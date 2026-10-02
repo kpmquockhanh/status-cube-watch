@@ -65,6 +65,13 @@ void testKeepIfBlank() {
   CHECK(portalKeepIfBlank("", "") == "");
 }
 
+void testBondTransition() {
+  CHECK(portalBondedTransition(false, true));
+  CHECK(!portalBondedTransition(true, true));  // already paired: stay in the portal
+  CHECK(!portalBondedTransition(false, false));
+  CHECK(!portalBondedTransition(true, false));
+}
+
 void testIdleReboot() {
   CHECK(portalIdleRebootDue(true, false, 60001, 60000));
   CHECK(!portalIdleRebootDue(true, false, 60000, 60000));
@@ -76,6 +83,7 @@ void testIdleReboot() {
 
 int main() {
   testIdleReboot();
+  testBondTransition();
   testSsid();
   testBridgeUrl();
   testEscape();

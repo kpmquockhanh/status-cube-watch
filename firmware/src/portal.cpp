@@ -139,6 +139,8 @@ void handleNotFound() {
 
   uint32_t lastActive = millis();
   bool showingPair = false;
+  uint32_t paintedKey = 0;
+  const bool bondedAtStart = bleBonded();
   for (;;) {
     dns.processNextRequest();
     server.handleClient();
@@ -147,13 +149,17 @@ void handleNotFound() {
     // restart into the normal boot flow once the Mac is bonded.
     const BleState bs = bleState();
     if (bs == BleState::Pairing) {
-      uiBlePair(lcd, blePasskey());
+      const uint32_t key = blePasskey();
+      if (!showingPair || key != paintedKey) {
+        uiBlePair(lcd, key);
+        paintedKey = key;
+      }
       showingPair = true;
     } else if (showingPair) {
       uiPortal(lcd, ap);
       showingPair = false;
     }
-    if (bleBonded()) {
+    if (portalBondedTransition(bondedAtStart, bleBonded())) {
       Serial.println("[portal] Mac paired over Bluetooth -- rebooting");
       delay(500);
       ESP.restart();

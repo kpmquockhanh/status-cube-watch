@@ -9,6 +9,11 @@ inline bool portalIdleRebootDue(bool autoRetry, bool bleBusy, unsigned long idle
   return autoRetry && !bleBusy && idleMs > limitMs;
 }
 
+// Reboot into the normal boot flow only when a Mac becomes bonded while the
+// portal is up. An already-bonded cube reaching the portal (boot-time hold) must
+// stay there so it can use "Forget paired Mac".
+inline bool portalBondedTransition(bool bondedAtStart, bool bondedNow) { return !bondedAtStart && bondedNow; }
+
 // SSIDs are 1..32 bytes. WPA passphrases are 8..63, but an open network has
 // none, so the password is only length-checked where it is stored.
 inline bool portalValidSsid(const std::string &s) { return !s.empty() && s.size() <= 32; }
