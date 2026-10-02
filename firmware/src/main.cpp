@@ -12,7 +12,9 @@
 #include "display.h"
 #include "gesture.h"
 #include "idle_sleep.h"
+#include "imu.h"
 #include "net.h"
+#include "orientation.h"
 #include "ota.h"
 #include "payload.h"
 #include "dev_editor.h"
@@ -24,6 +26,7 @@
 #include "settings.h"
 #include "settings_json.h"
 #include "touch.h"
+#include "touch_map.h"
 #include "transport_policy.h"
 #include "ui.h"
 
@@ -68,6 +71,16 @@ IdleSleep idle;
 bool screenOn = true;
 bool swallowTouch = false;  // the touch that woke the screen is ignored until the finger lifts
 bool pairWaitDismissed = false;  // a touch dismisses the first-boot "waiting for a Mac" screen
+
+// Auto-rotate (orientation.h). `orient` is what the IMU says; `appliedRot` is what
+// is on the panel: they differ only while the screen sleeps, so the panel is
+// never written to while it is off. Touch is remapped by `appliedRot`.
+Orientation orient;
+uint8_t appliedRot = 0;
+bool imuUp = false;
+bool touchDown = false;  // a finger was on the glass at the last poll: do not flip under it
+uint32_t lastImu = 0;
+constexpr uint32_t IMU_POLL_MS = 200;
 
 // First boot with neither a Mac nor a network and nothing received yet.
 bool waitingToPair() { return pairWaitAtBoot(bleBonded(), settingsHaveWifi()) && !payload.valid; }
@@ -217,6 +230,8 @@ void editorGesture(Gesture g) {
 void pollTouch() {
   int16_t x = 0, y = 0;
   const bool down = touch.read(x, y);
+  touchDown = down;
+  if (down) touchToScreen(appliedRot, x, y);
   if (down && !pairWaitDismissed && waitingToPair()) {
     pairWaitDismissed = true;
     dirty = true;
@@ -263,6 +278,24 @@ void pollTouch() {
   }
 }
 
+void pollOrientation(uint32_t now) {
+  if (!imuUp || now - lastImu < IMU_POLL_MS) return;
+  lastImu = now;
+  float ax, ay, az;
+  if (!imuReadAccel(ax, ay, az)) return;  // a missed read keeps the current orientation
+  orient.update(now, (float)IMU_UP_SIGN * ay, az, touchDown);
+}
+
+// Puts the classifier's answer on the panel. Not while the screen is asleep; the
+// wake path calls this on the same loop pass, before the first frame is drawn.
+void applyRotation() {
+  if (!screenOn || appliedRot == orient.rotation()) return;
+  appliedRot = orient.rotation();
+  lcd.setRotation(appliedRot);
+  dirty = true;
+  Serial.printf("[imu] rotation -> %d\n", (int)appliedRot);
+}
+
 uint32_t pollMs() { return (uint32_t)deviceSettings().pollSec * 1000u; }
 uint32_t rotateMs() { return (uint32_t)deviceSettings().rotateSec * 1000u; }
 uint32_t sleepMs() { return (uint32_t)deviceSettings().sleepMin * 60000u; }
@@ -282,6 +315,7 @@ void setup() {
   uiBegin(lcd);
 
   touch.begin();
+  imuUp = imuBegin();  // after touch.begin(), which starts the shared I2C bus
   batteryBegin();
 
   // BLE first: the stack must be up before bleBonded() means anything. The
@@ -330,6 +364,7 @@ void loop() {
     dirty = true;
   }
   pollTouch();
+  pollOrientation(now);
   batteryUpdate(now);
 
   // Which transport feeds the cube (transport_policy.h): BLE while the Mac is
@@ -415,6 +450,7 @@ void loop() {
     delay(50);  // touch is still polled, so a tap wakes it at once
     return;
   }
+  applyRotation();
 
   // Redraw on change, every frame while a ring is still moving, and once a
   // second otherwise so the freshness counter ticks.
