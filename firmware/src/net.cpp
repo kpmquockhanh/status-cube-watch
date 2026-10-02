@@ -10,13 +10,23 @@ char g_error[64] = "";
 void fail(const char *msg) { strlcpy(g_error, msg, sizeof(g_error)); }
 }  // namespace
 
-bool netBegin() {
+void netStart() {
   WiFi.mode(WIFI_STA);
   WiFi.setSleep(true);  // the radio idles between 5s polls
   const Settings &s = settings();
   // A null passphrase is how the WiFi library spells "open network".
   WiFi.begin(s.ssid, s.pass[0] ? s.pass : nullptr);
-  Serial.printf("[net] connecting to %s", s.ssid);
+  Serial.printf("[net] connecting to %s\n", s.ssid);
+}
+
+void netStop() {
+  WiFi.disconnect(true);
+  WiFi.mode(WIFI_OFF);
+  Serial.println("[net] wifi off");
+}
+
+bool netBegin() {
+  netStart();
   for (int i = 0; i < 80 && WiFi.status() != WL_CONNECTED; i++) {
     delay(250);
     Serial.print('.');

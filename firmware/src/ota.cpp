@@ -53,3 +53,5 @@ void otaBegin(Display &lcd) {
 }
 
 void otaHandle() { ArduinoOTA.handle(); }
+
+void otaEnd() { ArduinoOTA.end(); }

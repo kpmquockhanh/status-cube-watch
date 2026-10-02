@@ -131,6 +131,9 @@ bool netBegin() {
   return true;
 }
 
+void netStart() { Serial.println("[net] simulator wifi on"); }
+void netStop() { Serial.println("[net] simulator wifi off"); }
+
 bool netOnline() { return g_online; }
 
 const char *netLastError() { return g_error; }
