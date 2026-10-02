@@ -42,6 +42,8 @@ class Display : public lgfx::LGFX_Device {
   }
   // No backlight on a desktop window; accept the call and ignore it.
   void setBrightness(uint8_t) {}
+  void sleep() {}
+  void wakeup() {}
 };
 
 #else  // ---- real hardware ------------------------------------------------

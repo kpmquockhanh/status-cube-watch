@@ -11,6 +11,7 @@
 #include "deck_util.h"
 #include "display.h"
 #include "gesture.h"
+#include "idle_sleep.h"
 #include "net.h"
 #include "ota.h"
 #include "payload.h"
@@ -38,6 +39,13 @@
 
 namespace {
 
+constexpr uint32_t CPU_MHZ_AWAKE = 240;  // matches board_build.f_cpu
+constexpr uint32_t CPU_MHZ_ASLEEP = 80;  // lowest clock WiFi/BLE still run at
+
+#ifndef SCREEN_SLEEP_MS
+#define SCREEN_SLEEP_MS 900000  // older config.h files: 15 min
+#endif
+
 Display lcd;
 Touch touch;
 Payload payload{};
@@ -57,6 +65,9 @@ bool dirty = true;
 TransportPolicy policy;
 bool wifiUp = false;           // netStart() called and not yet netStop()
 bool otaUp = false;            // otaBegin() called and not yet otaEnd()
+IdleSleep idle;
+bool screenOn = true;
+bool swallowTouch = false;  // the touch that woke the screen is ignored until the finger lifts
 bool pairWaitDismissed = false;  // a touch dismisses the first-boot "waiting for a Mac" screen
 
 // First boot with neither a Mac nor a network and nothing received yet.
@@ -155,6 +166,11 @@ void pollTouch() {
     dirty = true;
   }
   const uint32_t now = millis();
+  if (down && idle.touch(now)) swallowTouch = true;
+  if (swallowTouch) {
+    if (!down) swallowTouch = false;
+    return;
+  }
   // Holds only mean something on the Pomodoro card. Everywhere else a long
   // touch is ignored when the finger lifts, as a slow press always was.
   const bool onPomodoro = cardIndex == uiPomodoroIndex(payload);
@@ -227,6 +243,7 @@ void setup() {
     uiMessage(lcd, "NO MAC", "WAITING FOR LINK");
   }
 
+  idle.begin(millis());
   policy.begin(millis());
   // First poll on the first loop pass rather than a full interval from now.
   lastPoll = millis() - POLL_INTERVAL_MS;
@@ -285,6 +302,7 @@ void loop() {
   }
   if (gotData) {
     lastGood = now;
+    idle.data(now);
     // The deck may have changed size: keep the Pomodoro card under the user.
     cardIndex = deckKeepIndex(wasOnPomodoro, cardIndex, uiDeckSize(payload));
     dirty = true;
@@ -307,6 +325,30 @@ void loop() {
   if (bv.pct != lastBatPct) {
     lastBatPct = bv.pct;
     dirty = true;
+  }
+
+  // Screen sleep: never while a session is running, the editor or a pairing
+  // code is up (see idle_sleep.h).
+  const PomoState ps = pv.state;
+  const bool keepOn = ps == POMO_FOCUS || ps == POMO_BREAK || ps == POMO_PAUSED || editing ||
+                      bleState() == BleState::Pairing || (!pairWaitDismissed && waitingToPair());
+  const bool wantOn = idle.update(now, keepOn, SCREEN_SLEEP_MS);
+  if (wantOn != screenOn) {
+    screenOn = wantOn;
+    if (screenOn) {
+      setCpuFrequencyMhz(CPU_MHZ_AWAKE);
+      lcd.wakeup();
+      lcd.setBrightness(BACKLIGHT);
+      dirty = true;
+    } else {
+      lcd.setBrightness(0);
+      lcd.sleep();
+      setCpuFrequencyMhz(CPU_MHZ_ASLEEP);
+    }
+  }
+  if (!screenOn) {
+    delay(50);  // touch is still polled, so a tap wakes it at once
+    return;
   }
 
   // Redraw on change, every frame while a ring is still moving, and once a
