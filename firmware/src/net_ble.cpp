@@ -1,4 +1,3 @@
-#ifndef CUBE_NO_BLE  // the BLE-off build uses net_ble_off.cpp instead
 #include <Arduino.h>
 #include <ArduinoJson.h>
 #include <NimBLEDevice.h>
@@ -249,4 +248,3 @@ void bleNotifyPomodoro(uint8_t ended, uint8_t next) {
   const size_t len = bleEncodePomoEnded(ended, next, m);
   notifyControl(m, len);
 }
-#endif  // CUBE_NO_BLE
