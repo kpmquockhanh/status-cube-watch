@@ -23,8 +23,8 @@ bool Touch::read(int16_t &x, int16_t &y) {
   x = (int16_t)tp.x;
   y = (int16_t)tp.y;
   // main.cpp expects raw panel coordinates and mirrors them itself when the display
-  // is rotated. The mouse is over the already-rotated window, so undo that first;
-  // the mirror is its own inverse.
+  // is rotated. getTouch() has already mirrored the point for the current rotation
+  // (Panel_Device::convertRawXY), so undo that first; the mirror is its own inverse.
   touchToScreen(g_simDisplay->getRotation(), x, y);
   return true;
 }

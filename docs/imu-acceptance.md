@@ -49,6 +49,7 @@ flashing (`pio run -t upload && pio device monitor`).
 ## Simulator (a human at the window)
 
 - [ ] `cd firmware/sim && CUBE_ORIENT=2 make run`: the window flips about a second
-      after start; dragging the mouse right-to-left still advances the card. If it
-      goes back a card instead, delete the `touchToScreen(...)` call in
-      `firmware/sim/touch_sim.cpp`.
+      after start. The picture is upside down, so its left edge is the window's
+      right edge: dragging the mouse **left-to-right** (towards the picture's left)
+      advances the card and right-to-left goes back. Keep the `touchToScreen(...)`
+      call in `firmware/sim/touch_sim.cpp`; without it the directions are wrong.

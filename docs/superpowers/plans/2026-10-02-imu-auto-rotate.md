@@ -744,10 +744,10 @@ cd firmware/sim && CUBE_ORIENT=2 make run
 
 Expected:
 1. The terminal prints `[imu] simulated, CUBE_ORIENT=2`, then about 1 s after start `[imu] rotation -> 2`, and the window content turns upside down.
-2. Drag the mouse right-to-left across the window: the card advances (same as upright). Click: it also advances. Drag top-to-bottom: the display panel slides in from the top **of what you see**.
+2. The picture is upside down, so drag the mouse **left-to-right** across the window (towards the picture's left): the card advances. Right-to-left goes back. Click: it advances. Drag bottom-to-top on the window: the display panel slides in from the top **of the picture**.
 3. `make run` with no `CUBE_ORIENT` stays upright and never prints `[imu] rotation`.
 
-If drag directions are reversed in step 2 (a left drag goes back a card), LovyanGFX's SDL panel is already rotating the mouse for you: delete the `touchToScreen(...)` call (and its comment and include) from `firmware/sim/touch_sim.cpp` and re-run. Do not change `main.cpp` or `touch_map.h` for this.
+Keep the `touchToScreen(...)` call in `firmware/sim/touch_sim.cpp`: `getTouch()` already mirrors the point for the current rotation, so the call undoes that and `main.cpp` then re-mirrors it. (Plan corrected after the final review; the original remedy here was inverted.)
 
 - [ ] **Step 9: Commit**
 
