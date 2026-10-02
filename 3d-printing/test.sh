@@ -80,6 +80,13 @@ expect_empty "pushers clear of the shell"         check_pusher_shell
 expect_empty "plate ribs clear of the shell"      check_ribs_shell
 expect_empty "plate ribs clear of the battery"    check_ribs_battery
 expect_manifold "base plate" base_plate --max 48 86 30
+# edge rounding: the rounded corners must not thin the wall, and the plate must stay inside the shell
+expect_empty "wall >= 2.3 through the corners"            check_wall
+expect_empty "wall >= 2.3 (edge_r 6, prof_r 5)"           check_wall -D edge_r=6 -D prof_r=5
+expect_empty "plate stays inside the shell footprint"     check_plate_flush
+expect_empty "hard edges still build (all radii 0)"       check_wall -D edge_r=0 -D prof_r=0 -D win_cham=0 -D plate_cham=0
+expect_solid "control: unrounded void thins the corners"  check_wall_unrounded
+expect_solid "control: plate_cham=-2 stands proud"        check_plate_flush -D plate_cham=-2
 expect_solid "pushers still touch (tilt 55)"      check_pusher_touch -D tilt=55
 expect_solid "pushers still touch (tilt 75)"      check_pusher_touch -D tilt=75
 expect_solid "pushers still touch (board_flip)"   check_pusher_touch -D board_flip=true
@@ -127,11 +134,26 @@ expect_solid "control: huge relief hits the bay"           check_plug_bay    -D 
 expect_solid "control: huge relief hits the window"        check_plug_window -D usb_plug_h=80 -D usb_plug_w=80 -D usb_plug_x0=-30
 expect_manifold "front shell with openings" front_shell --max 48 86 63
 
+# Type-C blanking cap
+expect_empty "cap passes through the opening"            check_cap_fit
+expect_empty "flip: cap passes through the opening"      check_cap_fit -D board_flip=true
+expect_solid "cap barbs reach behind the wall"           check_cap_snap
+expect_empty "cap flange covers the opening"             check_cap_covers
+expect_empty "cap flange seats on the wall"              check_cap_seat
+expect_empty "cap clears the board"                      check_cap_board
+expect_solid "control: cap_clr=-0.5 jams in the opening" check_cap_fit    -D cap_clr=-0.5
+expect_empty "control: tongues too short to snap"        check_cap_snap   -D cap_land=-0.5
+expect_solid "control: flange smaller than the opening"  check_cap_covers -D cap_flange=-2
+expect_solid "control: 12 mm flange runs off the wall"   check_cap_seat   -D cap_flange=12
+expect_solid "control: 20 mm tongues hit the board"      check_cap_board  -D cap_land=20
+expect_manifold "Type-C cap" cap --max 20 11 5
+
 # deliverables
 expect_manifold "printable front shell" front --max 48 86 63
 expect_manifold "printable base plate"  base  --max 48 86 30
 expect_manifold "fit-check coupon"      fit   --max 48 60 70
 expect_solid    "assembly renders"      assembly
 expect_solid    "section renders"       section
+expect_solid    "cap fitted renders"    cap_fitted
 
 exit $fail
