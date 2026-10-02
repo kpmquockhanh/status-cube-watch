@@ -354,6 +354,8 @@ void loop() {
 
   pomo.tick(now);
   if (pomo.takeAlert()) {
+    const PomoView ended = pomo.view();  // DONE: phase = the one that just ended
+    bleNotifyPomodoro(ended.phase, ended.next);
     // Phase over: pull the deck to the Pomodoro card wherever you were. A swipe
     // leaves it again; the DONE state waits for a double tap.
     cardIndex = uiPomodoroIndex(payload);

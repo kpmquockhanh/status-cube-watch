@@ -12,4 +12,5 @@ uint32_t bleLastGood() { return 0; }
 void bleForgetBonds() {}
 bool bleTakeSettings(char *, size_t) { return false; }
 void bleSettingsReply(uint8_t) {}
+void bleNotifyPomodoro(uint8_t, uint8_t) {}
 #endif  // CUBE_NO_BLE
