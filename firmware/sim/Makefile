@@ -82,7 +82,8 @@ shot: $(SHOT)
 # compiler: no SDL, LovyanGFX or Arduino. Each test links only the sources it
 # is given an extra rule for below.
 TESTS := build/portal_util_test build/pomodoro_test build/gesture_test build/deck_test \
-         build/pomo_settings_test build/pomo_editor_test build/battery_util_test
+         build/pomo_settings_test build/pomo_editor_test build/battery_util_test \
+         build/ble_frame_test
 
 build/pomodoro_test: ../src/pomodoro.cpp
 build/gesture_test: ../src/gesture.cpp

@@ -1,0 +1,16 @@
+# Golden frames for the BLE payload protocol (docs/ble-protocol.md).
+# `chunk` = JSON bytes per frame (the write size minus the 4-byte header).
+case basic
+seq 7
+chunk 4
+json {"v":1,"cards":[]}
+frame 01 07 00 05 7b 22 76 22
+frame 01 07 01 05 3a 31 2c 22
+frame 01 07 02 05 63 61 72 64
+frame 01 07 03 05 73 22 3a 5b
+frame 01 07 04 05 5d 7d
+case single
+seq 255
+chunk 16
+json {"v":1}
+frame 01 ff 00 01 7b 22 76 22 3a 31 7d
