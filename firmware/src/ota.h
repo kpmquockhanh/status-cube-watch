@@ -9,3 +9,5 @@
 // arrives without anyone having to arrange it.
 void otaBegin(Display &lcd);
 void otaHandle();
+// Stops the OTA listener (WiFi is about to go away); otaBegin may be called again later.
+void otaEnd();

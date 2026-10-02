@@ -6,6 +6,7 @@
 
 #include <Arduino.h>
 #include "battery.h"
+#include "ble.h"
 #include "config.h"
 #include "deck_util.h"
 #include "display.h"
@@ -19,6 +20,7 @@
 #include "portal.h"
 #include "settings.h"
 #include "touch.h"
+#include "transport_policy.h"
 #include "ui.h"
 
 // Divides every Pomodoro duration. Leave at 1. `make run POMO_FAST=60` in
@@ -26,6 +28,12 @@
 // can be watched in about two minutes.
 #ifndef POMO_TIME_DIV
 #define POMO_TIME_DIV 1
+#endif
+
+// Keep WiFi up while BLE is live (OTA needs it). A config.h from before this
+// existed still builds.
+#ifndef WIFI_ALWAYS_ON
+#define WIFI_ALWAYS_ON 0
 #endif
 
 namespace {
@@ -45,6 +53,14 @@ uint32_t lastRotate = 0;
 uint32_t lastGood = 0;  // millis() of the last successful fetch
 uint32_t lastDraw = 0;
 bool dirty = true;
+
+TransportPolicy policy;
+bool wifiUp = false;           // netStart() called and not yet netStop()
+bool otaUp = false;            // otaBegin() called and not yet otaEnd()
+bool pairWaitDismissed = false;  // a touch dismisses the first-boot "waiting for a Mac" screen
+
+// First boot with neither a Mac nor a network and nothing received yet.
+bool waitingToPair() { return pairWaitAtBoot(bleBonded(), settingsHaveWifi()) && !payload.valid; }
 
 // Gestures come from raw coordinates (see gesture.h), which keeps this working
 // across the CST816S/T/D variants, whose gesture registers disagree.
@@ -69,7 +85,7 @@ bool setupHoldRequested() {
   // rather than only at the instant of boot. It costs a normal boot 3 s, which the hint on screen explains.
   const uint32_t w0 = millis();
   bool touched = false;
-  uiMessage(lcd, "STARTING", "HOLD SCREEN FOR WIFI SETUP");
+  uiMessage(lcd, "STARTING", "HOLD SCREEN FOR SETUP");
   while (millis() - w0 < SETUP_WINDOW_MS && !touched) {
     touched = touch.read(x, y);
     if (!touched) delay(20);
@@ -77,7 +93,7 @@ bool setupHoldRequested() {
   Serial.printf("[boot] setup-touch window: touched=%d\n", (int)touched);
   if (!touched) return false;
   Serial.println("[boot] touch at boot: keep holding for WiFi setup");
-  uiMessage(lcd, "KEEP HOLDING", "FOR WIFI SETUP");
+  uiMessage(lcd, "KEEP HOLDING", "FOR SETUP");
   const uint32_t t0 = millis();
   uint8_t misses = 0;
   while (millis() - t0 < SETUP_HOLD_MS) {
@@ -101,6 +117,7 @@ void step(int delta) {
 void openEditor() {
   editSettings = pomoSettings();
   editing = true;
+  uiEditorSlide(true, editSettings);
   dirty = true;
 }
 
@@ -109,6 +126,7 @@ void closeEditor() {
   pomoSettingsSave(editSettings);
   pomo.setConfig(pomoConfigFrom(pomoSettings(), POMO_TIME_DIV));
   editing = false;
+  uiEditorSlide(false, editSettings);
   uiReplayPomodoro();
   lastRotate = millis();
   dirty = true;
@@ -132,6 +150,10 @@ void editorGesture(Gesture g) {
 void pollTouch() {
   int16_t x = 0, y = 0;
   const bool down = touch.read(x, y);
+  if (down && !pairWaitDismissed && waitingToPair()) {
+    pairWaitDismissed = true;
+    dirty = true;
+  }
   const uint32_t now = millis();
   // Holds only mean something on the Pomodoro card. Everywhere else a long
   // touch is ignored when the finger lifts, as a slow press always was.
@@ -182,25 +204,38 @@ void setup() {
   touch.begin();
   batteryBegin();
 
-  // The setup portal is asked for by holding the screen, needed when there is
-  // nothing to join, and fallen back to when the stored network cannot be
-  // reached. Only the last case retries by itself.
-  if (setupHoldRequested() || !settingsHaveWifi()) portalRun(lcd, false);
-  uiMessage(lcd, "CONNECTING", settings().ssid);
-  if (!netBegin()) portalRun(lcd, true);
-  otaBegin(lcd);
+  // BLE first: the stack must be up before bleBonded() means anything. The
+  // setup portal is asked for by holding the screen; WiFi is joined at boot
+  // only when there is no Mac to wait for (the old behaviour, and the old
+  // fallback to the portal). With a bond, WiFi comes up later and only if BLE
+  // goes quiet (see transport_policy.h).
+  bleBegin();
+  if (setupHoldRequested()) portalRun(lcd, false);
 
-  if (netFetch(payload)) {
-    lastGood = millis();
-  } else {
-    uiMessage(lcd, "NO BRIDGE", netLastError());
+  if (!bleBonded()) {
+    if (settingsHaveWifi()) {
+      uiMessage(lcd, "CONNECTING", settings().ssid);
+      const bool joined = netBegin();
+      wifiUp = true;
+      if (!joined && portalOnJoinFail(false)) portalRun(lcd, true);
+      if (joined) {
+        otaBegin(lcd);
+        otaUp = true;
+      }
+    }
+  } else if (!settingsHaveWifi()) {
+    uiMessage(lcd, "NO MAC", "WAITING FOR LINK");
   }
-  lastPoll = lastRotate = millis();
+
+  policy.begin(millis());
+  // First poll on the first loop pass rather than a full interval from now.
+  lastPoll = millis() - POLL_INTERVAL_MS;
+  lastRotate = millis();
   dirty = true;
 }
 
 void loop() {
-  otaHandle();
+  if (otaUp) otaHandle();
   const uint32_t now = millis();
 
   pomo.tick(now);
@@ -216,16 +251,42 @@ void loop() {
   pollTouch();
   batteryUpdate(now);
 
-  if (now - lastPoll >= POLL_INTERVAL_MS) {
+  // Which transport feeds the cube (transport_policy.h): BLE while the Mac is
+  // delivering, WiFi when it is not.
+  const TransportDecision td =
+      policy.update(now, bleLastGood(), bleBonded(), settingsHaveWifi(), WIFI_ALWAYS_ON != 0);
+  if (td.wifiOn && !wifiUp) {
+    netStart();
+    wifiUp = true;
+  } else if (!td.wifiOn && wifiUp) {
+    if (otaUp) {
+      otaEnd();
+      otaUp = false;
+    }
+    netStop();
+    wifiUp = false;
+  }
+  if (wifiUp && !otaUp && netOnline()) {
+    otaBegin(lcd);
+    otaUp = true;
+  }
+
+  bool gotData = false;
+  const bool wasOnPomodoro = cardIndex == uiPomodoroIndex(payload);
+  if (bleTake(payload)) gotData = true;
+  if (wifiUp && now - lastPoll >= POLL_INTERVAL_MS) {
     lastPoll = now;
-    const bool wasOnPomodoro = cardIndex == uiPomodoroIndex(payload);
     if (netFetch(payload)) {
-      lastGood = now;
-      // The deck may have changed size: keep the Pomodoro card under the user.
-      cardIndex = deckKeepIndex(wasOnPomodoro, cardIndex, uiDeckSize(payload));
+      gotData = true;
     } else {
       Serial.printf("[net] fetch failed: %s\n", netLastError());
     }
+    dirty = true;
+  }
+  if (gotData) {
+    lastGood = now;
+    // The deck may have changed size: keep the Pomodoro card under the user.
+    cardIndex = deckKeepIndex(wasOnPomodoro, cardIndex, uiDeckSize(payload));
     dirty = true;
   }
 
@@ -252,8 +313,10 @@ void loop() {
   // second otherwise so the freshness counter ticks.
   if (dirty || uiAnimating() || now - lastDraw >= 1000) {
     const uint32_t age = lastGood ? now - lastGood : now;
-    if (editing) uiPomodoroEditor(lcd, editSettings);
-    else uiRender(lcd, payload, cardIndex, netOnline(), age, pv, bv);
+    if (bleState() == BleState::Pairing) uiBlePair(lcd, blePasskey());  // the code must be seen
+    else if (!pairWaitDismissed && waitingToPair()) uiBlePair(lcd, 0);
+    else if (editing && !uiEditorSliding()) uiPomodoroEditor(lcd, editSettings);
+    else uiRender(lcd, payload, cardIndex, td.bleLive || netOnline(), age, pv, bv);
     lastDraw = now;
     dirty = false;
   }

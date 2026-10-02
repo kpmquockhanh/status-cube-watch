@@ -13,6 +13,10 @@
 #define CARD_ROTATE_MS       0   // auto-advance every N ms; 0 disables it
 #define BACKLIGHT          160   // 0-255
 
+// Keep WiFi up even while the Mac is delivering over Bluetooth. Needed for OTA
+// updates (OTA is a WiFi feature); costs power. 0 = WiFi only when BLE is stale.
+#define WIFI_ALWAYS_ON       0
+
 // Optional: default OTA password. The setup portal can set or change it; with
 // neither, OTA still works but anyone on the network can flash the cube.
 // #define OTA_PASSWORD  "choose-one"

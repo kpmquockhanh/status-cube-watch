@@ -4,3 +4,4 @@
 
 void otaBegin(Display &) {}
 void otaHandle() {}
+void otaEnd() {}

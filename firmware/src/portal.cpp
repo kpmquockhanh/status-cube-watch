@@ -7,6 +7,7 @@
 #include <string>
 
 #include "portal_util.h"
+#include "ble.h"
 #include "settings.h"
 #include "ui.h"
 
@@ -47,7 +48,12 @@ std::string formPage(const Settings &cur, const std::string &error) {
        "http://192.168.1.50:8787/api/status</div>"
        "<label>OTA password (optional)</label><input name=otapass type=password maxlength=63 "
        "placeholder=\"leave blank to keep\">"
-       "<button>Save and reboot</button></form></body></html>";
+       "<button>Save and reboot</button></form>";
+  if (bleBonded())
+    h += "<form method=post action=/forget><button style='background:#2a3242;color:#e7ecf5'>"
+         "Forget paired Mac</button></form>"
+         "<div class=hint>Also remove &ldquo;Claude Cube&rdquo; in the Mac's Bluetooth settings.</div>";
+  h += "</body></html>";
   return h;
 }
 
@@ -90,6 +96,16 @@ void handleSave() {
   ESP.restart();
 }
 
+void handleForget() {
+  bleForgetBonds();
+  server.send(200, "text/html",
+              "<!doctype html><meta charset=utf-8><meta name=viewport content='width=device-width,initial-scale=1'>"
+              "<body style='font:16px system-ui;background:#0b0d12;color:#e7ecf5;padding:24px'>"
+              "Forgotten. The cube is rebooting and will wait to pair again.</body>");
+  delay(1000);
+  ESP.restart();
+}
+
 // Phones probe a known URL (/generate_204, /hotspot-detect.html, ...) to
 // decide whether a network needs a sign-in page. Redirecting everything to
 // the form is what makes the page open by itself.
@@ -114,6 +130,7 @@ void handleNotFound() {
 
   server.on("/", HTTP_GET, handleRoot);
   server.on("/save", HTTP_POST, handleSave);
+  server.on("/forget", HTTP_POST, handleForget);
   server.onNotFound(handleNotFound);
   server.begin();
 
@@ -121,11 +138,35 @@ void handleNotFound() {
   uiPortal(lcd, ap);
 
   uint32_t lastActive = millis();
+  bool showingPair = false;
+  uint32_t paintedKey = 0;
+  const bool bondedAtStart = bleBonded();
   for (;;) {
     dns.processNextRequest();
     server.handleClient();
-    if (WiFi.softAPgetStationNum() > 0) lastActive = millis();
-    if (autoRetry && millis() - lastActive > IDLE_RETRY_MS) {
+    // An unpaired cube whose WiFi is unreachable lands here, and it must still
+    // be pairable over Bluetooth: show the code, hold off the reboot, and
+    // restart into the normal boot flow once the Mac is bonded.
+    const BleState bs = bleState();
+    if (bs == BleState::Pairing) {
+      const uint32_t key = blePasskey();
+      if (!showingPair || key != paintedKey) {
+        uiBlePair(lcd, key);
+        paintedKey = key;
+      }
+      showingPair = true;
+    } else if (showingPair) {
+      uiPortal(lcd, ap);
+      showingPair = false;
+    }
+    if (portalBondedTransition(bondedAtStart, bleBonded())) {
+      Serial.println("[portal] Mac paired over Bluetooth -- rebooting");
+      delay(500);
+      ESP.restart();
+    }
+    const bool bleBusy = bs == BleState::Pairing || bs == BleState::Connected;
+    if (WiFi.softAPgetStationNum() > 0 || bleBusy) lastActive = millis();
+    if (portalIdleRebootDue(autoRetry, bleBusy, millis() - lastActive, IDLE_RETRY_MS)) {
       Serial.println("[portal] nobody joined -- rebooting to retry the saved network");
       ESP.restart();
     }

@@ -29,10 +29,19 @@ void uiAlertStart();
 // The Pomodoro settings editor: four rows of - / + and a RESET / DONE bar.
 // One static frame; hit-testing is in pomo_editor.h, which owns the layout.
 void uiPomodoroEditor(Display &lcd, const PomoSettings &s);
+// Slides the editor panel up over (open) or back down off (!open) the card
+// that uiRender draws. uiRender paints it while uiEditorSliding(); once it
+// reports false the open editor is drawn by uiPomodoroEditor.
+void uiEditorSlide(bool open, const PomoSettings &s);
+bool uiEditorSliding();
 void uiMessage(Display &lcd, const char *title, const char *body);
 // Setup screen shown while the config portal runs: the cube's own WiFi name
 // as text and as a join-QR, and the address of the form.
 void uiPortal(Display &lcd, const char *apName);
+
+// Pairing screen. With a passkey (non-zero) it shows the 6-digit code to type
+// on the Mac; with 0 it shows the "waiting for a Mac" variant.
+void uiBlePair(Display &lcd, uint32_t passkey);
 
 // Progress screen while an OTA image is arriving.
 void uiOta(Display &lcd, uint8_t percent);

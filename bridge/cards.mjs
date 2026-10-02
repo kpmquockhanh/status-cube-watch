@@ -103,15 +103,33 @@ function limitCard(title, window, label, now, err) {
   };
 }
 
+// Unread inbox count as a big-number card. `mail.error` with no earlier count
+// means we have never had a reading, so say why instead of showing a zero.
+function mailCard(mail) {
+  if (mail.unread == null) {
+    return { t: 'MAIL', v: '--', s1: 'no reading', s2: String(mail.error ?? 'unavailable').slice(0, 39), c: 'red' };
+  }
+  const n = mail.unread;
+  return {
+    t: 'MAIL',
+    v: n.toLocaleString('en-US'),
+    s1: n === 1 ? 'unread email' : 'unread emails',
+    s2: mail.stale ? `stale: ${mail.error}`.slice(0, 39) : 'in inbox',
+    c: mail.stale ? 'red' : n === 0 ? 'green' : 'amber',
+  };
+}
+
 export function buildPayload(events, opts = {}) {
   const { source = 'local', hasRequestCounts = true, billed = null, error = null,
-          limits = null, extraCards = false } = opts;
+          limits = null, mail = null, extraCards = false } = opts;
   const now = Date.now();
 
   const cards = [
     limitCard('SESSION', limits?.five_hour, 'of 5h limit', now, limits?.error),
     limitCard('THIS WEEK', limits?.seven_day, 'of 7d limit', now, limits?.error),
   ];
+
+  if (mail) cards.push(mailCard(mail));
 
   if (extraCards) cards.push(...spendCards(events, { source, hasRequestCounts, billed, now }));
 
