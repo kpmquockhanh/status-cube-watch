@@ -1,3 +1,4 @@
+#ifndef CUBE_NO_BLE  // the BLE-off build uses net_ble_off.cpp instead
 #include <Arduino.h>
 #include <ArduinoJson.h>
 #include <NimBLEDevice.h>
@@ -188,3 +189,4 @@ bool bleTake(Payload &out) {
   g_lastGood = now ? now : 1;  // 0 means "never"
   return true;
 }
+#endif  // CUBE_NO_BLE
