@@ -45,7 +45,7 @@ constexpr int RING_R_IN = 60;
 constexpr int VALUE_CY = RING_CY - 13;
 constexpr int CAPTION_Y = RING_CY + 10;
 constexpr int PCT_Y = RING_CY + 66;
-constexpr int NAME_Y = LCD_HEIGHT - 38;
+constexpr int NAME_Y = RING_CY + 102;  // a line under the percentage, clear of the page dots
 constexpr int VALUE_MAX_W = 104;  // between the ring's inner edges at the value's height
 constexpr int VALUE_MAX_H = 36;
 constexpr float ARC_START = 135.0f;
@@ -199,35 +199,33 @@ void drawDots(LovyanGFX *g, uint8_t n, uint8_t active) {
   }
 }
 
-// Battery glyph + "NN%". Fixed in position: the glyph sits at a constant x and
-// the number is right-aligned in a slot sized for "100%", so neither moves when
-// the percentage or the age readout next to it changes width. `rightX` is the
-// slot's right edge; returns the glyph's left edge.
-int drawBattery(LovyanGFX *g, int rightX, int y, const BatteryView &bat) {
+// Battery glyph + "NN%", top-left. Fixed in position: the glyph sits at `leftX`
+// and the number starts at a constant offset from it, so neither moves when the
+// percentage changes width. Returns the x where the run ends (sized for "100%").
+int drawBattery(LovyanGFX *g, int leftX, int y, const BatteryView &bat) {
   const uint16_t col = bat.pct >= 40   ? g_palette[ACC_GREEN]
                        : bat.pct >= 15 ? g_palette[ACC_AMBER]
                                        : g_palette[ACC_RED];
-  char txt[8];
-  snprintf(txt, sizeof(txt), "%u%%", (unsigned)bat.pct);
-  g->setFont(&V_S12.font);
-  g->setTextDatum(middle_right);
-  g->setTextColor(col, BG);
-  g->drawString(txt, rightX, y);
-  const int slotW = g->textWidth("100%");
-
-  constexpr int BODY_W = 14, BODY_H = 8, NUB_W = 2, GAP = 3;
-  const int left = rightX - slotW - GAP - (BODY_W + NUB_W);
-  g->drawRect(left, y - BODY_H / 2, BODY_W, BODY_H, DIM);
-  g->fillRect(left + BODY_W, y - 2, NUB_W, 5, DIM);
+  constexpr int BODY_W = 14, BODY_H = 8, NUB_W = 2, GAP = 4;
+  g->drawRect(leftX, y - BODY_H / 2, BODY_W, BODY_H, DIM);
+  g->fillRect(leftX + BODY_W, y - 2, NUB_W, 5, DIM);
   const int inner = BODY_W - 4;
   int fill = (inner * bat.pct + 50) / 100;
   if (bat.pct > 0 && fill < 1) fill = 1;
-  if (fill > 0) g->fillRect(left + 2, y - BODY_H / 2 + 2, fill, BODY_H - 4, col);
-  return left;
+  if (fill > 0) g->fillRect(leftX + 2, y - BODY_H / 2 + 2, fill, BODY_H - 4, col);
+
+  char txt[8];
+  snprintf(txt, sizeof(txt), "%u%%", (unsigned)bat.pct);
+  g->setFont(&V_S12.font);
+  g->setTextDatum(middle_left);
+  g->setTextColor(col, BG);
+  const int textX = leftX + BODY_W + NUB_W + GAP;
+  g->drawString(txt, textX, y);
+  return textX + g->textWidth("100%");
 }
 
-// `left` is what the bar says on the left: the card's own name on a gauge
-// card, which needs no other title, and the data source on a text card.
+// The battery sits top-left. `left` is a label for the card, if it has none of
+// its own elsewhere (the text cards: the data source); a ring card passes "".
 void drawTopBar(LovyanGFX *g, const char *left, bool online, uint32_t ageMs,
                 const BatteryView &bat) {
   // The panel has rounded corners (~35px radius), so the bar is inset from the
@@ -251,22 +249,21 @@ void drawTopBar(LovyanGFX *g, const char *left, bool online, uint32_t ageMs,
   g->drawString(right, LCD_WIDTH - 46, Y);
   g->fillCircle(LCD_WIDTH - 36, Y, 3, col);
 
-  // The age readout's slot is the widest it can be, so the battery's place
-  // does not depend on what the age happens to say right now.
-  int ageW = g->textWidth("59s");
-  if (g->textWidth("99m") > ageW) ageW = g->textWidth("99m");
-  if (g->textWidth("OFF") > ageW) ageW = g->textWidth("OFF");
-  const int batLeft = drawBattery(g, LCD_WIDTH - 46 - ageW - 6, Y, bat);
+  const int batRight = drawBattery(g, LEFT_X, Y, bat);
 
-  // The card name takes whatever is left (in capitals, as drawCaps draws it);
-  // trim it rather than run into the battery.
+  // The label gets what is left between the battery and the age readout, in
+  // capitals as drawCaps draws it; trim it rather than run into either.
   char name[48];
   size_t n = 0;
   for (; left[n] && n < sizeof(name) - 1; n++) name[n] = toupper((unsigned char)left[n]);
   name[n] = '\0';
-  const int maxW = batLeft - 3 - LEFT_X;
+  int ageW = g->textWidth("59s");
+  if (g->textWidth("99m") > ageW) ageW = g->textWidth("99m");
+  if (g->textWidth("OFF") > ageW) ageW = g->textWidth("OFF");
+  const int x0 = batRight + 10;
+  const int maxW = LCD_WIDTH - 46 - ageW - 6 - x0;
   for (; n > 1 && capsWidth(g, name) > maxW; n--) name[n - 1] = '\0';
-  drawCaps(g, name, LEFT_X, Y, DIM, middle_left);
+  if (n) drawCaps(g, name, x0, Y, DIM, middle_left);
 }
 
 // --- the ring ------------------------------------------------------------
@@ -471,9 +468,8 @@ void drawGaugeCard(LovyanGFX *g, const Card &card, const RingStyle &style,
 // which has no percentage of anything to draw a ring from.
 void drawTextCard(LovyanGFX *g, const Payload &p, const Card &card, uint16_t color,
                   bool online, uint32_t ageMs, const BatteryView &bat) {
-  char bar[20];
-  snprintf(bar, sizeof(bar), "CLAUDE %s%s", p.source, p.estimated ? " ~" : "");
-  drawTopBar(g, bar, online, ageMs, bat);
+  (void)p;
+  drawTopBar(g, "", online, ageMs, bat);
 
   drawCaps(g, card.title, LCD_WIDTH / 2, 60, DIM, top_center);
   drawFitted(g, card.value, LCD_WIDTH / 2, 145, LCD_WIDTH - 20, 96, color);
@@ -560,14 +556,62 @@ void drawPomodoroCard(LovyanGFX *g, const PomoView &v, float flash, bool online,
 // --- the Pomodoro editor ---------------------------------------------------
 // A button is its hit rectangle inset by 3 px, so neighbours never touch while
 // the full rectangle stays the touch target.
-void drawEditorButton(LovyanGFX *g, const EditRect &r, const char *text, uint16_t fill,
-                      uint16_t ink) {
+void drawEditorButton(LovyanGFX *g, const EditRect &r0, const char *text, uint16_t fill,
+                      uint16_t ink, int yOff = 0) {
   constexpr int GAP = 3;
+  EditRect r = r0;
+  r.y += yOff;
   g->fillRoundRect(r.x + GAP, r.y + GAP, r.w - 2 * GAP, r.h - 2 * GAP, 8, fill);
   g->setFont(text[1] == '\0' ? &V_B24.font : &V_B18.font);  // a lone - or + is drawn big
   g->setTextDatum(middle_center);
   g->setTextColor(ink, fill);
   g->drawString(text, r.x + r.w / 2, r.y + r.h / 2);
+}
+
+// The editor panel, drawn `yOff` px down from its resting place so it can slide.
+void drawEditorPanel(LovyanGFX *g, const PomoSettings &s, int yOff) {
+  g->fillRect(0, yOff, LCD_WIDTH, LCD_HEIGHT, BG);
+  g->drawFastHLine(0, yOff, LCD_WIDTH, FAINT);  // edge that separates it from the card behind
+
+  drawCaps(g, "Pomodoro", LCD_WIDTH / 2, 24 + yOff, g_palette[ACC_ACCENT], middle_center);
+
+  const uint8_t vals[EDIT_ROWS] = {s.focusMin, s.shortMin, s.longMin, s.sessions};
+  for (int r = 0; r < EDIT_ROWS; r++) {
+    const EditRect row = editorRow(r);
+    drawEditorButton(g, editorMinus(r), "-", FAINT, INK, yOff);
+    drawEditorButton(g, editorPlus(r), "+", FAINT, INK, yOff);
+    drawCaps(g, editorLabel(r), LCD_WIDTH / 2, row.y + 12 + yOff, DIM, middle_center);
+    char buf[12];
+    if (r == EDIT_ROWS - 1) snprintf(buf, sizeof(buf), "%u", (unsigned)vals[r]);
+    else snprintf(buf, sizeof(buf), "%u min", (unsigned)vals[r]);
+    g->setFont(&V_B24.font);
+    g->setTextDatum(middle_center);
+    g->setTextColor(INK, BG);
+    g->drawString(buf, LCD_WIDTH / 2, row.y + 31 + yOff);
+  }
+  drawEditorButton(g, editorResetBtn(), "RESET", FAINT, INK, yOff);
+  drawEditorButton(g, editorDoneBtn(), "DONE", g_palette[ACC_ACCENT], BG, yOff);
+}
+
+// Slide of the editor over the Pomodoro card: 0 = hidden below the screen,
+// 1 = fully open. Ease-out going up, ease-in coming back down.
+constexpr uint32_t EDITOR_SLIDE_MS = 260;
+bool g_edSliding = false;
+bool g_edOpening = false;
+uint32_t g_edStart = 0;
+PomoSettings g_edSettings{};
+
+// Position in 0..1 of the panel now, ending the slide when it is over.
+float editorSlidePos(uint32_t now) {
+  float t = (float)(now - g_edStart) / (float)EDITOR_SLIDE_MS;
+  if (t >= 1.0f) {
+    g_edSliding = false;
+    return g_edOpening ? 1.0f : 0.0f;
+  }
+  const float u = 1.0f - t;
+  const float out = 1.0f - u * u * u;  // ease-out cubic
+  const float in = t * t * t;          // ease-in cubic
+  return g_edOpening ? out : 1.0f - in;
 }
 
 // --- phase-end alert -----------------------------------------------------
@@ -666,8 +710,25 @@ void uiRender(Display &lcd, const Payload &p, uint8_t index, bool online, uint32
 
   drawDots(g, deck, i);
 
+  if (g_edSliding) {
+    const float pos = editorSlidePos(millis());
+    if (pos > 0.0f) drawEditorPanel(g, g_edSettings, (int)((1.0f - pos) * LCD_HEIGHT));
+    // The last frame of the slide stays animating so it is pushed before the
+    // static editor (or the plain card) takes over.
+    g_animating = true;
+  }
+
   if (g_sprite) g_canvas.pushSprite(&lcd, 0, 0);
 }
+
+void uiEditorSlide(bool open, const PomoSettings &s) {
+  g_edSettings = s;
+  g_edOpening = open;
+  g_edSliding = true;
+  g_edStart = millis();
+}
+
+bool uiEditorSliding() { return g_edSliding; }
 
 void uiMessage(Display &lcd, const char *title, const char *body) {
   LovyanGFX *g = target(lcd);
@@ -685,27 +746,7 @@ void uiMessage(Display &lcd, const char *title, const char *body) {
 void uiPomodoroEditor(Display &lcd, const PomoSettings &s) {
   g_animating = false;
   LovyanGFX *g = target(lcd);
-  g->fillScreen(BG);
-
-  drawCaps(g, "Pomodoro", LCD_WIDTH / 2, 24, g_palette[ACC_ACCENT], middle_center);
-
-  const uint8_t vals[EDIT_ROWS] = {s.focusMin, s.shortMin, s.longMin, s.sessions};
-  for (int r = 0; r < EDIT_ROWS; r++) {
-    const EditRect row = editorRow(r);
-    drawEditorButton(g, editorMinus(r), "-", FAINT, INK);
-    drawEditorButton(g, editorPlus(r), "+", FAINT, INK);
-    drawCaps(g, editorLabel(r), LCD_WIDTH / 2, row.y + 12, DIM, middle_center);
-    char buf[12];
-    if (r == EDIT_ROWS - 1) snprintf(buf, sizeof(buf), "%u", (unsigned)vals[r]);
-    else snprintf(buf, sizeof(buf), "%u min", (unsigned)vals[r]);
-    g->setFont(&V_B24.font);
-    g->setTextDatum(middle_center);
-    g->setTextColor(INK, BG);
-    g->drawString(buf, LCD_WIDTH / 2, row.y + 31);
-  }
-  drawEditorButton(g, editorResetBtn(), "RESET", FAINT, INK);
-  drawEditorButton(g, editorDoneBtn(), "DONE", g_palette[ACC_ACCENT], BG);
-
+  drawEditorPanel(g, s, 0);
   if (g_sprite) g_canvas.pushSprite(&lcd, 0, 0);
 }
 

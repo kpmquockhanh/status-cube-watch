@@ -101,6 +101,7 @@ void step(int delta) {
 void openEditor() {
   editSettings = pomoSettings();
   editing = true;
+  uiEditorSlide(true, editSettings);
   dirty = true;
 }
 
@@ -109,6 +110,7 @@ void closeEditor() {
   pomoSettingsSave(editSettings);
   pomo.setConfig(pomoConfigFrom(pomoSettings(), POMO_TIME_DIV));
   editing = false;
+  uiEditorSlide(false, editSettings);
   uiReplayPomodoro();
   lastRotate = millis();
   dirty = true;
@@ -252,7 +254,7 @@ void loop() {
   // second otherwise so the freshness counter ticks.
   if (dirty || uiAnimating() || now - lastDraw >= 1000) {
     const uint32_t age = lastGood ? now - lastGood : now;
-    if (editing) uiPomodoroEditor(lcd, editSettings);
+    if (editing && !uiEditorSliding()) uiPomodoroEditor(lcd, editSettings);
     else uiRender(lcd, payload, cardIndex, netOnline(), age, pv, bv);
     lastDraw = now;
     dirty = false;

@@ -69,6 +69,18 @@ flag away -- set `"extraCards": true` in `bridge/config.json`, or run with
 and they have no percentage of anything to fill a ring with, so they keep the
 older big-number layout (see **Adding a card**).
 
+### Unread mail card
+
+Set `"gmail": {"user": "you@gmail.com", "appPassword": "xxxx xxxx xxxx xxxx"}`
+in `bridge/config.json` (or `CUBE_GMAIL_USER` / `CUBE_GMAIL_PASSWORD`) and a
+`MAIL` card with your unread inbox count follows the two rings. The bridge
+reads it over IMAP (`STATUS INBOX (UNSEEN)`, at most once a minute), so the
+device never sees a credential. Create the app password at
+<https://myaccount.google.com/apppasswords> (needs 2-step verification; some
+Workspace admins disable them). If a fetch fails the last count stays on screen
+marked `stale: ...`; with no count yet the card says why. Leave the settings
+empty and there is no card.
+
 ## Two data sources
 
 | Source | What it reads | Who it works for |

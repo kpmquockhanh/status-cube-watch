@@ -21,6 +21,7 @@ import { LocalSource } from './sources/local.mjs';
 import { AdminSource } from './sources/admin.mjs';
 import { buildPayload } from './cards.mjs';
 import { getUsageLimits } from './limits.mjs';
+import { getUnreadMail } from './sources/gmail.mjs';
 
 const here = path.dirname(fileURLToPath(import.meta.url));
 
@@ -42,6 +43,9 @@ async function loadConfig() {
     // The deck is the two rate-limit gauges by default. Flip this on to swipe
     // through the spend and token breakdowns as well.
     extraCards: process.env.CUBE_EXTRA_CARDS === '1' || file.extraCards === true,
+    // Unread-mail card over IMAP. Needs a Gmail app password; absent = no card.
+    gmailUser: process.env.CUBE_GMAIL_USER ?? file.gmail?.user,
+    gmailPassword: process.env.CUBE_GMAIL_PASSWORD ?? file.gmail?.appPassword,
   };
 }
 
@@ -65,13 +69,17 @@ async function refresh() {
   // The gauges come from the usage endpoint and the sparkline from the local
   // transcripts; neither should be able to take the other down, so the limits
   // are fetched independently and report their own failure on the card.
-  const limits = await getUsageLimits();
+  const [limits, mail] = await Promise.all([
+    getUsageLimits(),
+    getUnreadMail({ user: cfg.gmailUser, password: cfg.gmailPassword }),
+  ]);
   const common = {
     source: source.label,
     hasRequestCounts: source.hasRequestCounts !== false,
     billed: source.billed ?? null,
     extraCards: cfg.extraCards,
     limits,
+    mail,
   };
   try {
     // Transcript scanning now only feeds the optional spend cards, so the
