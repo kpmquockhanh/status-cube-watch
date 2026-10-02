@@ -12,6 +12,7 @@
 #define POLL_INTERVAL_MS   5000   // how often to refresh from the bridge
 #define CARD_ROTATE_MS       0   // auto-advance every N ms; 0 disables it
 #define BACKLIGHT          160   // 0-255
+#define SCREEN_SLEEP_MS 900000   // screen off after this long with no touch and no data; 0 = never
 
 // Keep WiFi up even while the Mac is delivering over Bluetooth. Needed for OTA
 // updates (OTA is a WiFi feature); costs power. 0 = WiFi only when BLE is stale.

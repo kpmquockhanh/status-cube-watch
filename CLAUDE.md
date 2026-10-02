@@ -65,6 +65,8 @@ There is no linter, and the only automated tests are the host-side unit tests ab
 
 **Battery indicator.** The top bar of every card shows a battery glyph + percent, read on-device from `PIN_BAT_ADC` (`battery.cpp`; logic in `battery_util.h`, host-tested). It is local-only: not in the payload contract and not in `preview.html`. With no cell fitted (mV < 2500) the cube is on USB and shows a full 100%. The glyph is dropped (number only) when the card name would not fit beside it. In the simulator set `CUBE_BATTERY=<0..100>|none` (default 78).
 
+**Screen sleep.** After `SCREEN_SLEEP_MS` (`config.h`, default 15 min, 0 = never) with no touch and no fresh data, `main.cpp` turns the backlight off and puts the panel to sleep; a touch wakes it (and is swallowed), data alone does not. Never while a Pomodoro session runs/pauses, the editor is open, or a pairing screen is up. Logic is `idle_sleep.h` (pure, host-tested). Local-only, not in the payload or `preview.html`; the sim ignores brightness, so only the state machine is testable off-device.
+
 **Three renderers of the same layout.**
 - `firmware/src/ui.cpp` — the real one: whole frame composed in one full-screen sprite then pushed. Ring notches at 60%/85% (`NOTCHES`), animations (700ms first sweep, 260ms retarget, 400ms colour crossfade); `uiAnimating()` tells `main.cpp` to keep drawing frames.
 - `bridge/preview.html` — a separate JS/SVG reimplementation for browser previewing; it shows whether the data reads well, not whether the firmware draws it correctly. Layout/threshold changes in `ui.cpp` must be mirrored here by hand.
