@@ -66,3 +66,7 @@ void bleForgetBonds() { Serial.println("[ble] (sim) forget bonds"); }
 bool bleTakeSettings(char *, size_t) { return false; }
 
 void bleSettingsReply(uint8_t) {}
+
+void bleNotifyPomodoro(uint8_t ended, uint8_t next) {
+  Serial.printf("[ble] (sim) pomodoro ended %u, next %u\n", (unsigned)ended, (unsigned)next);
+}

@@ -45,3 +45,12 @@ Tick an item only when you observed it. Logs: `./install.sh logs` (Mac, from `ma
 
 - [ ] `RunLoop.main.run()` is enough for CoreBluetooth in the LaunchAgent-started `.app`; if no callbacks arrive, `NSApplication` is needed (the Task 1 spike was skipped, so this is unverified).
 - [ ] The Bluetooth permission granted in `install.sh` applies to the LaunchAgent-started `.app`. If launchd-started instances are denied, fall back to a menu-bar app started at login.
+
+## Pomodoro notification
+
+- [ ] With the cube connected over BLE, let a focus phase end (set a 1 minute focus in the Pomodoro editor): a "Focus done" banner appears on the Mac as the cube alerts.
+- [ ] The break ending gives "Break over / Time to focus"; the fourth focus gives "Take a long break".
+- [ ] Unticking "Pomodoro notifications" in the menu silences it; the cube alert still happens.
+- [ ] Mac asleep or out of range when the phase ends: nothing is queued and nothing crashes on either side.
+- [ ] With notifications switched off for Claude Cube Link in System Settings, the menu item reads "(off in System Settings)" and is greyed out.
+- [ ] Dismiss the first permission prompt without answering: the item stays enabled with no hint, and opening the menu asks again.

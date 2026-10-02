@@ -9,6 +9,8 @@ import Foundation
 /// ready. The cube sends "send now" on subscribe and an ACK per payload.
 public final class CubeLink: NSObject, CBCentralManagerDelegate, CBPeripheralDelegate {
     public var onSendNow: (() -> Void)?
+    /// The cube reports a finished Pomodoro phase: (ended, next).
+    public var onPomodoroEnded: ((PomodoroPhase, PomodoroPhase) -> Void)?
     /// The cube's settings, read once the link is ready and again after every write. Nil while
     /// disconnected, or when the cube's firmware predates the Settings characteristic.
     public private(set) var cubeSettings: CubeSettings?
@@ -252,6 +254,8 @@ public final class CubeLink: NSObject, CBCentralManagerDelegate, CBPeripheralDel
             switch msg {
             case .sendNow:
                 onSendNow?()
+            case .pomodoroEnded(let ended, let next):
+                onPomodoroEnded?(ended, next)
             case .settings(let r):
                 onSettingsResult?(r)
                 if r != .okReboot { refreshSettings() }

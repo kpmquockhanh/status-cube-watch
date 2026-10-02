@@ -282,6 +282,40 @@ void testSetConfigIgnoredWhenNotIdle() {
   CHECK(done.p.view().displaySec == 5 * 60);
 }
 
+// main.cpp reads view() right after takeAlert() to tell the Mac which phase ended.
+void testAlertNamesTheEndedPhase() {
+  Rig r;
+  r.press();
+  r.advance(25 * MIN);
+  CHECK(r.p.takeAlert());
+  PomoView v = r.p.view();
+  CHECK(v.state == POMO_DONE);
+  CHECK(v.phase == PHASE_FOCUS);
+  CHECK(v.next == PHASE_SHORT);
+
+  r.press();
+  r.advance(5 * MIN);
+  CHECK(r.p.takeAlert());
+  v = r.p.view();
+  CHECK(v.phase == PHASE_SHORT);
+  CHECK(v.next == PHASE_FOCUS);
+
+  // The fourth focus session is followed by the long break.
+  for (int i = 0; i < 3; i++) {
+    r.press();
+    r.advance(25 * MIN);
+    CHECK(r.p.takeAlert());
+    if (i < 2) {
+      r.press();
+      r.advance(5 * MIN);
+      CHECK(r.p.takeAlert());
+    }
+  }
+  v = r.p.view();
+  CHECK(v.phase == PHASE_FOCUS);
+  CHECK(v.next == PHASE_LONG);
+}
+
 }  // namespace
 
 int main() {
@@ -301,5 +335,6 @@ int main() {
   testFormat();
   testSetConfigWhileIdle();
   testSetConfigIgnoredWhenNotIdle();
+  testAlertNamesTheEndedPhase();
   return checksDone("pomodoro_test");
 }
