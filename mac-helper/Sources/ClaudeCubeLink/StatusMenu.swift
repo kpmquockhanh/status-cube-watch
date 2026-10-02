@@ -2,11 +2,18 @@ import AppKit
 import CubeLinkCore
 
 /// The menu bar item: icon + 5h percent, with a dropdown of the cards, status and actions.
-final class StatusMenu: NSObject {
+final class StatusMenu: NSObject, NSMenuDelegate {
     var onSendNow: () -> Void = {}
     var onRestartBridge: () -> Void = {}
     var onShowSettings: () -> Void = {}
     var logURL: URL?
+    var prefs = PomodoroNoticePrefs()
+    var onMenuWillOpen: () -> Void = {}
+    /// False when macOS notifications are off for the app; the checkbox is then disabled with a hint.
+    var notificationsAllowed = true {
+        didSet { styleNoticesItem() }
+    }
+    private var noticesItem: NSMenuItem?
 
     private let item = NSStatusBar.system.statusItem(withLength: NSStatusItem.variableLength)
     private let menu = NSMenu()
@@ -14,6 +21,7 @@ final class StatusMenu: NSObject {
     override init() {
         super.init()
         item.menu = menu
+        menu.delegate = self
         item.button?.image = NSImage(systemSymbolName: "cube", accessibilityDescription: "Claude Cube")
         item.button?.imagePosition = .imageLeading
         apply(MenuModel.make(payload: nil, bridgeUp: false, link: .searching))
@@ -47,6 +55,10 @@ final class StatusMenu: NSObject {
         menu.addItem(action("Send now", #selector(sendNow), key: "s"))
         menu.addItem(action("Restart bridge", #selector(restartBridge), key: "r"))
         menu.addItem(action("Cube settings…", #selector(showSettings), key: ","))
+        let notices = action("Pomodoro notifications", #selector(toggleNotices), key: "")
+        noticesItem = notices
+        styleNoticesItem()
+        menu.addItem(notices)
         menu.addItem(.separator())
         menu.addItem(action("Show log", #selector(showLog), key: "l"))
         let trace = action("Verbose trace", #selector(toggleTrace), key: "")
@@ -67,6 +79,23 @@ final class StatusMenu: NSObject {
         i.target = self
         return i
     }
+
+    private func styleNoticesItem() {
+        guard let i = noticesItem else { return }
+        i.state = prefs.enabled ? .on : .off
+        i.title = notificationsAllowed ? "Pomodoro notifications" : "Pomodoro notifications (off in System Settings)"
+    }
+
+    @objc func validateMenuItem(_ item: NSMenuItem) -> Bool {
+        item !== noticesItem || notificationsAllowed
+    }
+
+    @objc private func toggleNotices() {
+        prefs.enabled.toggle()
+        styleNoticesItem()
+    }
+
+    func menuWillOpen(_ menu: NSMenu) { onMenuWillOpen() }
 
     @objc private func sendNow() { onSendNow() }
     @objc private func restartBridge() { onRestartBridge() }

@@ -97,6 +97,17 @@ statusMenu.onShowSettings = {
 }
 
 link.onSendNow = { tick(force: true) }
+let notifier = Notifier()
+notifier.onAuthorizationChange = { statusMenu.notificationsAllowed = $0 }
+statusMenu.onMenuWillOpen = { notifier.refreshAuthorization() }
+link.onPomodoroEnded = { ended, next in
+    guard statusMenu.prefs.enabled else {
+        Trace.log("main", "pomodoro notice muted")
+        return
+    }
+    notifier.post(PomodoroNotice.make(ended: ended, next: next))
+}
+notifier.start()
 link.onStateChange = { Trace.log("link", "state -> \($0)"); refreshMenu() }
 statusMenu.onSendNow = { tick(force: true) }
 statusMenu.onRestartBridge = { supervisor.restart() }
