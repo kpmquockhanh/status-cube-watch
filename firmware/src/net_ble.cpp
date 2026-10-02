@@ -1,0 +1,186 @@
+#include <Arduino.h>
+#include <ArduinoJson.h>
+#include <NimBLEDevice.h>
+#include <esp_random.h>
+
+#include "ble.h"
+#include "ble_frame.h"
+
+// GATT server for the Mac app. NimBLE calls these callbacks from its own
+// task, so they only copy bytes and set flags; parsing happens in bleTake(),
+// on the main loop. See docs/ble-protocol.md.
+
+namespace {
+
+FrameAssembler g_asm;
+NimBLECharacteristic *g_control = nullptr;
+
+volatile BleState g_state = BleState::Off;
+volatile uint32_t g_passkey = 0;
+volatile uint32_t g_lastGood = 0;
+volatile bool g_sendNow = false;
+int g_bondsAtConnect = 0;
+
+portMUX_TYPE g_mux = portMUX_INITIALIZER_UNLOCKED;
+char g_pending[BLE_MAX_PAYLOAD + 1];
+size_t g_pendingLen = 0;
+volatile bool g_pendingReady = false;
+
+void notifyControl(const uint8_t *data, size_t len) {
+  if (!g_control) return;
+  g_control->setValue(data, len);
+  g_control->notify();
+}
+
+struct ServerCb : NimBLEServerCallbacks {
+  void onConnect(NimBLEServer *, NimBLEConnInfo &) override {
+    g_bondsAtConnect = NimBLEDevice::getNumBonds();
+    g_asm.clear();
+    g_state = BleState::Connected;
+    Serial.printf("[ble] connect (bonds %d)\n", g_bondsAtConnect);
+  }
+
+  void onDisconnect(NimBLEServer *, NimBLEConnInfo &, int reason) override {
+    Serial.printf("[ble] disconnect %d\n", reason);
+    g_passkey = 0;
+    g_state = BleState::Advertising;
+    NimBLEDevice::startAdvertising();
+  }
+
+  // Display-only IO capability: the stack asks us for the code to show.
+  uint32_t onPassKeyDisplay() override {
+    g_passkey = esp_random() % 1000000;
+    g_state = BleState::Pairing;
+    Serial.printf("[ble] pairing passkey %06u\n", (unsigned)g_passkey);
+    return g_passkey;
+  }
+
+  void onConfirmPassKey(NimBLEConnInfo &info, uint32_t) override { NimBLEDevice::injectConfirmPasskey(info, true); }
+
+  void onAuthenticationComplete(NimBLEConnInfo &info) override {
+    g_passkey = 0;
+    NimBLEServer *srv = NimBLEDevice::getServer();
+    if (!info.isEncrypted()) {  // wrong passkey or refused
+      Serial.println("[ble] pairing failed");
+      g_state = BleState::Connected;
+      srv->disconnect(info.getConnHandle());
+      return;
+    }
+    // One bonded Mac at a time: if a bond already existed and a second device
+    // just got through, drop the new one.
+    if (g_bondsAtConnect > 0 && NimBLEDevice::getNumBonds() > g_bondsAtConnect) {
+      Serial.println("[ble] second Mac refused");
+      NimBLEDevice::deleteBond(info.getIdAddress());
+      srv->disconnect(info.getConnHandle());
+      return;
+    }
+    g_state = BleState::Connected;
+    Serial.println("[ble] encrypted");
+  }
+};
+
+struct PayloadCb : NimBLECharacteristicCallbacks {
+  void onWrite(NimBLECharacteristic *chr, NimBLEConnInfo &) override {
+    const NimBLEAttValue v = chr->getValue();
+    const FrameResult r = g_asm.feed(v.data(), v.size());
+    if (r == FrameResult::Complete) {
+      portENTER_CRITICAL(&g_mux);
+      memcpy(g_pending, g_asm.json(), g_asm.size() + 1);
+      g_pendingLen = g_asm.size();
+      g_pendingReady = true;
+      portEXIT_CRITICAL(&g_mux);
+      const uint8_t ack[2] = {BLE_CTRL_ACK, g_asm.seq()};
+      notifyControl(ack, sizeof(ack));
+    } else if (r == FrameResult::Bad) {
+      Serial.println("[ble] bad frame dropped");
+    }
+  }
+};
+
+struct ControlCb : NimBLECharacteristicCallbacks {
+  void onSubscribe(NimBLECharacteristic *, NimBLEConnInfo &, uint16_t subValue) override {
+    if (subValue & 1) g_sendNow = true;  // sent from bleTake(), on the main loop
+  }
+};
+
+ServerCb g_serverCb;
+PayloadCb g_payloadCb;
+ControlCb g_controlCb;
+
+}  // namespace
+
+void bleBegin() {
+  NimBLEDevice::init("Claude Cube");
+  NimBLEDevice::setSecurityAuth(true, true, true);  // bonding, MITM, secure connections
+  NimBLEDevice::setSecurityIOCap(BLE_HS_IO_DISPLAY_ONLY);
+
+  NimBLEServer *server = NimBLEDevice::createServer();
+  server->setCallbacks(&g_serverCb);
+  NimBLEService *svc = server->createService(BLE_SERVICE_UUID);
+
+  NimBLECharacteristic *payload = svc->createCharacteristic(
+      BLE_PAYLOAD_UUID, NIMBLE_PROPERTY::WRITE | NIMBLE_PROPERTY::WRITE_ENC | NIMBLE_PROPERTY::WRITE_AUTHEN);
+  payload->setCallbacks(&g_payloadCb);
+
+  g_control = svc->createCharacteristic(BLE_CONTROL_UUID, NIMBLE_PROPERTY::NOTIFY);
+  g_control->setCallbacks(&g_controlCb);
+
+  NimBLECharacteristic *info = svc->createCharacteristic(
+      BLE_INFO_UUID, NIMBLE_PROPERTY::READ | NIMBLE_PROPERTY::READ_ENC | NIMBLE_PROPERTY::READ_AUTHEN);
+  const uint8_t infoVal[2] = {BLE_PROTO_VER, BLE_FW_REV};
+  info->setValue(infoVal, sizeof(infoVal));
+
+  svc->start();
+  NimBLEAdvertising *adv = NimBLEDevice::getAdvertising();
+  adv->addServiceUUID(BLE_SERVICE_UUID);  // in the advertisement: the Mac scans by it
+  adv->setName("Claude Cube");            // too long for the same packet: goes in the scan response
+  adv->enableScanResponse(true);
+  adv->start();
+  g_state = BleState::Advertising;
+  Serial.printf("[ble] advertising, bonds %d\n", NimBLEDevice::getNumBonds());
+}
+
+BleState bleState() { return g_state; }
+
+uint32_t blePasskey() { return g_passkey; }
+
+bool bleBonded() { return NimBLEDevice::getNumBonds() > 0; }
+
+uint32_t bleLastGood() { return g_lastGood; }
+
+void bleForgetBonds() {
+  NimBLEDevice::deleteAllBonds();
+  Serial.println("[ble] bonds deleted");
+}
+
+bool bleTake(Payload &out) {
+  if (g_sendNow) {
+    g_sendNow = false;
+    const uint8_t m = BLE_CTRL_SEND_NOW;
+    notifyControl(&m, 1);
+  }
+  if (!g_pendingReady) return false;
+
+  static char local[BLE_MAX_PAYLOAD + 1];
+  portENTER_CRITICAL(&g_mux);
+  memcpy(local, g_pending, g_pendingLen + 1);
+  g_pendingReady = false;
+  portEXIT_CRITICAL(&g_mux);
+
+  JsonDocument doc;
+  const DeserializationError err = deserializeJson(doc, local);
+  if (err) {
+    Serial.printf("[ble] json: %s\n", err.c_str());
+    return false;
+  }
+  Payload p{};
+  char why[64] = "";
+  if (!payloadFromJson(doc, p, why, sizeof(why))) {
+    Serial.printf("[ble] payload rejected: %s\n", why);
+    return false;
+  }
+  out = p;
+  const uint32_t now = millis();
+  g_lastGood = now ? now : 1;  // 0 means "never"
+  return true;
+}
