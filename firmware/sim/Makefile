@@ -84,7 +84,7 @@ shot: $(SHOT)
 TESTS := build/portal_util_test build/pomodoro_test build/gesture_test build/deck_test \
          build/pomo_settings_test build/pomo_editor_test build/battery_util_test \
          build/ble_frame_test build/transport_policy_test build/idle_sleep_test build/device_settings_test \
-         build/settings_json_test build/dev_editor_test build/orientation_test
+         build/settings_json_test build/dev_editor_test build/orientation_test build/touch_map_test
 
 build/pomodoro_test: ../src/pomodoro.cpp
 build/gesture_test: ../src/gesture.cpp
