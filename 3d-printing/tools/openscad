@@ -1,0 +1,3 @@
+#!/bin/sh
+# Run OpenSCAD in Docker (no native install available). Mounts the cwd at the same path.
+exec docker run --rm -v "$PWD":"$PWD" -w "$PWD" openscad/openscad:trixie openscad "$@"
