@@ -10,6 +10,10 @@ import Foundation
 public final class CubeLink: NSObject, CBCentralManagerDelegate, CBPeripheralDelegate {
     public var onSendNow: (() -> Void)?
     public private(set) var isReady = false
+    public private(set) var state: LinkState = .searching {
+        didSet { if state != oldValue { onStateChange?(state) } }
+    }
+    public var onStateChange: ((LinkState) -> Void)?
 
     private let log: (String) -> Void
     private var central: CBCentralManager!
@@ -80,13 +84,16 @@ public final class CubeLink: NSObject, CBCentralManagerDelegate, CBPeripheralDel
         switch c.state {
         case .poweredOn:
             log("Bluetooth on")
+            state = .searching
             connect()
         case .unauthorized:
             log("Bluetooth permission denied: allow Claude Cube Link in System Settings > Privacy & Security > Bluetooth")
             setReady(false)
+            state = .unauthorized
         default:
             log("Bluetooth unavailable (state \(c.state.rawValue))")
             setReady(false)
+            state = .bluetoothOff
         }
     }
 
@@ -113,6 +120,7 @@ public final class CubeLink: NSObject, CBCentralManagerDelegate, CBPeripheralDel
 
     public func centralManager(_ c: CBCentralManager, didConnect p: CBPeripheral) {
         log("connected")
+        state = .connecting
         p.delegate = self
         p.discoverServices([serviceID])
     }
@@ -228,6 +236,8 @@ public final class CubeLink: NSObject, CBCentralManagerDelegate, CBPeripheralDel
 
     private func setReady(_ ready: Bool) {
         isReady = ready
+        if ready { state = .connected }
+        else if state == .connected { state = .searching }
         if !ready {
             payloadChar = nil
             controlChar = nil

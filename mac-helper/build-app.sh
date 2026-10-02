@@ -10,5 +10,8 @@ rm -rf "$APP"
 mkdir -p "$APP/Contents/MacOS"
 cp .build/release/ClaudeCubeLink "$APP/Contents/MacOS/ClaudeCubeLink"
 cp Info.plist "$APP/Contents/Info.plist"
+# Regenerate the icon with: swift icon/make-icon.swift X.iconset && iconutil -c icns X.iconset -o icon/AppIcon.icns
+mkdir -p "$APP/Contents/Resources"
+cp icon/AppIcon.icns "$APP/Contents/Resources/AppIcon.icns"
 codesign --force --sign - --identifier com.claude-cube.link "$APP"
 echo "built $(pwd)/$APP"

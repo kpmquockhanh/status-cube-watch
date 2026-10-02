@@ -8,7 +8,7 @@ A desk display for Claude rate-limit usage. Two halves that talk over plain HTTP
 
 - `bridge/` — Node ≥20 ESM, **zero npm dependencies**. Gathers data on the host and serves one small, fully pre-formatted JSON document at `GET /api/status` (plus `/` = browser mock, `/health`).
 - `firmware/` — PlatformIO / Arduino for a Waveshare ESP32-S3-Touch-LCD-1.69 (240x280 ST7789V2, CST816 touch), drawn with LovyanGFX (no LVGL) + ArduinoJson. It only polls the bridge (or takes the same payload over BLE) and draws strings; it never talks to Anthropic.
-- `mac-helper/` — Swift package building `ClaudeCubeLink.app`: supervises the bridge (`node bridge/server.mjs`) and pushes `/api/status` to the cube over BLE (CoreBluetooth). Optional; BLE users run its `install.sh` instead of `bridge/agent.sh`.
+- `mac-helper/` — Swift package building `ClaudeCubeLink.app`: supervises the bridge (`node bridge/server.mjs`) and pushes `/api/status` to the cube over BLE (CoreBluetooth). Optional; BLE users run its `install.sh` instead of `bridge/agent.sh`. It shows a menu bar item (`StatusMenu.swift`: 5h percent tinted at 60/85%, dropdown of cards, bridge/cube status, Send now / Restart bridge / Quit); what it displays is derived by the pure `MenuModel` in `CubeLinkCore`.
 
 The README is detailed and authoritative for setup, troubleshooting and design rationale.
 
