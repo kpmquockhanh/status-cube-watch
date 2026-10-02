@@ -55,6 +55,11 @@ public final class BridgeSupervisor {
         process?.terminate()
     }
 
+    /// Restarts a bridge this app spawned (it comes back after the backoff); otherwise re-checks the port.
+    public func restart() {
+        if let process { process.terminate() } else { start() }
+    }
+
     private func act(externalUp: Bool) {
         guard !stopping else { return }
         switch Self.decide(externalBridgeUp: externalUp, node: node) {

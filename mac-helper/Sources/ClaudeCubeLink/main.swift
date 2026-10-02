@@ -1,3 +1,4 @@
+import AppKit
 import CubeLinkCore
 import Foundation
 
@@ -39,6 +40,16 @@ let client = BridgeClient(port: port)
 let link = CubeLink(log: log)
 var policy = PushPolicy(heartbeat: 5)
 var lastBridgeError = ""
+var lastBody: Data?
+var bridgeUp = false
+
+let app = NSApplication.shared
+app.setActivationPolicy(.accessory)
+let statusMenu = StatusMenu()
+
+func refreshMenu() {
+    statusMenu.apply(MenuModel.make(payload: lastBody, bridgeUp: bridgeUp, link: link.state))
+}
 
 func tick(force: Bool) {
     client.fetch { body, why in
@@ -48,6 +59,9 @@ func tick(force: Bool) {
                 log("bridge: \(why)")
             }
             if body != nil { lastBridgeError = "" }
+            bridgeUp = body != nil
+            if let body { lastBody = body }
+            refreshMenu()
             guard link.isReady else { return }
             let now = Date()
             if let body, policy.shouldSend(body: body, now: now, force: force) {
@@ -59,6 +73,9 @@ func tick(force: Bool) {
 }
 
 link.onSendNow = { tick(force: true) }
+link.onStateChange = { _ in refreshMenu() }
+statusMenu.onSendNow = { tick(force: true) }
+statusMenu.onRestartBridge = { supervisor.restart() }
 supervisor.start()
 Timer.scheduledTimer(withTimeInterval: 5, repeats: true) { _ in tick(force: false) }
 log("Claude Cube Link started (bridge :\(port), dir \(bridgeDir.path))")
@@ -74,4 +91,4 @@ for sig in [SIGTERM, SIGINT] {
     src.resume()
     signalSources.append(src)
 }
-RunLoop.main.run()
+app.run()
