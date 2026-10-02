@@ -137,14 +137,25 @@ public final class CubeLink: NSObject, CBCentralManagerDelegate, CBPeripheralDel
     // MARK: discovery
 
     public func peripheral(_ p: CBPeripheral, didDiscoverServices error: Error?) {
+        if let error {
+            explain(error)
+            setupFailed(p)
+            return
+        }
         guard let svc = p.services?.first(where: { $0.uuid == serviceID }) else {
             log("cube service not found")
+            setupFailed(p)
             return
         }
         p.discoverCharacteristics([payloadID, controlID, infoID], for: svc)
     }
 
     public func peripheral(_ p: CBPeripheral, didDiscoverCharacteristicsFor s: CBService, error: Error?) {
+        if let error {
+            explain(error)
+            setupFailed(p)
+            return
+        }
         for ch in s.characteristics ?? [] {
             if ch.uuid == payloadID { payloadChar = ch }
             else if ch.uuid == controlID { controlChar = ch }
@@ -152,6 +163,7 @@ public final class CubeLink: NSObject, CBCentralManagerDelegate, CBPeripheralDel
         }
         guard let info = infoChar, controlChar != nil, payloadChar != nil else {
             log("cube is missing a characteristic")
+            setupFailed(p)
             return
         }
         log("reading Info; if this is a new cube, macOS now asks for the code shown on its screen")
@@ -164,11 +176,13 @@ public final class CubeLink: NSObject, CBCentralManagerDelegate, CBPeripheralDel
         if ch.uuid == infoID {
             if let error {
                 explain(error)
+                setupFailed(p)
                 return
             }
             let b = [UInt8](ch.value ?? Data())
             guard b.first == CubeProtocol.version else {
                 log("cube speaks protocol \(b.first.map(String.init) ?? "?"), this app speaks \(CubeProtocol.version); update one of them")
+                setupFailed(p)
                 return
             }
             UserDefaults.standard.set(p.identifier.uuidString, forKey: idKey)
@@ -189,6 +203,7 @@ public final class CubeLink: NSObject, CBCentralManagerDelegate, CBPeripheralDel
     public func peripheral(_ p: CBPeripheral, didUpdateNotificationStateFor ch: CBCharacteristic, error: Error?) {
         if let error {
             explain(error)
+            setupFailed(p)
             return
         }
         if ch.uuid == controlID, ch.isNotifying {
@@ -204,9 +219,19 @@ public final class CubeLink: NSObject, CBCentralManagerDelegate, CBPeripheralDel
 
     // MARK: helpers
 
+    /// A setup step failed while the link is still up. CoreBluetooth would keep it
+    /// connected forever, so drop it: didDisconnect then backs off and retries.
+    private func setupFailed(_ p: CBPeripheral) {
+        setReady(false)
+        central.cancelPeripheralConnection(p)
+    }
+
     private func setReady(_ ready: Bool) {
         isReady = ready
         if !ready {
+            payloadChar = nil
+            controlChar = nil
+            infoChar = nil
             awaitingAck = nil
             ackTimeout?.cancel()
         }
@@ -215,7 +240,9 @@ public final class CubeLink: NSObject, CBCentralManagerDelegate, CBPeripheralDel
     /// Turns the Bluetooth errors a user can act on into a sentence.
     private func explain(_ error: Error?) {
         guard let error else { return }
-        if let e = error as? CBError, e.code == .peerRemovedPairingInformation {
+        if let e = error as? CBError, e.code == .encryptionTimedOut {
+            log("pairing timed out or was cancelled; retrying the link")
+        } else if let e = error as? CBError, e.code == .peerRemovedPairingInformation {
             log("the cube forgot this Mac (its flash was erased or the bond was forgotten). "
                 + "Remove \"Claude Cube\" in System Settings > Bluetooth, then pair again.")
         } else if let e = error as? CBATTError,

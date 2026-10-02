@@ -14,7 +14,11 @@ func acquireSingleInstanceLock() -> Bool {
         .appendingPathComponent("ClaudeCubeLink")
     try? FileManager.default.createDirectory(at: dir, withIntermediateDirectories: true)
     let fd = open(dir.appendingPathComponent("lock").path, O_CREAT | O_RDWR, 0o644)
-    return fd >= 0 && flock(fd, LOCK_EX | LOCK_NB) == 0  // the fd stays open for the life of the process
+    if fd < 0 {
+        log("cannot open lock file: \(String(cString: strerror(errno)))")
+        exit(1)
+    }
+    return flock(fd, LOCK_EX | LOCK_NB) == 0  // the fd stays open for the life of the process
 }
 
 guard acquireSingleInstanceLock() else {
@@ -59,8 +63,15 @@ supervisor.start()
 Timer.scheduledTimer(withTimeInterval: 5, repeats: true) { _ in tick(force: false) }
 log("Claude Cube Link started (bridge :\(port), dir \(bridgeDir.path))")
 
-signal(SIGTERM) { _ in
-    supervisor.stop()
-    exit(0)
+var signalSources: [DispatchSourceSignal] = []
+for sig in [SIGTERM, SIGINT] {
+    signal(sig, SIG_IGN)
+    let src = DispatchSource.makeSignalSource(signal: sig, queue: .main)
+    src.setEventHandler {
+        supervisor.stop()
+        exit(0)
+    }
+    src.resume()
+    signalSources.append(src)
 }
 RunLoop.main.run()
