@@ -180,7 +180,7 @@ cd mac-helper
 ./install.sh status|logs|restart|uninstall
 ```
 
-1. Flash the cube. With no WiFi configured and no Mac paired it shows **Waiting for a Mac**.
+1. Flash the cube. With no WiFi configured and no Mac paired it shows **Waiting for a Mac** until a payload arrives (a touch dismisses it).
 2. `./install.sh install`, click **Allow** on the macOS Bluetooth prompt. The script pauses
    (`read`) until you press Enter, so run it from a terminal, not a script without stdin.
 3. The cube shows a 6-digit code; macOS asks for it. Type it. That is the whole pairing.
@@ -195,7 +195,8 @@ The app reads `CUBE_PORT` (default 8787), `CUBE_BRIDGE_DIR` and `CUBE_NODE` (pat
 the environment, and takes `--port N` on its command line; `install.sh` writes them into the
 LaunchAgent, which restarts the app only after a crash (`KeepAlive` with `SuccessfulExit=false`).
 
-The cube takes data from Bluetooth while it arrives (a payload every 5 s) and turns WiFi off. If
+While a Mac is paired and data arrives over Bluetooth (a payload every 5 s) the cube turns WiFi off
+(with no paired Mac, or with `WIFI_ALWAYS_ON 1`, WiFi stays on even when Bluetooth is live). If
 nothing arrives for 15 s and WiFi is configured it polls the bridge instead, and goes back to
 Bluetooth after it has been steady for 30 s. `WIFI_ALWAYS_ON 1` in `config.h` keeps WiFi up
 (needed for OTA while Bluetooth is working). With no WiFi configured and the Mac away, the last
@@ -211,7 +212,7 @@ on a real cube yet) is `docs/ble-acceptance.md`.
 
 ### Changing WiFi without reflashing (setup portal)
 
-The cube shows a setup screen when it cannot join the stored network within ~20 s and has no paired Mac (a cube with no WiFi and no Mac shows "Waiting for a Mac" instead, see Pairing over Bluetooth), or when you touch the screen while the boot screen says "hold screen for WiFi setup" (the first 3 s after power-up) and keep holding for 5 s. Join the open `claude-cube-XXXX` network (scan the QR on the screen); the setup page opens by itself, or browse to `192.168.4.1`. Enter the WiFi name and password, the bridge URL and, optionally, an OTA password. A WiFi password must be 8 to 63 characters (or empty for an open network). A blank password keeps the saved one unless you change the network. If nobody joins within a minute the cube reboots and retries the stored network, so a router that was slow to come back after a power cut does not strand it. The setup network is open by design: while it is up (setup screen showing), anyone in radio range can change the cube's settings, including the OTA password. Only reconfigure when you are at the cube, and set an OTA password. The page also has a **Forget paired Mac** button.
+The cube shows a setup screen when it cannot join the stored network within ~20 s and has no paired Mac (a cube with no WiFi and no Mac shows "Waiting for a Mac" instead, see Pairing over Bluetooth), or when you touch the screen while the boot screen says "HOLD SCREEN FOR SETUP" (the first 3 s after power-up) and keep holding for 5 s. Join the open `claude-cube-XXXX` network (scan the QR on the screen); the setup page opens by itself, or browse to `192.168.4.1`. Enter the WiFi name and password, the bridge URL and, optionally, an OTA password. A WiFi password must be 8 to 63 characters (or empty for an open network). A blank password keeps the saved one unless you change the network. If nobody joins within a minute the cube reboots and retries the stored network, so a router that was slow to come back after a power cut does not strand it. The setup network is open by design: while it is up (setup screen showing), anyone in radio range can change the cube's settings, including the OTA password. Only reconfigure when you are at the cube, and set an OTA password. The page also has a **Forget paired Mac** button.
 
 ### Updating over WiFi (OTA)
 
