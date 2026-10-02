@@ -63,6 +63,31 @@ func loadFixture() throws -> [FixtureCase] {
     }
 }
 
+@Test func parsesPomodoroEnded() {
+    #expect(ControlMessage.parse(Data([0x04, 0, 1])) == .pomodoroEnded(ended: .focus, next: .shortBreak))
+    #expect(ControlMessage.parse(Data([0x04, 2, 0])) == .pomodoroEnded(ended: .longBreak, next: .focus))
+    #expect(ControlMessage.parse(Data([0x04])) == nil)        // no phases
+    #expect(ControlMessage.parse(Data([0x04, 0])) == nil)     // no next
+    #expect(ControlMessage.parse(Data([0x04, 3, 0])) == nil)  // unknown ended phase
+    #expect(ControlMessage.parse(Data([0x04, 0, 9])) == nil)  // unknown next phase
+}
+
+@Test func pomodoroEndedMatchesTheFirmwareFixture() throws {
+    var root = URL(fileURLWithPath: #filePath)
+    for _ in 0..<4 { root.deleteLastPathComponent() }
+    let text = try String(contentsOf: root.appendingPathComponent("firmware/sim/fixtures/ble-frames.txt"), encoding: .utf8)
+    var n = 0
+    for line in text.split(separator: "\n") where line.hasPrefix("pomo_ended ") {
+        let f = line.split(separator: " ").dropFirst()
+        let ended = PomodoroPhase(rawValue: UInt8(f[f.startIndex])!)!
+        let next = PomodoroPhase(rawValue: UInt8(f[f.startIndex + 1])!)!
+        let bytes = f.dropFirst(2).map { UInt8($0, radix: 16)! }
+        #expect(ControlMessage.parse(Data(bytes)) == .pomodoroEnded(ended: ended, next: next))
+        n += 1
+    }
+    #expect(n == 4)  // a missing fixture must fail, not pass vacuously
+}
+
 @Test func rejectsEmptyAndTinyMTU() {
     #expect(throws: FrameError.empty) { try encodeFrames(payload: Data(), seq: 1, maxWrite: 100) }
     #expect(throws: FrameError.mtuTooSmall(4)) { try encodeFrames(payload: Data([1]), seq: 1, maxWrite: 4) }
