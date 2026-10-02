@@ -40,6 +40,10 @@ constexpr int RING_CX = LCD_WIDTH / 2;
 constexpr int RING_CY = 128;
 constexpr int RING_R_OUT = 73;
 constexpr int RING_R_IN = 60;
+// The combined usage card adds a second, thinner ring inside the first (the 7d
+// window), 4px clear of it. Same centre, same 270 degree arc and notches.
+constexpr int RING2_R_OUT = 55;
+constexpr int RING2_R_IN = 47;
 // Inside the ring: the value, its caption below, then (in the gap the arc leaves
 // at the bottom) the percentage line, and under it all the card's name.
 constexpr int VALUE_CY = RING_CY - 13;
@@ -77,6 +81,7 @@ struct GaugeAnim {
 // up by a swipe or tap (uiReplay), so the ring visibly fills each time you
 // look at it; periodic redraws and data updates only retarget it.
 GaugeAnim g_anim[MAX_CARDS];
+GaugeAnim g_anim2[MAX_CARDS];  // the inner ring of a dual-ring card
 
 float easeOut(float t) {
   if (t <= 0.0f) return 0.0f;
@@ -145,7 +150,7 @@ ValueFont fitDeck(LovyanGFX *g, const Payload &p, int maxW, int maxH) {
   const char *pick = "";
   g->setFont(&VALUE_FONTS[0]->font);
   for (uint8_t i = 0; i < p.nCards; i++) {
-    if (p.cards[i].gauge < GAUGE_BLANK) continue;  // text cards size themselves
+    if (p.cards[i].gauge < GAUGE_BLANK || p.cards[i].gauge2 >= GAUGE_BLANK) continue;  // text and dual cards size themselves
     const int w = g->textWidth(p.cards[i].value);
     if (w > widest) {
       widest = w;
@@ -299,9 +304,16 @@ struct RingPx {
   uint8_t covNo;   // the same coverage with the notches left out, for rings without thresholds
 };
 constexpr uint32_t RING_TRACK = 0x2A3242;
-constexpr float RING_PX_PER_DEG = 1.16f;  // ~radius x pi/180 over the 60..73px band
-RingPx *g_ringPx = nullptr;
-int g_ringN = 0;
+
+// One precomputed ring: its radii and the pixels they cover.
+struct RingTable {
+  int rOut, rIn;
+  RingPx *px;
+  int n;
+  float pxPerDeg() const { return (rOut + rIn) * 0.5f * 0.01745329252f; }  // at the band's middle
+};
+RingTable g_ringOuter = {RING_R_OUT, RING_R_IN, nullptr, 0};
+RingTable g_ringInner = {RING2_R_OUT, RING2_R_IN, nullptr, 0};
 
 float clamp01(float v) { return v < 0.0f ? 0.0f : (v > 1.0f ? 1.0f : v); }
 
@@ -313,17 +325,17 @@ uint16_t pack565(uint32_t rgb, float scale) {
 
 // Everything that does not depend on the current percentage or colour --
 // coverage from the radii, end caps and notches -- is worked out once here.
-void buildRingTable() {
+void buildRingTable(RingTable &t) {
   constexpr float DEG = 0.01745329252f;
-  const int rMax = RING_R_OUT + 1;
-  const int rMin = RING_R_IN - 1;
+  const int rMax = t.rOut + 1;
+  const int rMin = t.rIn - 1;
   for (int pass = 0; pass < 2; pass++) {
     int n = 0;
     for (int dy = -rMax; dy <= rMax; dy++) {
       for (int dx = -rMax; dx <= rMax; dx++) {
         const float r = sqrtf((float)(dx * dx + dy * dy));
         if (r > rMax || r < rMin) continue;
-        const float covR = fminf(clamp01(RING_R_OUT + 0.5f - r), clamp01(r - RING_R_IN + 0.5f));
+        const float covR = fminf(clamp01(t.rOut + 0.5f - r), clamp01(r - t.rIn + 0.5f));
         if (covR <= 0.0f) continue;
         // The gap sits at 270..360 degrees from the start; wrap just before
         // the start to a small negative number.
@@ -344,7 +356,7 @@ void buildRingTable() {
         if (covPlain <= 0.0f) continue;
 
         if (pass == 1) {
-          RingPx &p = g_ringPx[n];
+          RingPx &p = t.px[n];
           p.idx = (uint16_t)((RING_CY + dy) * LCD_WIDTH + RING_CX + dx);
           p.cov = (uint8_t)(cov * 255.0f + 0.5f);
           p.fs = (uint8_t)(clamp01(d * px + 0.5f) * 255.0f + 0.5f);
@@ -356,28 +368,30 @@ void buildRingTable() {
       }
     }
     if (pass == 0) {
-      g_ringPx = (RingPx *)malloc(sizeof(RingPx) * n);
-      if (!g_ringPx) return;
-      g_ringN = n;
+      t.px = (RingPx *)malloc(sizeof(RingPx) * n);
+      if (!t.px) return;
+      t.n = n;
     }
   }
 }
 
-void drawRing(LovyanGFX *g, float pct, uint32_t rgb, bool filled, bool notches) {
-  if (!g_ringPx) return;
+void drawRing(LovyanGFX *g, const RingTable &ring, float pct, uint32_t rgb, bool filled,
+              bool notches) {
+  if (!ring.px) return;
+  const float pxPerDeg = ring.pxPerDeg();
   const float fillEnd = filled ? ARC_SWEEP * (pct / 100.0f) : -10.0f;
   // Past this the fill (and its AA edge) cannot reach: use the cached pixel.
   const int past = (int)((fillEnd + 1.5f) * 16.0f);
   uint16_t *buf = g_sprite ? (uint16_t *)g_canvas.getBuffer() : nullptr;
 
-  for (int i = 0; i < g_ringN; i++) {
-    const RingPx &p = g_ringPx[i];
+  for (int i = 0; i < ring.n; i++) {
+    const RingPx &p = ring.px[i];
     const uint8_t cov = notches ? p.cov : p.covNo;
     // `base` was cached with the notches cut out; without them it is rebuilt.
     uint16_t c = notches ? p.base : pack565(RING_TRACK, p.covNo * (1.0f / 255.0f));
     if (p.d <= past) {
       const float d = p.d * (1.0f / 16.0f);
-      const float t = clamp01((fillEnd - d) * RING_PX_PER_DEG + 0.5f) * (p.fs * (1.0f / 255.0f));
+      const float t = clamp01((fillEnd - d) * pxPerDeg + 0.5f) * (p.fs * (1.0f / 255.0f));
       const uint32_t col = lerpRgb(RING_TRACK, rgb, t);
       c = pack565(col, cov * (1.0f / 255.0f));
     }
@@ -405,6 +419,42 @@ RingStyle ringStyle(uint32_t rgb) {
   return s;
 }
 
+// Advances one ring's sweep / retarget / colour crossfade to `now` and returns
+// the arc to draw; `shownRgb` gets the colour to draw it in. Marks the frame as
+// animating while either is still moving.
+float stepGauge(GaugeAnim &a, float want, uint32_t rgb, uint32_t now, uint32_t &shownRgb) {
+  if (!a.seen) {
+    a.seen = true;
+    a.from = 0.0f;
+    a.to = want;
+    a.start = now;
+    a.dur = SWEEP_MS;
+    a.colFrom = a.colTo = rgb;
+    a.colStart = now - COLOR_MS;
+  } else if (fabsf(want - a.to) > 0.01f) {
+    a.from = a.shown;
+    a.to = want;
+    a.start = now;
+    a.dur = RETARGET_MS;
+  }
+
+  const float p = progress(now, a.start, a.dur);
+  a.shown = a.from + (a.to - a.from) * easeOut(p);
+
+  const float cp = progress(now, a.colStart, COLOR_MS);
+  shownRgb = lerpRgb(a.colFrom, a.colTo, easeOut(cp));
+  if (rgb != a.colTo) {
+    // Retarget the colour from wherever the crossfade currently is, the same
+    // way the arc retargets, so a second threshold crossed mid-fade does not
+    // snap back to the old hue first.
+    a.colFrom = shownRgb;
+    a.colTo = rgb;
+    a.colStart = now;
+  }
+  if (p < 1.0f || cp < 1.0f) g_animating = true;
+  return a.shown;
+}
+
 // --- the two card layouts ------------------------------------------------
 // A gauge card: the ring is the number, the middle of the ring is the one
 // thing a ring cannot show (time left), and the exact percentage drops to a
@@ -415,42 +465,12 @@ void drawGaugeCard(LovyanGFX *g, const Card &card, const RingStyle &style,
   const bool hasReading = card.gauge >= 0;
   const uint32_t rgb = style.rgb;
 
-  if (!a.seen) {
-    a.seen = true;
-    a.from = 0.0f;
-    a.to = hasReading ? card.gauge : 0.0f;
-    a.start = now;
-    a.dur = SWEEP_MS;
-    a.colFrom = a.colTo = rgb;
-    a.colStart = now - COLOR_MS;
-  } else {
-    const float want = hasReading ? card.gauge : 0.0f;
-    if (fabsf(want - a.to) > 0.01f) {
-      a.from = a.shown;
-      a.to = want;
-      a.start = now;
-      a.dur = RETARGET_MS;
-    }
-  }
-
-  const float p = progress(now, a.start, a.dur);
-  a.shown = a.from + (a.to - a.from) * easeOut(p);
-
-  const float cp = progress(now, a.colStart, COLOR_MS);
-  const uint32_t shownRgb = lerpRgb(a.colFrom, a.colTo, easeOut(cp));
-  if (rgb != a.colTo) {
-    // Retarget the colour from wherever the crossfade currently is, the same
-    // way the arc retargets, so a second threshold crossed mid-fade does not
-    // snap back to the old hue first.
-    a.colFrom = shownRgb;
-    a.colTo = rgb;
-    a.colStart = now;
-  }
-  if (p < 1.0f || cp < 1.0f) g_animating = true;
+  uint32_t shownRgb;
+  stepGauge(a, hasReading ? card.gauge : 0.0f, rgb, now, shownRgb);
 
   drawTopBar(g, "", online, ageMs, bat);
   const uint32_t ringRgb = style.flash > 0.0f ? lerpRgb(shownRgb, 0xFFFFFF, style.flash) : shownRgb;
-  drawRing(g, a.shown, ringRgb, hasReading, style.notches);
+  drawRing(g, g_ringOuter, a.shown, ringRgb, hasReading, style.notches);
 
   // Inside the ring, in the size the whole deck agreed on.
   drawIn(g, valueFont, card.value, RING_CX, VALUE_CY, hasReading ? INK : FAINT);
@@ -477,6 +497,67 @@ void drawGaugeCard(LovyanGFX *g, const Card &card, const RingStyle &style,
   }
 
   drawCaps(g, card.title, RING_CX, NAME_Y, DIM, middle_center);
+}
+
+// The combined usage card: both rate-limit windows as concentric rings (outer =
+// the 5h session, inner = the 7d week), the session countdown in the middle,
+// the unread-mail badge in the gap the arcs leave at the bottom, and one legend
+// line per window under them. Rings animate independently, like a gauge card's.
+constexpr int DUAL_VALUE_CY = RING_CY - 10;
+constexpr int DUAL_CAPTION_Y = RING_CY + 9;
+constexpr int DUAL_VALUE_MAX_W = 80;  // between the inner ring's edges at the value's height
+constexpr int DUAL_VALUE_MAX_H = 30;
+constexpr int MAIL_CY = RING_CY + 48;
+constexpr int ROW1_Y = RING_CY + 86;
+constexpr int ROW2_Y = RING_CY + 108;
+constexpr int ROW_LEFT = 34;
+constexpr int ROW_RIGHT = LCD_WIDTH - 34;
+
+void drawEnvelope(LovyanGFX *g, int x, int y, uint16_t col) {
+  g->drawRoundRect(x, y, 16, 11, 2, col);
+  g->drawLine(x + 2, y + 2, x + 8, y + 6, col);  // flap
+  g->drawLine(x + 13, y + 2, x + 8, y + 6, col);
+}
+
+void drawLegendRow(LovyanGFX *g, const LegendRow &row, int y, uint32_t swatch) {
+  g->fillRoundRect(ROW_LEFT, y - 3, 7, 7, 2, to565(swatch));
+  drawCaps(g, row.key, ROW_LEFT + 13, y, DIM, middle_left);
+  g->setFont(&V_B18.font);
+  g->setTextDatum(middle_left);
+  g->setTextColor(INK, BG);
+  g->drawString(row.pct, ROW_LEFT + 38, y);
+  if (row.reset[0]) drawCaps(g, row.reset, ROW_RIGHT, y, DIM, middle_right);
+}
+
+void drawDualCard(LovyanGFX *g, const Card &card, GaugeAnim &outer, GaugeAnim &inner,
+                  uint32_t now, bool online, uint32_t ageMs, const BatteryView &bat) {
+  const bool has1 = card.gauge >= 0;
+  const bool has2 = card.gauge2 >= 0;
+  uint32_t rgb1, rgb2;
+  stepGauge(outer, has1 ? card.gauge : 0.0f, RGB888[card.color % 7], now, rgb1);
+  stepGauge(inner, has2 ? card.gauge2 : 0.0f, RGB888[card.color2 % 7], now, rgb2);
+
+  drawTopBar(g, "", online, ageMs, bat);
+  drawRing(g, g_ringOuter, outer.shown, rgb1, has1, true);
+  drawRing(g, g_ringInner, inner.shown, rgb2, has2, true);
+
+  const ValueFont vf = fitFont(g, card.value, DUAL_VALUE_MAX_W, DUAL_VALUE_MAX_H);
+  drawIn(g, vf, card.value, RING_CX, DUAL_VALUE_CY, has1 ? INK : FAINT);
+  if (card.sub1[0]) drawCaps(g, card.sub1, RING_CX, DUAL_CAPTION_Y, DIM, top_center);
+
+  if (card.mail[0]) {
+    const uint16_t col = to565(RGB888[card.mailColor % 7]);
+    g->setFont(&V_B18.font);
+    const int run = 16 + 6 + g->textWidth(card.mail);
+    const int x0 = RING_CX - run / 2;
+    drawEnvelope(g, x0, MAIL_CY - 5, col);
+    g->setTextDatum(middle_left);
+    g->setTextColor(col, BG);
+    g->drawString(card.mail, x0 + 22, MAIL_CY);
+  }
+
+  if (card.nRows > 0) drawLegendRow(g, card.rows[0], ROW1_Y, rgb1);
+  if (card.nRows > 1) drawLegendRow(g, card.rows[1], ROW2_Y, rgb2);
 }
 
 // A text card: the original layout, still used by the optional spend deck,
@@ -665,14 +746,18 @@ void uiBegin(Display &lcd) {
 
   g_canvas.setColorDepth(16);
   g_sprite = g_canvas.createSprite(LCD_WIDTH, LCD_HEIGHT) != nullptr;
-  buildRingTable();
+  buildRingTable(g_ringOuter);
+  buildRingTable(g_ringInner);
   Serial.printf("[ui] framebuffer: %s\n", g_sprite ? "sprite (double buffered)" : "direct");
 }
 
 bool uiAnimating() { return g_animating; }
 
 void uiReplay(uint8_t index) {
-  if (index < MAX_CARDS) g_anim[index].seen = false;
+  if (index < MAX_CARDS) {
+    g_anim[index].seen = false;
+    g_anim2[index].seen = false;
+  }
 }
 
 void uiReplayPomodoro() { g_pomoAnim.seen = false; }
@@ -713,7 +798,9 @@ void uiRender(Display &lcd, const Payload &p, uint8_t index, bool online, uint32
     drawPomodoroCard(g, pomo, flash * ALERT_RING_MIX, online, ageMs, bat);
   } else {
     const Card &card = p.cards[i];
-    if (card.gauge >= GAUGE_BLANK) {
+    if (card.gauge >= GAUGE_BLANK && card.gauge2 >= GAUGE_BLANK) {
+      drawDualCard(g, card, g_anim[i], g_anim2[i], millis(), online, ageMs, bat);
+    } else if (card.gauge >= GAUGE_BLANK) {
       // VALUE_MAX_W is what fits between the ring's inner edges at the value's
       // height; the size is settled across the deck, not per card.
       const ValueFont valueFont = fitDeck(g, p, VALUE_MAX_W, VALUE_MAX_H);

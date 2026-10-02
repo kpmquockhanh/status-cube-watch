@@ -5,11 +5,12 @@
 // this file and reloading -- no reflash.
 //
 // The deck is deliberately short. The only numbers that actually change what
-// you do next are the two rate-limit windows, so those are the two cards. A
-// card carrying a `g` (a whole percentage) is drawn as a ring: `g` fills the
-// arc, `v` sits in the middle of it, `s1` captions `v`, and `s2` labels the
-// percentage in the gap at the bottom. A card without `g` keeps the old
-// big-number layout. The spend and token breakdowns are still computed below
+// you do next are the two rate-limit windows, so those share ONE card (usageCard
+// below) with the unread-mail count tucked into it. A card carrying a `g` (a
+// whole percentage) is drawn as a ring: `g` fills the arc, `v` sits in the
+// middle of it, `s1` captions `v`, and `s2` labels the percentage in the gap at
+// the bottom. A `g2` adds a second, inner ring (see usageCard). A card without
+// `g` keeps the old big-number layout. The spend and token breakdowns are still computed below
 // and are one config flag away (`extraCards`), but they are off by default.
 
 const money = (usd) => {
@@ -78,44 +79,54 @@ function topBy(events, key, metric = (e) => e.cost) {
   return [...m.entries()].sort((a, b) => b[1] - a[1]);
 }
 
-// One rate-limit window -> one ring. `window` is the {utilization, resets_at}
-// object straight off the usage endpoint; null means we could not read it, in
-// which case the device draws the empty track rather than a zeroed arc -- an
-// unfilled ring reads as a legible nothing, a missing ring reads as a bug.
-function limitCard(title, window, label, now, err) {
-  if (!window || typeof window.utilization !== 'number') {
-    return { t: title, v: '--', s1: 'no reading', s2: err ?? 'unavailable', c: 'ink', g: -1 };
-  }
+// Both rate-limit windows -> ONE card of two concentric rings: the outer ring
+// is the 5h session (`g`, `c`), the inner one the 7d week (`g2`, `c2`). The
+// middle of the dials shows how long until the session comes back, and `rows`
+// are the two legend lines under them. `five` / `seven` are the
+// {utilization, resets_at} objects straight off the usage endpoint; null means
+// we could not read it, in which case the device draws an empty track rather
+// than a zeroed arc -- an unfilled ring reads as a legible nothing, a missing
+// ring reads as a bug.
+const tone = (pct) => (pct >= 85 ? 'red' : pct >= 60 ? 'amber' : 'green');
+
+function windowView(window, now) {
+  if (!window || typeof window.utilization !== 'number') return null;
   const pct = Math.round(window.utilization);
   const resetsAt = Date.parse(window.resets_at ?? '');
+  const known = Number.isFinite(resetsAt);
   // A reset already in the past means the window lapsed and you are starting
   // clean, which is worth saying outright rather than counting down to zero.
-  const lapsed = Number.isFinite(resetsAt) && resetsAt <= now;
+  const lapsed = known && resetsAt <= now;
+  return { pct, known, lapsed, left: known ? (lapsed ? 'idle' : until(resetsAt - now)) : '--' };
+}
+
+// Unread inbox count, shown as a number beside an envelope in the gap of the
+// rings. `mail.error` with no earlier count means we have never had a reading,
+// so show "--" in red rather than a zero. Returns {} when mail is not set up.
+function mailBadge(mail) {
+  if (!mail) return {};
+  if (mail.unread == null) return { m: '--', mc: 'red' };
   return {
-    t: title,
-    // The arc is the percentage, so the middle of the ring gets the one thing
-    // an arc cannot show: how long until the window comes back.
-    v: !Number.isFinite(resetsAt) ? '--' : lapsed ? 'idle' : until(resetsAt - now),
-    s1: !Number.isFinite(resetsAt) ? '' : lapsed ? 'window reset' : 'until reset',
-    s2: label,
-    c: pct >= 85 ? 'red' : pct >= 60 ? 'amber' : 'green',
-    g: pct,
+    m: mail.unread.toLocaleString('en-US'),
+    mc: mail.stale ? 'red' : mail.unread === 0 ? 'green' : 'amber',
   };
 }
 
-// Unread inbox count as a big-number card. `mail.error` with no earlier count
-// means we have never had a reading, so say why instead of showing a zero.
-function mailCard(mail) {
-  if (mail.unread == null) {
-    return { t: 'MAIL', v: '--', s1: 'no reading', s2: String(mail.error ?? 'unavailable').slice(0, 39), c: 'red' };
-  }
-  const n = mail.unread;
+function usageCard(limits, mail, now) {
+  const five = windowView(limits?.five_hour, now);
+  const seven = windowView(limits?.seven_day, now);
+  const row = (k, w) => ({ k, p: w ? `${w.pct}%` : '--', r: w && w.known ? w.left : '' });
   return {
-    t: 'MAIL',
-    v: n.toLocaleString('en-US'),
-    s1: n === 1 ? 'unread email' : 'unread emails',
-    s2: mail.stale ? `stale: ${mail.error}`.slice(0, 39) : 'in inbox',
-    c: mail.stale ? 'red' : n === 0 ? 'green' : 'amber',
+    t: 'CLAUDE',
+    v: five ? five.left : '--',
+    s1: !five ? 'no data' : !five.known ? '' : five.lapsed ? 'reset' : 'to reset',
+    s2: !five && !seven ? String(limits?.error ?? 'unavailable').slice(0, 39) : '',
+    c: five ? tone(five.pct) : 'ink',
+    g: five ? five.pct : -1,
+    c2: seven ? tone(seven.pct) : 'ink',
+    g2: seven ? seven.pct : -1,
+    rows: [row('5H', five), row('7D', seven)],
+    ...mailBadge(mail),
   };
 }
 
@@ -124,12 +135,7 @@ export function buildPayload(events, opts = {}) {
           limits = null, mail = null, extraCards = false } = opts;
   const now = Date.now();
 
-  const cards = [
-    limitCard('SESSION', limits?.five_hour, 'of 5h limit', now, limits?.error),
-    limitCard('THIS WEEK', limits?.seven_day, 'of 7d limit', now, limits?.error),
-  ];
-
-  if (mail) cards.push(mailCard(mail));
+  const cards = [usageCard(limits, mail, now)];
 
   if (extraCards) cards.push(...spendCards(events, { source, hasRequestCounts, billed, now }));
 

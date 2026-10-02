@@ -96,6 +96,28 @@
   .device.nopct .read .pct { display: none; }
   .device.nonotch .notch { display: none; }
 
+  /* The combined usage card (a card with `g2`): a second, inner ring for the 7d
+     window, the session countdown in the middle, the unread-mail badge in the
+     gap of the rings and a legend line per window. Positions are the DUAL_* /
+     ROW* / MAIL_* numbers in drawDualCard in firmware/src/ui.cpp. */
+  .device:not(.dual) .ring2, .device:not(.dual) .mail, .device:not(.dual) .rows { display: none; }
+  .device.dual .read, .device.dual .name { display: none; }
+  .device.dual .mid { top: 106px; gap: 10px; }
+  .device.dual .mid .value { font-size: 24px; }
+  .mail {
+    position: absolute; top: 167px; left: 0; width: 240px; height: 18px;
+    display: flex; align-items: center; justify-content: center; gap: 6px;
+    font-size: 15px; font-weight: 700; font-variant-numeric: tabular-nums;
+  }
+  .mail:empty { display: none; }
+  .mail svg { width: 16px; height: 11px; fill: none; stroke: currentColor; stroke-width: 1; }
+  .rows { position: absolute; top: 203px; left: 34px; right: 34px; }
+  .rows .row { height: 22px; display: flex; align-items: center; }
+  .rows .sw { width: 7px; height: 7px; border-radius: 2px; margin-right: 6px; flex: none; }
+  .rows .k { width: 25px; font-size: 9px; font-weight: 500; letter-spacing: .16em; color: var(--dim); text-transform: uppercase; }
+  .rows .p { font-size: 15px; font-weight: 700; font-variant-numeric: tabular-nums; }
+  .rows .r { margin-left: auto; font-size: 9px; font-weight: 500; letter-spacing: .16em; color: var(--dim); text-transform: uppercase; }
+
   .dots { position: absolute; bottom: 12px; left: 0; width: 240px; display: flex; gap: 6px; justify-content: center; }
   .dots b { width: 5px; height: 5px; border-radius: 50%; background: var(--faint); }
   .dots b.on { background: var(--ink); }
@@ -120,11 +142,21 @@
               transform="rotate(135 120 128)"></circle>
       <line class="notch" x1="147.24" y1="74.54" x2="153.14" y2="62.96" stroke="#000" stroke-width="2"></line>
       <line class="notch" x1="179.82" y1="132.71" x2="192.77" y2="133.73" stroke="#000" stroke-width="2"></line>
+      <!-- inner ring of the combined usage card: r 47..55 (RING2_* in ui.cpp) -->
+      <circle class="ring2" cx="120" cy="128" r="51" fill="none" stroke="#2a3242" stroke-width="8"
+              pathLength="100" stroke-dasharray="75 100" transform="rotate(135 120 128)"></circle>
+      <circle class="arc ring2" id="arc2" cx="120" cy="128" r="51" fill="none" stroke-width="8"
+              pathLength="100" stroke-dasharray="75 100" stroke-dashoffset="75"
+              transform="rotate(135 120 128)"></circle>
+      <line class="notch ring2" x1="140.88" y1="87.01" x2="145.42" y2="78.10" stroke="#000" stroke-width="2"></line>
+      <line class="notch ring2" x1="165.86" y1="131.61" x2="175.83" y2="132.39" stroke="#000" stroke-width="2"></line>
     </svg>
     <div class="mid">
       <div class="value" id="v">--</div>
       <div class="cap" id="s1">waiting for bridge</div>
     </div>
+    <div class="mail" id="mail"></div>
+    <div class="rows" id="rows"></div>
     <div class="read"><span class="pct" id="pct"></span><span class="label" id="s2"></span></div>
     <div class="name" id="nm"></div>
     <div class="dots" id="dots"></div>
@@ -159,7 +191,9 @@ function paint() {
   const color = `var(${COLORS[card.c] || '--ink'})`;
   // A card with `g` is a ring; anything else keeps the big-number layout.
   const gauge = typeof card.g === 'number';
+  const dual = gauge && typeof card.g2 === 'number';
   device.classList.toggle('text', !gauge);
+  device.classList.toggle('dual', dual);
   device.classList.toggle('nopct', !!card.local);
   device.classList.toggle('nonotch', !!card.local);
 
@@ -179,6 +213,19 @@ function paint() {
     arc.style.stroke = color;
     pct.textContent = card.g < 0 ? '' : `${pctVal}%`;
     pct.style.color = color;
+  }
+
+  if (dual) {
+    const col2 = `var(${COLORS[card.c2] || '--ink'})`;
+    arc2.style.strokeDashoffset = card.g2 < 0 ? 75 : (75 * (1 - Math.min(100, card.g2) / 100)).toFixed(2);
+    arc2.style.stroke = col2;
+    const esc = (x) => String(x ?? '').replace(/[&<>]/g, (ch) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;' }[ch]));
+    mail.innerHTML = card.m
+      ? `<svg viewBox="0 0 16 11" aria-hidden="true"><rect x=".5" y=".5" width="15" height="10" rx="2"/><path d="M2.5 2.5 8 6.5l5.5-4"/></svg><span>${esc(card.m)}</span>`
+      : '';
+    mail.style.color = `var(${COLORS[card.mc] || '--ink'})`;
+    rows.innerHTML = (card.rows || []).map((r, i) =>
+      `<div class="row"><i class="sw" style="background:${i ? col2 : color}"></i><span class="k">${esc(r.k)}</span><span class="p">${esc(r.p)}</span><span class="r">${esc(r.r)}</span></div>`).join('');
   }
 
   dots.innerHTML = deck.map((_, i) => `<b class="${i === idx ? 'on' : ''}"></b>`).join('');

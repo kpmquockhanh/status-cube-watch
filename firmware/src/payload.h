@@ -16,6 +16,13 @@ constexpr int8_t GAUGE_BLANK = -1;  // no reading: draw the empty track only
 
 enum Accent : uint8_t { ACC_INK, ACC_ACCENT, ACC_BLUE, ACC_GREEN, ACC_AMBER, ACC_VIOLET, ACC_RED };
 
+// One legend line under a dual-ring card ("5H  14%  4h 09m"), pre-formatted.
+struct LegendRow {
+  char key[6];
+  char pct[8];
+  char reset[12];
+};
+
 struct Card {
   char title[24];
   char value[24];
@@ -23,6 +30,15 @@ struct Card {
   char sub2[40];
   uint8_t color;
   int8_t gauge;
+  // Dual-ring card (`g2` present): `gauge`/`color` are the outer ring, these
+  // the inner one. `gauge2` is GAUGE_NONE on every other card.
+  int8_t gauge2;
+  uint8_t color2;
+  uint8_t nRows;
+  LegendRow rows[2];
+  // Unread-mail badge in the gap of the rings; empty = no badge.
+  char mail[8];
+  uint8_t mailColor;
 };
 
 struct Payload {

@@ -35,6 +35,16 @@ public struct MenuModel: Equatable {
                 let g = (c["g"] as? NSNumber)?.intValue
                 let reading = g.flatMap { $0 >= 0 ? $0 : nil }
                 if !barSettled, g != nil { barPercent = reading; barSettled = true }
+                // The combined usage card carries both windows as `rows` and the unread
+                // count as `m`; list each on its own line instead of one "CLAUDE" row.
+                if let rows = c["rows"] as? [[String: Any]], !rows.isEmpty {
+                    for r in rows {
+                        cards.append(CardRow(title: "\(r["k"] as? String ?? "")  \(r["p"] as? String ?? "")",
+                                             detail: r["r"] as? String ?? ""))
+                    }
+                    if let m = c["m"] as? String, !m.isEmpty { cards.append(CardRow(title: "Unread mail", detail: m)) }
+                    continue
+                }
                 let detail = ["v", "s1", "s2"].compactMap { c[$0] as? String }.filter { !$0.isEmpty }
                     .joined(separator: " · ")
                 cards.append(CardRow(title: reading.map { "\(title)  \($0)%" } ?? title, detail: detail))

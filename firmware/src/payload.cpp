@@ -27,6 +27,21 @@ bool payloadFromJson(const JsonDocument &doc, Payload &out, char *err, size_t er
     card.color = accentFromName(c["c"] | "ink");
     const int g = c["g"] | (int)GAUGE_NONE;
     card.gauge = g > 100 ? 100 : (g < GAUGE_NONE ? GAUGE_NONE : (int8_t)g);
+
+    // Optional second ring, legend rows and mail badge (the combined usage
+    // card). A card without them is parsed exactly as before.
+    const int g2 = c["g2"] | (int)GAUGE_NONE;
+    card.gauge2 = g2 > 100 ? 100 : (g2 < GAUGE_NONE ? GAUGE_NONE : (int8_t)g2);
+    card.color2 = accentFromName(c["c2"] | "ink");
+    for (JsonObjectConst r : c["rows"].as<JsonArrayConst>()) {
+      if (card.nRows >= 2) break;
+      LegendRow &row = card.rows[card.nRows++];
+      strlcpy(row.key, r["k"] | "", sizeof(row.key));
+      strlcpy(row.pct, r["p"] | "", sizeof(row.pct));
+      strlcpy(row.reset, r["r"] | "", sizeof(row.reset));
+    }
+    strlcpy(card.mail, c["m"] | "", sizeof(card.mail));
+    card.mailColor = accentFromName(c["mc"] | "ink");
   }
   if (p.nCards == 0) {
     strlcpy(err, "no cards in payload", errLen);

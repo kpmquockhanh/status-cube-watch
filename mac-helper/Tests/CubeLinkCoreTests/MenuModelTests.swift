@@ -36,3 +36,17 @@ private func payload(_ g1: Int?, _ g2: Int? = 10) -> Data {
     #expect(m.barTitle == "–")
     #expect(m.cards[0].title == "Session")
 }
+
+@Test func usageCardListsBothWindowsAndMail() {
+    let json = """
+    {"v":1,"cards":[{"t":"CLAUDE","v":"4h 09m","s1":"to reset","s2":"","c":"green","g":14,"c2":"green","g2":53,
+      "rows":[{"k":"5H","p":"14%","r":"4h 09m"},{"k":"7D","p":"53%","r":"1d 1h"}],"m":"12","mc":"amber"}]}
+    """
+    let m = MenuModel.make(payload: Data(json.utf8), bridgeUp: true, link: .connected)
+    #expect(m.barTitle == "14%")  // the outer (5h) ring
+    #expect(m.cards == [
+        CardRow(title: "5H  14%", detail: "4h 09m"),
+        CardRow(title: "7D  53%", detail: "1d 1h"),
+        CardRow(title: "Unread mail", detail: "12"),
+    ])
+}

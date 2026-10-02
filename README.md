@@ -4,28 +4,31 @@ A desk display that shows how much of your Claude rate limits you have left.
 Runs on a **Waveshare ESP32-S3-Touch-LCD-1.69** (240x280 ST7789V2, CST816
 touch).
 
-Two swipeable cards — the five-hour session window and the seven-day window —
-and nothing else. Each one is a dial: the ring is the percentage, the middle
-of the ring holds the one thing a ring cannot show, and the exact number drops
-to a single line in the gap at the bottom.
+One card with both rate-limit windows — the five-hour session and the
+seven-day week — as two concentric rings: outer is the session, inner is the
+week. The middle holds the one thing a ring cannot show (time until the session
+resets), a legend line per window sits underneath with its exact percentage and
+reset time, and your unread-mail count rides in the gap of the rings next to an
+envelope.
 
 ```
 ┌─────────────────────┐
-│ SESSION          4s●│
+│ 78%    BLE      4s● │
 │      ╭───────╮      │
-│    ╭─╯       ╰─╮    │
-│   │   4h 09m    │   │
-│   │ UNTIL RESET │   │
-│    ╰─╮       ╭─╯    │
+│    ╭─╯ ╭───╮ ╰─╮    │
+│   │  │ 4h 09m │ │   │
+│   │  │TO RESET│ │   │
+│    ╰─╮╰─ ✉ 12 ─╯╭╯  │
 │      ╰──   ──╯      │
-│    14% OF 5H LIMIT  │
+│  ■ 5H  14%   4h 09m │
+│  ■ 7D  53%   1d 1h  │
 │        ● ○          │
 └─────────────────────┘
 ```
 
-Two notches are cut into the ring at 60% and 85%, where it turns amber and
-then red, so the arc reads against its own thresholds with no legend anywhere
-on screen.
+Two notches are cut into each ring at 60% and 85%, where it turns amber and
+then red, so the arcs read against their own thresholds with no legend of
+colours anywhere on screen.
 
 ## How it fits together
 
@@ -73,13 +76,13 @@ older big-number layout (see **Adding a card**).
 
 Set `"gmail": {"user": "you@gmail.com", "appPassword": "xxxx xxxx xxxx xxxx"}`
 in `bridge/config.json` (or `CUBE_GMAIL_USER` / `CUBE_GMAIL_PASSWORD`) and a
-`MAIL` card with your unread inbox count follows the two rings. The bridge
+number appears next to an envelope in the gap of the rings. The bridge
 reads it over IMAP (`STATUS INBOX (UNSEEN)`, at most once a minute), so the
 device never sees a credential. Create the app password at
 <https://myaccount.google.com/apppasswords> (needs 2-step verification; some
 Workspace admins disable them). If a fetch fails the last count stays on screen
-marked `stale: ...`; with no count yet the card says why. Leave the settings
-empty and there is no card.
+shown in red; with no count yet it reads `--`. Leave the settings empty and
+there is no mail badge.
 
 ## Two data sources
 
