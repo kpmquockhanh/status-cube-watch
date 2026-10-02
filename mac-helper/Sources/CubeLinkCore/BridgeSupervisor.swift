@@ -21,6 +21,10 @@ public final class BridgeSupervisor {
         return nil
     }
 
+    /// A child that stayed up this long counts as healthy, so the next crash restarts quickly again.
+    public static func shouldResetBackoff(uptime: TimeInterval) -> Bool { uptime >= 60 }
+
+    private var spawnedAt: Date?
     private let bridgeDir: URL
     private let port: Int
     private let node: String?
@@ -85,6 +89,7 @@ public final class BridgeSupervisor {
         do {
             try p.run()
             process = p
+            spawnedAt = Date()
             log("started bridge (pid \(p.processIdentifier)) in \(bridgeDir.path)")
         } catch {
             log("could not start bridge: \(error.localizedDescription)")
@@ -94,6 +99,8 @@ public final class BridgeSupervisor {
 
     private func exited(status: Int32) {
         process = nil
+        if let t = spawnedAt, Self.shouldResetBackoff(uptime: Date().timeIntervalSince(t)) { backoff.reset() }
+        spawnedAt = nil
         guard !stopping else { return }
         let delay = backoff.next()
         log("bridge exited (status \(status)); restarting in \(Int(delay)) s")

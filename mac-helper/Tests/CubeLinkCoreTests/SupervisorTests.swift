@@ -26,3 +26,8 @@ import Testing
     #expect(BridgeSupervisor.findNode(env: ["CUBE_NODE": "/missing/node"], exists: exists) == "/usr/local/bin/node")  // a bad override falls through
     #expect(BridgeSupervisor.findNode(env: [:], exists: { _ in false }) == nil)
 }
+
+@Test func backoffResetsOnlyAfterSixtySecondsUp() {
+    #expect(!BridgeSupervisor.shouldResetBackoff(uptime: 59))
+    #expect(BridgeSupervisor.shouldResetBackoff(uptime: 60))
+}
