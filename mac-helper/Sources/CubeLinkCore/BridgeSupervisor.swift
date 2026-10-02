@@ -52,16 +52,19 @@ public final class BridgeSupervisor {
 
     public func stop() {
         stopping = true
+        Trace.log("bridge", "stop requested")
         process?.terminate()
     }
 
     /// Restarts a bridge this app spawned (it comes back after the backoff); otherwise re-checks the port.
     public func restart() {
+        Trace.log("bridge", "restart requested (child: \(process != nil))")
         if let process { process.terminate() } else { start() }
     }
 
     private func act(externalUp: Bool) {
         guard !stopping else { return }
+        Trace.log("bridge", "health check on :\(port): \(externalUp ? "up" : "down"), node \(node ?? "none"), spawned child: \(process != nil)")
         switch Self.decide(externalBridgeUp: externalUp, node: node) {
         case .adopt:
             if process == nil {
@@ -88,6 +91,7 @@ public final class BridgeSupervisor {
         var env = ProcessInfo.processInfo.environment
         env["CUBE_PORT"] = String(port)
         p.environment = env
+        Trace.log("bridge", "spawn \(node) server.mjs cwd \(bridgeDir.path) CUBE_PORT=\(port)")
         p.terminationHandler = { [weak self] proc in
             DispatchQueue.main.async { self?.exited(status: proc.terminationStatus) }
         }
@@ -103,6 +107,7 @@ public final class BridgeSupervisor {
     }
 
     private func exited(status: Int32) {
+        Trace.log("bridge", "child exited, status \(status), uptime \(spawnedAt.map { Int(Date().timeIntervalSince($0)) } ?? -1) s")
         process = nil
         if let t = spawnedAt, Self.shouldResetBackoff(uptime: Date().timeIntervalSince(t)) { backoff.reset() }
         spawnedAt = nil

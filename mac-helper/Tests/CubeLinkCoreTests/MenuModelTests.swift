@@ -25,7 +25,7 @@ private func payload(_ g1: Int?, _ g2: Int? = 10) -> Data {
 @Test func rowsAndStatusLines() {
     let m = MenuModel.make(payload: payload(42), bridgeUp: false, link: .bluetoothOff)
     #expect(m.cards.count == 2)
-    #expect(m.cards[0] == CardRow(title: "Session  42%", detail: "2h 10m · left · used"))
+    #expect(m.cards[0] == CardRow(title: "Session  42%", detail: "2h 10m · left · used", label: "Session", value: "42%", fraction: 0.42))
     #expect(m.bridgeLine == "Bridge: down")
     #expect(m.cubeLine == "Cube: Bluetooth is off")
     #expect(!m.cubeConnected)
@@ -45,8 +45,8 @@ private func payload(_ g1: Int?, _ g2: Int? = 10) -> Data {
     let m = MenuModel.make(payload: Data(json.utf8), bridgeUp: true, link: .connected)
     #expect(m.barTitle == "14%")  // the outer (5h) ring
     #expect(m.cards == [
-        CardRow(title: "5H  14%", detail: "4h 09m"),
-        CardRow(title: "7D  53%", detail: "1d 1h"),
-        CardRow(title: "Unread mail", detail: "12"),
+        CardRow(title: "5H  14%", detail: "4h 09m", label: "5H", value: "14%", fraction: 0.14),
+        CardRow(title: "7D  53%", detail: "1d 1h", label: "7D", value: "53%", fraction: 0.53),
+        CardRow(title: "Unread mail", detail: "12", label: "Unread mail", value: "12"),
     ])
 }

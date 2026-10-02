@@ -16,7 +16,9 @@ public final class BridgeClient {
 
     /// `done(body, nil)` on success, `done(nil, reason)` otherwise. May be called on any queue.
     public func fetch(_ done: @escaping (Data?, String?) -> Void) {
+        let t0 = Date()
         session.dataTask(with: base.appendingPathComponent("api/status")) { data, resp, err in
+            Trace.log("http", "GET /api/status -> \((resp as? HTTPURLResponse)?.statusCode ?? -1), \(data?.count ?? 0) B, \(Int(Date().timeIntervalSince(t0) * 1000)) ms, error \(err?.localizedDescription ?? "none")")
             if let err { return done(nil, err.localizedDescription) }
             guard let http = resp as? HTTPURLResponse else { return done(nil, "no HTTP response") }
             guard http.statusCode == 200 else { return done(nil, "HTTP \(http.statusCode)") }

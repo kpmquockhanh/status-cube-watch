@@ -4,6 +4,15 @@ import Foundation
 
 setvbuf(stdout, nil, _IOLBF, 0)
 
+// Same file install.sh points the LaunchAgent's stderr at. When launched any other way
+// (Finder, `open`), stderr is not a file yet, so send it there too: the menu's "Show log" always has something to open.
+let logURL = FileManager.default.homeDirectoryForCurrentUser.appendingPathComponent("Library/Logs/claude-cube-link.log")
+var stderrStat = stat()
+if fstat(STDERR_FILENO, &stderrStat) != 0 || (stderrStat.st_mode & S_IFMT) != S_IFREG {
+    try? FileManager.default.createDirectory(at: logURL.deletingLastPathComponent(), withIntermediateDirectories: true)
+    freopen(logURL.path, "a", stderr)
+}
+
 func log(_ s: String) {
     let f = ISO8601DateFormatter()
     FileHandle.standardError.write(Data("\(f.string(from: Date())) \(s)\n".utf8))
@@ -28,6 +37,7 @@ guard acquireSingleInstanceLock() else {
 }
 
 let env = ProcessInfo.processInfo.environment
+Trace.configure(env: env, args: CommandLine.arguments)
 var port = Int(env["CUBE_PORT"] ?? "") ?? 8787
 let argv = CommandLine.arguments
 if let i = argv.firstIndex(of: "--port"), i + 1 < argv.count, let p = Int(argv[i + 1]) { port = p }
@@ -54,6 +64,7 @@ func refreshMenu() {
 func tick(force: Bool) {
     client.fetch { body, why in
         DispatchQueue.main.async {
+            Trace.log("tick", "force \(force), body \(body?.count ?? 0) B, link ready \(link.isReady), link state \(link.state)")
             if body == nil, let why, why != lastBridgeError {
                 lastBridgeError = why
                 log("bridge: \(why)")
@@ -64,21 +75,27 @@ func tick(force: Bool) {
             refreshMenu()
             guard link.isReady else { return }
             let now = Date()
-            if let body, policy.shouldSend(body: body, now: now, force: force) {
-                link.send(body)
-                policy.didSend(body: body, at: now)
+            if let body {
+                let send = policy.shouldSend(body: body, now: now, force: force)
+                Trace.log("tick", "push policy: \(send ? "send" : "skip")")
+                if send {
+                    link.send(body)
+                    policy.didSend(body: body, at: now)
+                }
             }
         }
     }
 }
 
 link.onSendNow = { tick(force: true) }
-link.onStateChange = { _ in refreshMenu() }
+link.onStateChange = { Trace.log("link", "state -> \($0)"); refreshMenu() }
 statusMenu.onSendNow = { tick(force: true) }
 statusMenu.onRestartBridge = { supervisor.restart() }
+statusMenu.logURL = logURL
 supervisor.start()
 Timer.scheduledTimer(withTimeInterval: 5, repeats: true) { _ in tick(force: false) }
 log("Claude Cube Link started (bridge :\(port), dir \(bridgeDir.path))")
+Trace.log("main", "tracing on; node \(node ?? "not found")")
 
 var signalSources: [DispatchSourceSignal] = []
 for sig in [SIGTERM, SIGINT] {

@@ -197,6 +197,9 @@ cd mac-helper
 The app reads `CUBE_PORT` (default 8787), `CUBE_BRIDGE_DIR` and `CUBE_NODE` (path to `node`) from
 the environment, and takes `--port N` on its command line; `install.sh` writes them into the
 LaunchAgent, which restarts the app only after a crash (`KeepAlive` with `SuccessfulExit=false`).
+For verbose diagnostics (BLE state changes, frames and ACKs, bridge health checks and child exits,
+HTTP timings, push decisions) set `CUBE_TRACE=1` or pass `--trace`; lines tagged `[trace:...]`
+go to stderr, i.e. `./install.sh logs`.
 
 While a Mac is paired and data arrives over Bluetooth (a payload every 5 s) the cube turns WiFi off
 (with no paired Mac, or with `WIFI_ALWAYS_ON 1`, WiFi stays on even when Bluetooth is live). If

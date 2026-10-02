@@ -44,7 +44,10 @@ public final class CubeLink: NSObject, CBCentralManagerDelegate, CBPeripheralDel
 
     /// Writes `payload` to the cube. A no-op until the link is ready.
     public func send(_ payload: Data) {
-        guard isReady, let p = peripheral, let payloadChar else { return }
+        guard isReady, let p = peripheral, let payloadChar else {
+            Trace.log("ble", "send skipped: link not ready (\(payload.count) B)")
+            return
+        }
         lastPayload = payload
         retried = false
         write(payload, to: p, char: payloadChar)
@@ -55,6 +58,7 @@ public final class CubeLink: NSObject, CBCentralManagerDelegate, CBPeripheralDel
         do {
             let frames = try encodeFrames(payload: payload, seq: seq,
                                           maxWrite: p.maximumWriteValueLength(for: .withResponse))
+            Trace.log("ble", "send seq \(seq): \(payload.count) B in \(frames.count) frame(s), maxWrite \(p.maximumWriteValueLength(for: .withResponse))")
             for f in frames { p.writeValue(f, for: char, type: .withResponse) }
             awaitingAck = seq
             ackTimeout?.cancel()
@@ -69,6 +73,7 @@ public final class CubeLink: NSObject, CBCentralManagerDelegate, CBPeripheralDel
     private func ackTimedOut() {
         guard awaitingAck != nil, let p = peripheral, let c = payloadChar, let payload = lastPayload else { return }
         awaitingAck = nil
+        Trace.log("ble", "ACK timeout (retried: \(retried))")
         if !retried {
             retried = true
             log("no ACK, retrying once")
@@ -81,6 +86,7 @@ public final class CubeLink: NSObject, CBCentralManagerDelegate, CBPeripheralDel
     // MARK: connecting
 
     public func centralManagerDidUpdateState(_ c: CBCentralManager) {
+        Trace.log("ble", "central state \(c.state.rawValue)")
         switch c.state {
         case .poweredOn:
             log("Bluetooth on")
@@ -112,6 +118,7 @@ public final class CubeLink: NSObject, CBCentralManagerDelegate, CBPeripheralDel
 
     public func centralManager(_ c: CBCentralManager, didDiscover p: CBPeripheral,
                                advertisementData: [String: Any], rssi: NSNumber) {
+        Trace.log("ble", "discovered \(p.identifier) rssi \(rssi) adv \(advertisementData.keys.sorted())")
         log("found \(p.name ?? "a cube")")
         c.stopScan()
         peripheral = p
@@ -119,6 +126,7 @@ public final class CubeLink: NSObject, CBCentralManagerDelegate, CBPeripheralDel
     }
 
     public func centralManager(_ c: CBCentralManager, didConnect p: CBPeripheral) {
+        Trace.log("ble", "didConnect \(p.identifier)")
         log("connected")
         state = .connecting
         p.delegate = self
@@ -139,6 +147,7 @@ public final class CubeLink: NSObject, CBCentralManagerDelegate, CBPeripheralDel
 
     private func reconnectLater() {
         let delay = backoff.next()
+        Trace.log("ble", "reconnect in \(delay) s")
         DispatchQueue.main.asyncAfter(deadline: .now() + delay) { [weak self] in self?.connect() }
     }
 
@@ -188,6 +197,7 @@ public final class CubeLink: NSObject, CBCentralManagerDelegate, CBPeripheralDel
                 return
             }
             let b = [UInt8](ch.value ?? Data())
+            Trace.log("ble", "Info read: \(b)")
             guard b.first == CubeProtocol.version else {
                 log("cube speaks protocol \(b.first.map(String.init) ?? "?"), this app speaks \(CubeProtocol.version); update one of them")
                 setupFailed(p)
@@ -196,6 +206,7 @@ public final class CubeLink: NSObject, CBCentralManagerDelegate, CBPeripheralDel
             UserDefaults.standard.set(p.identifier.uuidString, forKey: idKey)
             if let c = controlChar { p.setNotifyValue(true, for: c) }
         } else if ch.uuid == controlID, let value = ch.value, let msg = ControlMessage.parse(value) {
+            Trace.log("ble", "control: \(msg)")
             switch msg {
             case .sendNow:
                 onSendNow?()
@@ -222,6 +233,7 @@ public final class CubeLink: NSObject, CBCentralManagerDelegate, CBPeripheralDel
     }
 
     public func peripheral(_ p: CBPeripheral, didWriteValueFor ch: CBCharacteristic, error: Error?) {
+        Trace.log("ble", "didWrite \(ch.uuid) error: \(error?.localizedDescription ?? "none")")
         if let error { explain(error) }
     }
 
@@ -235,6 +247,7 @@ public final class CubeLink: NSObject, CBCentralManagerDelegate, CBPeripheralDel
     }
 
     private func setReady(_ ready: Bool) {
+        if ready != isReady { Trace.log("ble", "ready -> \(ready)") }
         isReady = ready
         if ready { state = .connected }
         else if state == .connected { state = .searching }
@@ -250,6 +263,7 @@ public final class CubeLink: NSObject, CBCentralManagerDelegate, CBPeripheralDel
     /// Turns the Bluetooth errors a user can act on into a sentence.
     private func explain(_ error: Error?) {
         guard let error else { return }
+        Trace.log("ble", "error: \(error) (\((error as NSError).domain) \((error as NSError).code))")
         if let e = error as? CBError, e.code == .encryptionTimedOut {
             log("pairing timed out or was cancelled; retrying the link")
         } else if let e = error as? CBError, e.code == .peerRemovedPairingInformation {
