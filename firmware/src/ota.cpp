@@ -14,10 +14,11 @@ int g_lastPct = -1;
 void otaBegin(Display &lcd) {
   g_lcd = &lcd;
 
-  // OTA invitations are single UDP packets. With modem sleep on, the radio
-  // misses roughly half of them and uploads time out. This is a USB-powered
-  // desk device, so stay awake.
-  WiFi.setSleep(false);
+  // Do NOT call WiFi.setSleep(false) here: BLE is always initialised, and the
+  // ESP32 coexistence layer aborts ("Should enable WiFi modem sleep when both
+  // WiFi and Bluetooth are enabled") if WiFi power-save is NONE while BT is on.
+  // net.cpp keeps modem sleep on (WIFI_PS_MIN_MODEM); OTA runs under it and may
+  // need a retry if an invitation packet is missed.
 
   ArduinoOTA.setHostname("claude-cube");
   const char *pass = settings().otaPass;

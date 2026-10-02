@@ -216,7 +216,7 @@ The cube shows a setup screen when it cannot join the stored network within ~20 
 
 ### Updating over WiFi (OTA)
 
-After the first USB flash the cube is reachable as `claude-cube.local`. In `firmware/platformio.ini` uncomment `upload_protocol = espota`, `upload_port = claude-cube.local` and (if you set an OTA password) `upload_flags = --auth=...`, then run `pio run -t upload` as usual. The screen shows a progress bar. Without an OTA password anyone on your network can flash the cube; set one in the portal.
+After the first USB flash the cube is reachable as `claude-cube.local`. In `firmware/platformio.ini` uncomment `upload_protocol = espota`, `upload_port = claude-cube.local` and (if you set an OTA password) `upload_flags = --auth=...`, then run `pio run -t upload` as usual. The screen shows a progress bar. OTA runs under WiFi modem sleep (Bluetooth is always on, and the ESP32 does not allow WiFi power-save off alongside it), so an upload may occasionally time out: just retry. Without an OTA password anyone on your network can flash the cube; set one in the portal.
 
 ### Pomodoro card
 

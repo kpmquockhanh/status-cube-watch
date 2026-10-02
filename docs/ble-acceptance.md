@@ -37,7 +37,7 @@ Tick an item only when you observed it. Logs: `./install.sh logs` (Mac, from `ma
 
 ## Radio and power
 
-- [ ] OTA with `WIFI_ALWAYS_ON 1` works. With 0 and BLE live, confirm whether OTA is unreachable (WiFi is off) and note it in the README.
+- [ ] OTA with `WIFI_ALWAYS_ON 1` works. OTA runs under WiFi modem sleep (BLE forbids power-save NONE), so it may be slightly less reliable: retry espota if it times out. On the first hardware boot, watch serial for the coexistence abort message ("Should enable WiFi modem sleep when both WiFi and Bluetooth are enabled"); it must not appear. With 0 and BLE live, confirm whether OTA is unreachable (WiFi is off) and note it in the README.
 - [ ] Free heap with BLE and WiFi both up: log `ESP.getFreeHeap()` once from `loop()` temporarily, note the number, remove the line.
 - [ ] Idle draw, BLE-only versus WiFi-only (USB meter readings, if available).
 
