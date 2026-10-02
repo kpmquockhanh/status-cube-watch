@@ -23,7 +23,7 @@ LDFLAGS  := $(shell pkg-config --libs sdl2) -lpthread
 # The firmware sources under test, plus the desktop stand-ins for the two
 # layers that touch hardware (WiFi and I2C).
 SRCS := ../src/main.cpp ../src/ui.cpp ../src/payload.cpp ../src/gesture.cpp ../src/pomodoro.cpp ../src/pomo_editor.cpp ../src/dev_editor.cpp ../src/settings_json.cpp \
-        net_sim.cpp touch_sim.cpp settings_sim.cpp portal_sim.cpp ota_sim.cpp battery_sim.cpp ble_sim.cpp sdl_main.cpp
+        net_sim.cpp touch_sim.cpp settings_sim.cpp portal_sim.cpp ota_sim.cpp battery_sim.cpp ble_sim.cpp imu_sim.cpp sdl_main.cpp
 
 # The headless frame grab shares ui.cpp and payload.cpp but brings its own
 # entry point, and needs no network or touch.
@@ -84,7 +84,7 @@ shot: $(SHOT)
 TESTS := build/portal_util_test build/pomodoro_test build/gesture_test build/deck_test \
          build/pomo_settings_test build/pomo_editor_test build/battery_util_test \
          build/ble_frame_test build/transport_policy_test build/idle_sleep_test build/device_settings_test \
-         build/settings_json_test build/dev_editor_test
+         build/settings_json_test build/dev_editor_test build/orientation_test build/touch_map_test
 
 build/pomodoro_test: ../src/pomodoro.cpp
 build/gesture_test: ../src/gesture.cpp
