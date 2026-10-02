@@ -10,7 +10,7 @@ import Testing
     let r1 = p.shouldSend(body: a, now: t0, force: false)
     #expect(r1)
     p.didSend(body: a, at: t0)
-    let r2 = p.shouldSend(body: a, now: t0.addingTimeInterval(4.9), force: false)
+    let r2 = p.shouldSend(body: a, now: t0.addingTimeInterval(4.0), force: false)
     #expect(!r2)   // unchanged, no heartbeat yet
     let r3 = p.shouldSend(body: a, now: t0.addingTimeInterval(5), force: false)
     #expect(r3)      // heartbeat
@@ -51,4 +51,15 @@ import Testing
     b.reset()
     let r12 = b.next()
     #expect(r12 == 1)
+}
+
+@Test func heartbeatToleratesTimerJitter() {
+    var p = PushPolicy(heartbeat: 5)
+    let t0 = Date(timeIntervalSince1970: 1000)
+    let a = Data("a".utf8)
+    p.didSend(body: a, at: t0)
+    let early = p.shouldSend(body: a, now: t0.addingTimeInterval(4.7), force: false)
+    #expect(early)    // a 5 s tick landing 0.3 s early must not slip to the next tick
+    let tooSoon = p.shouldSend(body: a, now: t0.addingTimeInterval(2), force: false)
+    #expect(!tooSoon)
 }
