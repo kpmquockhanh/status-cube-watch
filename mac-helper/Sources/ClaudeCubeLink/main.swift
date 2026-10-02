@@ -87,6 +87,15 @@ func tick(force: Bool) {
     }
 }
 
+let settingsWindow = SettingsWindow()
+settingsWindow.onApply = { link.writeSettings($0) }
+link.onSettings = { settingsWindow.render($0) }
+link.onSettingsResult = { settingsWindow.showResult($0) }
+statusMenu.onShowSettings = {
+    link.refreshSettings()  // the cube may have been edited on its own screen since
+    settingsWindow.show()
+}
+
 link.onSendNow = { tick(force: true) }
 link.onStateChange = { Trace.log("link", "state -> \($0)"); refreshMenu() }
 statusMenu.onSendNow = { tick(force: true) }

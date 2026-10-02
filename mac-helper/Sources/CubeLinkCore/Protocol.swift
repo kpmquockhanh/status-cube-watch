@@ -12,6 +12,8 @@ public enum CubeProtocol {
     public static let payloadUUID = "6E6D3C10-5D1A-4C1E-9F0B-7C4A2B8E1A02"
     public static let controlUUID = "6E6D3C10-5D1A-4C1E-9F0B-7C4A2B8E1A03"
     public static let infoUUID = "6E6D3C10-5D1A-4C1E-9F0B-7C4A2B8E1A04"
+    public static let settingsUUID = "6E6D3C10-5D1A-4C1E-9F0B-7C4A2B8E1A05"
+    public static let maxSettings = 512  // one ATT value
 }
 
 public enum FrameError: Error, Equatable {
@@ -46,6 +48,7 @@ public func encodeFrames(payload: Data, seq: UInt8, maxWrite: Int) throws -> [Da
 public enum ControlMessage: Equatable {
     case sendNow
     case ack(seq: UInt8)
+    case settings(SettingsResult)
 
     public static func parse(_ d: Data) -> ControlMessage? {
         let b = [UInt8](d)
@@ -53,9 +56,19 @@ public enum ControlMessage: Equatable {
         switch first {
         case 0x01: return .sendNow
         case 0x02: return b.count >= 2 ? .ack(seq: b[1]) : nil
+        case 0x03:
+            guard b.count >= 2, let r = SettingsResult(rawValue: b[1]) else { return nil }
+            return .settings(r)
         default: return nil
         }
     }
+}
+
+/// The cube's reply to a Settings write: Control `03 <result>`.
+public enum SettingsResult: UInt8, Equatable {
+    case ok = 0
+    case invalid = 1
+    case okReboot = 2  // applied; the network settings changed, so the cube is rebooting
 }
 
 /// Reconnect delays: 1 s, doubling, capped at 30 s.

@@ -5,6 +5,7 @@ import CubeLinkCore
 final class StatusMenu: NSObject {
     var onSendNow: () -> Void = {}
     var onRestartBridge: () -> Void = {}
+    var onShowSettings: () -> Void = {}
     var logURL: URL?
 
     private let item = NSStatusBar.system.statusItem(withLength: NSStatusItem.variableLength)
@@ -45,6 +46,7 @@ final class StatusMenu: NSObject {
         menu.addItem(.separator())
         menu.addItem(action("Send now", #selector(sendNow), key: "s"))
         menu.addItem(action("Restart bridge", #selector(restartBridge), key: "r"))
+        menu.addItem(action("Cube settings…", #selector(showSettings), key: ","))
         menu.addItem(.separator())
         menu.addItem(action("Show log", #selector(showLog), key: "l"))
         let trace = action("Verbose trace", #selector(toggleTrace), key: "")
@@ -68,6 +70,7 @@ final class StatusMenu: NSObject {
 
     @objc private func sendNow() { onSendNow() }
     @objc private func restartBridge() { onRestartBridge() }
+    @objc private func showSettings() { onShowSettings() }
     @objc private func showLog() {
         guard let url = logURL else { return }
         if !FileManager.default.fileExists(atPath: url.path) {

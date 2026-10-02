@@ -9,6 +9,12 @@ import Foundation
 /// ready. The cube sends "send now" on subscribe and an ACK per payload.
 public final class CubeLink: NSObject, CBCentralManagerDelegate, CBPeripheralDelegate {
     public var onSendNow: (() -> Void)?
+    /// The cube's settings, read once the link is ready and again after every write. Nil while
+    /// disconnected, or when the cube's firmware predates the Settings characteristic.
+    public private(set) var cubeSettings: CubeSettings?
+    public var onSettings: ((CubeSettings?) -> Void)?
+    /// The cube's verdict on a settings write.
+    public var onSettingsResult: ((SettingsResult) -> Void)?
     public private(set) var isReady = false
     public private(set) var state: LinkState = .searching {
         didSet { if state != oldValue { onStateChange?(state) } }
@@ -21,6 +27,7 @@ public final class CubeLink: NSObject, CBCentralManagerDelegate, CBPeripheralDel
     private var payloadChar: CBCharacteristic?
     private var controlChar: CBCharacteristic?
     private var infoChar: CBCharacteristic?
+    private var settingsChar: CBCharacteristic?
     private var backoff = Backoff()
     private var seq: UInt8 = 0
     private var awaitingAck: UInt8?
@@ -32,6 +39,7 @@ public final class CubeLink: NSObject, CBCentralManagerDelegate, CBPeripheralDel
     private let payloadID = CBUUID(string: CubeProtocol.payloadUUID)
     private let controlID = CBUUID(string: CubeProtocol.controlUUID)
     private let infoID = CBUUID(string: CubeProtocol.infoUUID)
+    private let settingsID = CBUUID(string: CubeProtocol.settingsUUID)
     private let idKey = "cubeIdentifier"
 
     public init(log: @escaping (String) -> Void) {
@@ -51,6 +59,25 @@ public final class CubeLink: NSObject, CBCentralManagerDelegate, CBPeripheralDel
         lastPayload = payload
         retried = false
         write(payload, to: p, char: payloadChar)
+    }
+
+    /// Writes a settings patch (see `CubeSettings.patch`). The cube answers on Control, then
+    /// the new values are read back. False when there is nothing to write to.
+    @discardableResult
+    public func writeSettings(_ patch: Data) -> Bool {
+        guard isReady, let p = peripheral, let ch = settingsChar, patch.count <= CubeProtocol.maxSettings else {
+            Trace.log("ble", "settings write skipped (ready \(isReady), char \(settingsChar != nil), \(patch.count) B)")
+            return false
+        }
+        Trace.log("ble", "settings write: \(String(decoding: patch, as: UTF8.self))")
+        p.writeValue(patch, for: ch, type: .withResponse)
+        return true
+    }
+
+    /// Asks the cube for its current settings again.
+    public func refreshSettings() {
+        guard isReady, let p = peripheral, let ch = settingsChar else { return }
+        p.readValue(for: ch)
     }
 
     private func write(_ payload: Data, to p: CBPeripheral, char: CBCharacteristic) {
@@ -164,7 +191,7 @@ public final class CubeLink: NSObject, CBCentralManagerDelegate, CBPeripheralDel
             setupFailed(p)
             return
         }
-        p.discoverCharacteristics([payloadID, controlID, infoID], for: svc)
+        p.discoverCharacteristics([payloadID, controlID, infoID, settingsID], for: svc)
     }
 
     public func peripheral(_ p: CBPeripheral, didDiscoverCharacteristicsFor s: CBService, error: Error?) {
@@ -177,12 +204,15 @@ public final class CubeLink: NSObject, CBCentralManagerDelegate, CBPeripheralDel
             if ch.uuid == payloadID { payloadChar = ch }
             else if ch.uuid == controlID { controlChar = ch }
             else if ch.uuid == infoID { infoChar = ch }
+            else if ch.uuid == settingsID { settingsChar = ch }  // optional: older firmware has none
         }
         guard let info = infoChar, controlChar != nil, payloadChar != nil else {
             log("cube is missing a characteristic")
             setupFailed(p)
             return
         }
+        log("cube characteristics: \((s.characteristics ?? []).map { String($0.uuid.uuidString.suffix(2)) }.joined(separator: ","))"
+            + (settingsChar == nil ? " (no Settings characteristic)" : ""))
         log("reading Info; if this is a new cube, macOS now asks for the code shown on its screen")
         p.readValue(for: info)
     }
@@ -198,6 +228,10 @@ public final class CubeLink: NSObject, CBCentralManagerDelegate, CBPeripheralDel
             }
             let b = [UInt8](ch.value ?? Data())
             Trace.log("ble", "Info read: \(b)")
+            if b.count >= 2, b[1] >= 2, settingsChar == nil {
+                log("cube firmware has Settings (rev \(b[1])) but macOS did not list the characteristic: "
+                    + "it is serving a cached copy of the old GATT table")
+            }
             guard b.first == CubeProtocol.version else {
                 log("cube speaks protocol \(b.first.map(String.init) ?? "?"), this app speaks \(CubeProtocol.version); update one of them")
                 setupFailed(p)
@@ -205,11 +239,22 @@ public final class CubeLink: NSObject, CBCentralManagerDelegate, CBPeripheralDel
             }
             UserDefaults.standard.set(p.identifier.uuidString, forKey: idKey)
             if let c = controlChar { p.setNotifyValue(true, for: c) }
+        } else if ch.uuid == settingsID {
+            if let error {
+                Trace.log("ble", "settings read failed: \(error.localizedDescription)")
+            } else if let value = ch.value {
+                cubeSettings = CubeSettings.parse(value)
+                Trace.log("ble", "settings read: \(cubeSettings != nil ? "ok" : "unparseable")")
+                onSettings?(cubeSettings)
+            }
         } else if ch.uuid == controlID, let value = ch.value, let msg = ControlMessage.parse(value) {
             Trace.log("ble", "control: \(msg)")
             switch msg {
             case .sendNow:
                 onSendNow?()
+            case .settings(let r):
+                onSettingsResult?(r)
+                if r != .okReboot { refreshSettings() }
             case .ack(let s):
                 if awaitingAck == s {
                     awaitingAck = nil
@@ -229,6 +274,7 @@ public final class CubeLink: NSObject, CBCentralManagerDelegate, CBPeripheralDel
             log("ready")
             backoff.reset()
             setReady(true)
+            refreshSettings()
         }
     }
 
@@ -255,6 +301,11 @@ public final class CubeLink: NSObject, CBCentralManagerDelegate, CBPeripheralDel
             payloadChar = nil
             controlChar = nil
             infoChar = nil
+            settingsChar = nil
+            if cubeSettings != nil {
+                cubeSettings = nil
+                onSettings?(nil)
+            }
             awaitingAck = nil
             ackTimeout?.cancel()
         }

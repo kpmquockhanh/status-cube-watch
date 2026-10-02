@@ -72,6 +72,10 @@ func loadFixture() throws -> [FixtureCase] {
     #expect(ControlMessage.parse(Data([0x01])) == .sendNow)
     #expect(ControlMessage.parse(Data([0x02, 9])) == .ack(seq: 9))
     #expect(ControlMessage.parse(Data([0x02])) == nil)   // ack without a seq
+    #expect(ControlMessage.parse(Data([0x03, 0])) == .settings(.ok))
+    #expect(ControlMessage.parse(Data([0x03, 2])) == .settings(.okReboot))
+    #expect(ControlMessage.parse(Data([0x03, 9])) == nil)   // unknown result
+    #expect(ControlMessage.parse(Data([0x03])) == nil)
     #expect(ControlMessage.parse(Data([0x7f])) == nil)
     #expect(ControlMessage.parse(Data()) == nil)
 }
