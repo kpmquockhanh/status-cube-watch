@@ -138,11 +138,29 @@ void handleNotFound() {
   uiPortal(lcd, ap);
 
   uint32_t lastActive = millis();
+  bool showingPair = false;
   for (;;) {
     dns.processNextRequest();
     server.handleClient();
-    if (WiFi.softAPgetStationNum() > 0) lastActive = millis();
-    if (autoRetry && millis() - lastActive > IDLE_RETRY_MS) {
+    // An unpaired cube whose WiFi is unreachable lands here, and it must still
+    // be pairable over Bluetooth: show the code, hold off the reboot, and
+    // restart into the normal boot flow once the Mac is bonded.
+    const BleState bs = bleState();
+    if (bs == BleState::Pairing) {
+      uiBlePair(lcd, blePasskey());
+      showingPair = true;
+    } else if (showingPair) {
+      uiPortal(lcd, ap);
+      showingPair = false;
+    }
+    if (bleBonded()) {
+      Serial.println("[portal] Mac paired over Bluetooth -- rebooting");
+      delay(500);
+      ESP.restart();
+    }
+    const bool bleBusy = bs == BleState::Pairing || bs == BleState::Connected;
+    if (WiFi.softAPgetStationNum() > 0 || bleBusy) lastActive = millis();
+    if (portalIdleRebootDue(autoRetry, bleBusy, millis() - lastActive, IDLE_RETRY_MS)) {
       Serial.println("[portal] nobody joined -- rebooting to retry the saved network");
       ESP.restart();
     }

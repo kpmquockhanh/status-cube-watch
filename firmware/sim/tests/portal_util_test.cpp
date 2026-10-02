@@ -65,9 +65,17 @@ void testKeepIfBlank() {
   CHECK(portalKeepIfBlank("", "") == "");
 }
 
+void testIdleReboot() {
+  CHECK(portalIdleRebootDue(true, false, 60001, 60000));
+  CHECK(!portalIdleRebootDue(true, false, 60000, 60000));
+  CHECK(!portalIdleRebootDue(true, true, 600000, 60000));  // pairing or connected
+  CHECK(!portalIdleRebootDue(false, false, 600000, 60000));
+}
+
 }  // namespace
 
 int main() {
+  testIdleReboot();
   testSsid();
   testBridgeUrl();
   testEscape();

@@ -3,6 +3,12 @@
 // tests in sim/tests can build this with a plain compiler.
 #include <string>
 
+// The portal's 60 s "nobody joined, reboot and retry WiFi" countdown must not
+// cut a Bluetooth pairing short or drop a live Mac link.
+inline bool portalIdleRebootDue(bool autoRetry, bool bleBusy, unsigned long idleMs, unsigned long limitMs) {
+  return autoRetry && !bleBusy && idleMs > limitMs;
+}
+
 // SSIDs are 1..32 bytes. WPA passphrases are 8..63, but an open network has
 // none, so the password is only length-checked where it is stored.
 inline bool portalValidSsid(const std::string &s) { return !s.empty() && s.size() <= 32; }
