@@ -53,3 +53,4 @@ Tick an item only when you observed it. Logs: `./install.sh logs` (Mac, from `ma
 - [ ] Unticking "Pomodoro notifications" in the menu silences it; the cube alert still happens.
 - [ ] Mac asleep or out of range when the phase ends: nothing is queued and nothing crashes on either side.
 - [ ] With notifications switched off for Claude Cube Link in System Settings, the menu item reads "(off in System Settings)" and is greyed out.
+- [ ] Dismiss the first permission prompt without answering: the item stays enabled with no hint, and opening the menu asks again.

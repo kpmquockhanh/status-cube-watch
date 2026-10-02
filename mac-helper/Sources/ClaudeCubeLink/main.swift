@@ -98,8 +98,8 @@ statusMenu.onShowSettings = {
 
 link.onSendNow = { tick(force: true) }
 let notifier = Notifier()
-notifier.onAuthorizationChange = { statusMenu.notificationsAllowed = $0 }
-statusMenu.onMenuWillOpen = { notifier.refreshAuthorization() }
+notifier.onAuthorizationChange = { statusMenu.authorization = $0 }
+statusMenu.onMenuWillOpen = { notifier.refreshAuthorization(askIfUnanswered: true) }
 link.onPomodoroEnded = { ended, next in
     guard statusMenu.prefs.enabled else {
         Trace.log("main", "pomodoro notice muted")

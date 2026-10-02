@@ -5,8 +5,8 @@ import UserNotifications
 /// Posts the Pomodoro banner. Needs the app bundle: `UNUserNotificationCenter.current()`
 /// traps in an unbundled `swift run` binary, so every call is a no-op without one.
 final class Notifier: NSObject, UNUserNotificationCenterDelegate {
-    /// True when the user allows notifications; called on the main queue.
-    var onAuthorizationChange: (Bool) -> Void = { _ in }
+    /// Called on the main queue.
+    var onAuthorizationChange: (NoticeAuthorization) -> Void = { _ in }
 
     private var center: UNUserNotificationCenter? {
         Bundle.main.bundleIdentifier == nil ? nil : UNUserNotificationCenter.current()
@@ -24,11 +24,19 @@ final class Notifier: NSObject, UNUserNotificationCenterDelegate {
         }
     }
 
-    func refreshAuthorization() {
+    /// `askIfUnanswered`: re-show the system prompt when the user dismissed it without answering.
+    /// Only the menu-open path sets it, so the request callback below cannot loop.
+    func refreshAuthorization(askIfUnanswered: Bool = false) {
         guard let center else { return }
         center.getNotificationSettings { [weak self] s in
-            let ok = s.authorizationStatus == .authorized || s.authorizationStatus == .provisional
-            DispatchQueue.main.async { self?.onAuthorizationChange(ok) }
+            let auth: NoticeAuthorization
+            switch s.authorizationStatus {
+            case .authorized, .provisional: auth = .allowed
+            case .denied: auth = .denied
+            default: auth = .unknown
+            }
+            if auth == .unknown, askIfUnanswered { self?.start() }
+            DispatchQueue.main.async { self?.onAuthorizationChange(auth) }
         }
     }
 

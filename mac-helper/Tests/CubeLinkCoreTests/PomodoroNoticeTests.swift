@@ -14,6 +14,13 @@ import Testing
     #expect(n == PomodoroNotice(title: "Pomodoro", body: "Phase finished"))
 }
 
+@Test func noticeItemOnlyDisablesWhenDenied() {
+    #expect(NoticeItemState.make(.allowed) == NoticeItemState(title: "Pomodoro notifications", enabled: true))
+    // Not answered yet is not "off in System Settings": the item stays usable.
+    #expect(NoticeItemState.make(.unknown) == NoticeItemState(title: "Pomodoro notifications", enabled: true))
+    #expect(NoticeItemState.make(.denied) == NoticeItemState(title: "Pomodoro notifications (off in System Settings)", enabled: false))
+}
+
 @Test func muteDefaultsOnAndPersists() {
     let defaults = UserDefaults(suiteName: "pomodoro-notice-test-\(UUID().uuidString)")!
     let prefs = PomodoroNoticePrefs(defaults: defaults)

@@ -9,9 +9,12 @@ final class StatusMenu: NSObject, NSMenuDelegate {
     var logURL: URL?
     var prefs = PomodoroNoticePrefs()
     var onMenuWillOpen: () -> Void = {}
-    /// False when macOS notifications are off for the app; the checkbox is then disabled with a hint.
-    var notificationsAllowed = true {
-        didSet { styleNoticesItem() }
+    /// The checkbox is disabled with a hint only when macOS notifications are denied for the app.
+    var authorization = NoticeAuthorization.unknown {
+        didSet {
+            styleNoticesItem()
+            menu.update()  // the reply lands after the menu validated its items; validate again
+        }
     }
     private var noticesItem: NSMenuItem?
 
@@ -83,11 +86,11 @@ final class StatusMenu: NSObject, NSMenuDelegate {
     private func styleNoticesItem() {
         guard let i = noticesItem else { return }
         i.state = prefs.enabled ? .on : .off
-        i.title = notificationsAllowed ? "Pomodoro notifications" : "Pomodoro notifications (off in System Settings)"
+        i.title = NoticeItemState.make(authorization).title
     }
 
     @objc func validateMenuItem(_ item: NSMenuItem) -> Bool {
-        item !== noticesItem || notificationsAllowed
+        item !== noticesItem || NoticeItemState.make(authorization).enabled
     }
 
     @objc private func toggleNotices() {
