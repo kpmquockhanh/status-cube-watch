@@ -33,7 +33,7 @@
 
 // --- QMI8658C 6-axis IMU, I2C (same bus as the touch controller) --------
 #define QMI8658_ADDR 0x6B
-// Sign of the IMU's Y-axis reading when the top of the screen points at the
+// Sign of the IMU's X-axis reading (measured: gravity lies on X with the cube on its edge) when the top of the screen points at the
 // ceiling (+1 g = upright). Flip to -1 if the screen rotates the wrong way when
 // the cube is stood on its edge; see docs/imu-acceptance.md.
 #define IMU_UP_SIGN  1

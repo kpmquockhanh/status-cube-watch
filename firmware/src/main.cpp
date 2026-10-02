@@ -283,7 +283,7 @@ void pollOrientation(uint32_t now) {
   lastImu = now;
   float ax, ay, az;
   if (!imuReadAccel(ax, ay, az)) return;  // a missed read keeps the current orientation
-  orient.update(now, (float)IMU_UP_SIGN * ay, az, touchDown);
+  orient.update(now, (float)IMU_UP_SIGN * ax, az, touchDown);
 }
 
 // Puts the classifier's answer on the panel. Not while the screen is asleep; the

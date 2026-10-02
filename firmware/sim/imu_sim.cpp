@@ -19,8 +19,8 @@ bool imuBegin() {
 }
 
 bool imuReadAccel(float &ax, float &ay, float &az) {
-  ax = 0.0f;
-  ay = (flipped() ? -1.0f : 1.0f) * (float)IMU_UP_SIGN;  // main.cpp multiplies by IMU_UP_SIGN again
+  ay = 0.0f;
+  ax = (flipped() ? -1.0f : 1.0f) * (float)IMU_UP_SIGN;  // main.cpp multiplies by IMU_UP_SIGN again
   az = 0.0f;
   return true;
 }
