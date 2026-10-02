@@ -11,10 +11,13 @@ void uiBegin(Display &lcd);
 uint8_t uiDeckSize(const Payload &p);       // always >= 1
 uint8_t uiPomodoroIndex(const Payload &p);  // the last index
 
+// Where the data on screen came from, shown as a small marker in the top bar.
+enum class UiLink : uint8_t { None, Ble, Wifi };
+
 // Draws one card plus the shared chrome. Everything is composed into an
 // off-screen sprite and pushed in one go, so the panel never tears.
 void uiRender(Display &lcd, const Payload &p, uint8_t index, bool online, uint32_t ageMs,
-              const PomoView &pomo, const BatteryView &bat);
+              const PomoView &pomo, const BatteryView &bat, UiLink link = UiLink::None);
 // True when the last uiRender left a ring or a colour part-way through its
 // transition, so the caller knows to keep drawing frames.
 bool uiAnimating();

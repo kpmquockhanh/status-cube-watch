@@ -22,3 +22,12 @@ inline BatteryView batteryViewFromEnv() {
   v.onUsb = false;
   return v;
 }
+
+// CUBE_LINK=ble|wifi|none picks the transport marker in screenshots (default ble).
+#include "../src/ui.h"
+inline UiLink linkFromEnv() {
+  const char *e = std::getenv("CUBE_LINK");
+  if (e && std::strcmp(e, "none") == 0) return UiLink::None;
+  if (e && std::strcmp(e, "wifi") == 0) return UiLink::Wifi;
+  return UiLink::Ble;
+}

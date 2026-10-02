@@ -316,7 +316,8 @@ void loop() {
     if (bleState() == BleState::Pairing) uiBlePair(lcd, blePasskey());  // the code must be seen
     else if (!pairWaitDismissed && waitingToPair()) uiBlePair(lcd, 0);
     else if (editing && !uiEditorSliding()) uiPomodoroEditor(lcd, editSettings);
-    else uiRender(lcd, payload, cardIndex, td.bleLive || netOnline(), age, pv, bv);
+    else uiRender(lcd, payload, cardIndex, td.bleLive || netOnline(), age, pv, bv,
+                    td.bleLive ? UiLink::Ble : (wifiUp && netOnline() ? UiLink::Wifi : UiLink::None));
     lastDraw = now;
     dirty = false;
   }

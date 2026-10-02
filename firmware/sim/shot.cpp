@@ -154,7 +154,7 @@ bool pomodoroShot(Display &lcd, const char *state) {
   const Payload none{};
   const PomoView v = p.view();
   for (int frame = 0; frame < 400; frame++) {
-    uiRender(lcd, none, 0, true, 4000, v, batteryViewFromEnv());
+    uiRender(lcd, none, 0, true, 4000, v, batteryViewFromEnv(), linkFromEnv());
     if (!uiAnimating()) break;
     delay(8);
   }
@@ -223,7 +223,7 @@ int render(bool *running) {
     // Draw until the entry animation has settled, so the grab shows the
     // resting layout rather than a frame part-way through the sweep.
     for (int frame = 0; frame < 400; frame++) {
-      uiRender(lcd, payload, i, true, 4000, idle, batteryViewFromEnv());
+      uiRender(lcd, payload, i, true, 4000, idle, batteryViewFromEnv(), linkFromEnv());
       if (!uiAnimating()) break;
       delay(8);
     }
