@@ -1,2 +1,66 @@
 import CubeLinkCore
-print("ClaudeCubeLink placeholder")
+import Foundation
+
+setvbuf(stdout, nil, _IOLBF, 0)
+
+func log(_ s: String) {
+    let f = ISO8601DateFormatter()
+    FileHandle.standardError.write(Data("\(f.string(from: Date())) \(s)\n".utf8))
+}
+
+// One instance only: a second launch (e.g. `open` after the LaunchAgent started one) exits quietly.
+func acquireSingleInstanceLock() -> Bool {
+    let dir = FileManager.default.urls(for: .applicationSupportDirectory, in: .userDomainMask)[0]
+        .appendingPathComponent("ClaudeCubeLink")
+    try? FileManager.default.createDirectory(at: dir, withIntermediateDirectories: true)
+    let fd = open(dir.appendingPathComponent("lock").path, O_CREAT | O_RDWR, 0o644)
+    return fd >= 0 && flock(fd, LOCK_EX | LOCK_NB) == 0  // the fd stays open for the life of the process
+}
+
+guard acquireSingleInstanceLock() else {
+    log("already running; exiting")
+    exit(0)
+}
+
+let env = ProcessInfo.processInfo.environment
+var port = Int(env["CUBE_PORT"] ?? "") ?? 8787
+let argv = CommandLine.arguments
+if let i = argv.firstIndex(of: "--port"), i + 1 < argv.count, let p = Int(argv[i + 1]) { port = p }
+
+let bridgeDir = URL(fileURLWithPath: env["CUBE_BRIDGE_DIR"] ?? FileManager.default.currentDirectoryPath + "/bridge")
+let node = BridgeSupervisor.findNode(env: env, exists: { FileManager.default.isExecutableFile(atPath: $0) })
+
+let supervisor = BridgeSupervisor(bridgeDir: bridgeDir, port: port, node: node, log: log)
+let client = BridgeClient(port: port)
+let link = CubeLink(log: log)
+var policy = PushPolicy(heartbeat: 5)
+var lastBridgeError = ""
+
+func tick(force: Bool) {
+    client.fetch { body, why in
+        DispatchQueue.main.async {
+            if body == nil, let why, why != lastBridgeError {
+                lastBridgeError = why
+                log("bridge: \(why)")
+            }
+            if body != nil { lastBridgeError = "" }
+            guard link.isReady else { return }
+            let now = Date()
+            if let body, policy.shouldSend(body: body, now: now, force: force) {
+                link.send(body)
+                policy.didSend(body: body, at: now)
+            }
+        }
+    }
+}
+
+link.onSendNow = { tick(force: true) }
+supervisor.start()
+Timer.scheduledTimer(withTimeInterval: 5, repeats: true) { _ in tick(force: false) }
+log("Claude Cube Link started (bridge :\(port), dir \(bridgeDir.path))")
+
+signal(SIGTERM) { _ in
+    supervisor.stop()
+    exit(0)
+}
+RunLoop.main.run()
