@@ -11,16 +11,16 @@ struct Pad {
   GestureTracker t;
   uint32_t last = 0;
   bool wasDown = false;
-  Gesture raw(uint32_t now, bool down, int x, int y, bool hold = false) {
+  Gesture raw(uint32_t now, bool down, int x, int y, bool multi = false) {
     last = now;
     wasDown = down;
-    return t.update(down, (int16_t)x, (int16_t)y, now, hold);
+    return t.update(down, (int16_t)x, (int16_t)y, now, multi);
   }
-  Gesture at(uint32_t now, bool down, int x, int y, bool hold = false) {
+  Gesture at(uint32_t now, bool down, int x, int y, bool multi = false) {
     if (down && wasDown) {
-      while (now - last > 50u) raw(last + 50u, true, x, y, hold);
+      while (now - last > 50u) raw(last + 50u, true, x, y, multi);
     }
-    return raw(now, down, x, y, hold);
+    return raw(now, down, x, y, multi);
   }
 };
 
@@ -58,118 +58,132 @@ void testNonGestures() {
   p.at(2100, true, 102, 120);
   CHECK(p.at(2150, false, 0, 0) == Gesture::SwipeUp);
 
-  // A touch held too long to be a tap, with holds disabled: ignored on release.
+  // A touch held too long to be a tap: ignored on release.
   p.at(3000, true, 100, 100);
   CHECK(p.at(3600, true, 100, 100) == Gesture::None);
   CHECK(p.at(3700, false, 0, 0) == Gesture::None);
 }
 
-void testLongPressAndReset() {
-  Pad p;
-  CHECK(p.at(0, true, 100, 100, true) == Gesture::None);
-  CHECK(p.at(300, true, 100, 100, true) == Gesture::None);
-  CHECK(p.at(599, true, 100, 100, true) == Gesture::None);
-  CHECK(p.at(600, true, 100, 100, true) == Gesture::LongPress);
-  CHECK(p.at(700, true, 100, 100, true) == Gesture::None);   // once
-  CHECK(p.at(1900, true, 100, 100, true) == Gesture::None);
-  CHECK(p.at(2000, true, 100, 100, true) == Gesture::ResetPress);
-  CHECK(p.at(2100, true, 100, 100, true) == Gesture::None);  // once
-  CHECK(p.at(2200, false, 0, 0) == Gesture::None);           // release acts as nothing
-}
-
-// Review Focus 1: the finger lifting after a hold must not be read as a tap.
-void testNoTrailingTap() {
+// Two quick taps are one DoubleTap, known once the gap passes with no third.
+void testDoubleTap() {
   Pad p;
   p.at(0, true, 100, 100, true);
-  CHECK(p.at(600, true, 100, 100, true) == Gesture::LongPress);
-  CHECK(p.at(650, false, 0, 0) == Gesture::None);  // not Tap
-  // ...and the tracker is clean for the next touch.
-  p.at(1000, true, 100, 100, true);
-  CHECK(p.at(1050, false, 0, 0) == Gesture::Tap);
+  CHECK(p.at(50, false, 0, 0, true) == Gesture::None);   // first tap: wait
+  p.at(150, true, 102, 100, true);
+  CHECK(p.at(200, false, 0, 0, true) == Gesture::None);  // second tap: still waiting on a third
+  CHECK(p.at(200 + MULTI_TAP_GAP_MS, false, 0, 0, true) == Gesture::None);  // gap not yet exceeded
+  CHECK(p.at(200 + MULTI_TAP_GAP_MS + 1, false, 0, 0, true) == Gesture::DoubleTap);
+  CHECK(p.at(1000, false, 0, 0, true) == Gesture::None);  // once
 }
 
-void testReleaseBetweenLongAndReset() {
+// A third tap inside the gap fires TripleTap at once and not a DoubleTap too.
+void testTripleTap() {
   Pad p;
   p.at(0, true, 100, 100, true);
-  CHECK(p.at(600, true, 100, 100, true) == Gesture::LongPress);
-  CHECK(p.at(1500, false, 0, 0) == Gesture::None);
-  // No ResetPress was produced, and a fresh touch starts from zero.
+  p.at(40, false, 0, 0, true);
+  p.at(120, true, 100, 100, true);
+  p.at(160, false, 0, 0, true);
+  p.at(240, true, 100, 100, true);
+  CHECK(p.at(280, false, 0, 0, true) == Gesture::TripleTap);
+  CHECK(p.at(1000, false, 0, 0, true) == Gesture::None);
+  // A fourth tap starts a fresh sequence.
   p.at(2000, true, 100, 100, true);
-  CHECK(p.at(2400, true, 100, 100, true) == Gesture::None);
+  CHECK(p.at(2040, false, 0, 0, true) == Gesture::None);
+  CHECK(p.at(2040 + MULTI_TAP_GAP_MS + 1, false, 0, 0, true) == Gesture::Tap);
 }
 
-// Review Focus 1: holds on a card that does not use them stay ignored.
-void testHoldDisabled() {
+// One tap alone settles as a plain Tap, after the gap.
+void testSingleTapOnMultiCard() {
+  Pad p;
+  p.at(0, true, 100, 100, true);
+  CHECK(p.at(50, false, 0, 0, true) == Gesture::None);
+  CHECK(p.at(50 + MULTI_TAP_GAP_MS + 1, false, 0, 0, true) == Gesture::Tap);
+}
+
+// Taps too far apart are two separate taps, not a DoubleTap.
+void testSlowTapsDoNotGroup() {
+  Pad p;
+  p.at(0, true, 100, 100, true);
+  p.at(50, false, 0, 0, true);
+  // The loop polls while no finger is down, so the first tap settles on its own.
+  CHECK(p.at(50 + MULTI_TAP_GAP_MS + 1, false, 0, 0, true) == Gesture::Tap);
+  p.at(600, true, 100, 100, true);
+  CHECK(p.at(650, false, 0, 0, true) == Gesture::None);
+  CHECK(p.at(650 + MULTI_TAP_GAP_MS + 1, false, 0, 0, true) == Gesture::Tap);
+}
+
+// If the next touch lands after a stalled loop, the waiting taps still settle.
+void testSettleOnNextTouchDown() {
+  Pad p;
+  p.at(0, true, 100, 100, true);
+  p.at(40, false, 0, 0, true);
+  p.at(120, true, 100, 100, true);
+  p.at(160, false, 0, 0, true);
+  CHECK(p.raw(2000, true, 100, 100, true) == Gesture::DoubleTap);
+}
+
+// With multi-tap off (every other card, the editors) a tap is immediate.
+void testTapImmediateWhenMultiOff() {
   Pad p;
   p.at(0, true, 100, 100, false);
-  CHECK(p.at(600, true, 100, 100, false) == Gesture::None);
-  CHECK(p.at(2000, true, 100, 100, false) == Gesture::None);
-  CHECK(p.at(2100, false, 0, 0) == Gesture::None);
+  CHECK(p.at(50, false, 0, 0, false) == Gesture::Tap);
+  p.at(100, true, 100, 100, false);
+  CHECK(p.at(150, false, 0, 0, false) == Gesture::Tap);  // never grouped
 }
 
-void testMovingCancelsHold() {
+// A swipe or a long press between taps breaks the sequence.
+void testBreaksTheSequence() {
   Pad p;
   p.at(0, true, 100, 100, true);
-  p.at(100, true, 130, 100, true);  // 30 px: no longer a stationary hold
-  CHECK(p.at(700, true, 130, 100, true) == Gesture::None);
-  CHECK(p.at(2100, true, 130, 100, true) == Gesture::None);
-  CHECK(p.at(2200, false, 0, 0) == Gesture::None);  // and 30 px is not a swipe either
+  p.at(40, false, 0, 0, true);  // one tap waiting
+  p.at(100, true, 200, 100, true);
+  p.at(150, true, 150, 100, true);
+  p.at(200, true, 100, 100, true);
+  CHECK(p.at(250, false, 0, 0, true) == Gesture::SwipeNext);
+  CHECK(p.at(250 + MULTI_TAP_GAP_MS + 1, false, 0, 0, true) == Gesture::None);  // the first tap is gone
+
+  p.at(1000, true, 100, 100, true);
+  p.at(1040, false, 0, 0, true);
+  p.at(1100, true, 100, 100, true);
+  p.at(1900, true, 100, 100, true);  // 800 ms press: not a tap
+  CHECK(p.at(1950, false, 0, 0, true) == Gesture::None);
+  CHECK(p.at(1950 + MULTI_TAP_GAP_MS + 1, false, 0, 0, true) == Gesture::None);
 }
 
-void testQuickTapOnHoldCard() {
+// Leaving the Pomodoro card with taps pending drops them: they must not
+// fire later on some other card.
+void testCardChangeDropsPending() {
   Pad p;
   p.at(0, true, 100, 100, true);
-  CHECK(p.at(100, false, 0, 0) == Gesture::Tap);
+  p.at(40, false, 0, 0, true);
+  p.at(120, true, 100, 100, true);
+  p.at(160, false, 0, 0, true);
+  CHECK(p.at(300, false, 0, 0, false) == Gesture::None);  // multi-tap went off
+  CHECK(p.at(300 + MULTI_TAP_GAP_MS + 1, false, 0, 0, true) == Gesture::None);
 }
 
-// Review Focus 3: millis() wrap.
+// A slow press or slight drift is no tap, so it never counts toward a multi-tap.
+void testDriftIsNotATap() {
+  Pad p;
+  p.at(0, true, 100, 100, true);
+  p.at(50, true, 130, 100, true);  // 30 px
+  CHECK(p.at(100, false, 0, 0, true) == Gesture::None);
+  CHECK(p.at(100 + MULTI_TAP_GAP_MS + 1, false, 0, 0, true) == Gesture::None);
+}
+
+// millis() wrap.
 void testClockWrap() {
   const uint32_t base = 0xFFFFFF00u;
   Pad p;
   p.at(base, true, 100, 100, true);
-  CHECK(p.at(base + 599u, true, 100, 100, true) == Gesture::None);
-  CHECK(p.at(base + 600u, true, 100, 100, true) == Gesture::LongPress);
-  CHECK(p.at(base + 650u, false, 0, 0) == Gesture::None);
+  p.at(base + 40u, false, 0, 0, true);
+  p.at(base + 120u, true, 100, 100, true);
+  p.at(base + 160u, false, 0, 0, true);
+  CHECK(p.at(base + 160u + MULTI_TAP_GAP_MS + 1u, false, 0, 0, true) == Gesture::DoubleTap);
 
   Pad q;  // a tap across the wrap
   q.at(base + 200u, true, 100, 100);
   CHECK(q.at(base + 300u, false, 0, 0) == Gesture::Tap);
-}
-
-// Final review I1: a touch that began where holds meant nothing must not turn
-// into a LongPress the moment the deck lands on the Pomodoro card.
-void testHoldEnabledMidTouch() {
-  Pad p;
-  p.at(0, true, 100, 100, false);
-  CHECK(p.at(1000, true, 100, 100, false) == Gesture::None);
-  CHECK(p.at(1010, true, 100, 100, true) == Gesture::None);  // card changed under the finger
-  CHECK(p.at(1500, true, 100, 100, true) == Gesture::None);
-  CHECK(p.at(1600, false, 0, 0) == Gesture::None);
-  // A fresh touch on the card is a normal hold again.
-  p.at(2000, true, 100, 100, true);
-  CHECK(p.at(2600, true, 100, 100, true) == Gesture::LongPress);
-}
-
-// Final review I3: a stalled loop (a blocking fetch) must not turn one hold
-// into LongPress and ResetPress back to back.
-void testSampleGapBlocksHold() {
-  Pad p;
-  p.raw(0, true, 100, 100, true);
-  p.raw(15, true, 100, 100, true);
-  CHECK(p.raw(2500, true, 100, 100, true) == Gesture::None);  // 2.5 s with no samples
-  CHECK(p.raw(2515, true, 100, 100, true) == Gesture::None);
-  CHECK(p.raw(2600, false, 0, 0) == Gesture::None);
-}
-
-// ResetPress is a deliberate second hold: it is measured from the LongPress,
-// not just from touch-down, so one slow sample cannot fire both together.
-void testResetFollowsLongByItsOwnInterval() {
-  Pad p;
-  p.at(0, true, 100, 100, true);
-  CHECK(p.at(600, true, 100, 100, true) == Gesture::LongPress);
-  CHECK(p.at(650, true, 100, 100, true) == Gesture::None);
-  CHECK(p.at(1999, true, 100, 100, true) == Gesture::None);
-  CHECK(p.at(2000, true, 100, 100, true) == Gesture::ResetPress);
 }
 
 void testVerticalSwipes() {
@@ -206,8 +220,8 @@ void testVerticalClassification() {
   CHECK(p.at(3801, false, 0, 0) == Gesture::None);
 }
 
-// A vertical drag on the hold-enabled Pomodoro card must not become a hold.
-void testVerticalSwipeOnHoldCard() {
+// A vertical drag on the multi-tap Pomodoro card is still a swipe.
+void testVerticalSwipeOnMultiCard() {
   Pad p;
   p.at(0, true, 100, 220, true);
   p.at(100, true, 100, 170, true);
@@ -231,23 +245,24 @@ void testStartPoint() {
 
 }  // namespace
 
+
 int main() {
-  testHoldEnabledMidTouch();
-  testSampleGapBlocksHold();
-  testResetFollowsLongByItsOwnInterval();
   testTap();
   testSwipes();
   testNonGestures();
-  testLongPressAndReset();
-  testNoTrailingTap();
-  testReleaseBetweenLongAndReset();
-  testHoldDisabled();
-  testMovingCancelsHold();
-  testQuickTapOnHoldCard();
+  testDoubleTap();
+  testTripleTap();
+  testSingleTapOnMultiCard();
+  testSlowTapsDoNotGroup();
+  testSettleOnNextTouchDown();
+  testTapImmediateWhenMultiOff();
+  testBreaksTheSequence();
+  testCardChangeDropsPending();
+  testDriftIsNotATap();
   testClockWrap();
   testVerticalSwipes();
   testVerticalClassification();
-  testVerticalSwipeOnHoldCard();
+  testVerticalSwipeOnMultiCard();
   testStartPoint();
   return checksDone("gesture_test");
 }

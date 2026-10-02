@@ -80,7 +80,7 @@ struct GaugeAnim {
 };
 
 // One per card. The sweep plays at boot and again whenever a card is brought
-// up by a swipe or tap (uiReplay), so the ring visibly fills each time you
+// up by a swipe (uiReplay), so the ring visibly fills each time you
 // look at it; periodic redraws and data updates only retarget it.
 GaugeAnim g_anim[MAX_CARDS];
 GaugeAnim g_anim2[MAX_CARDS];  // the inner ring of a dual-ring card
@@ -584,7 +584,7 @@ void drawTextCard(LovyanGFX *g, const Payload &p, const Card &card, uint16_t col
 // The timer lives on the device, so this is the one card whose text the
 // firmware formats itself (MM:SS). It reuses the gauge layout: the ring is the
 // time left in the phase, the middle is the clock, and the line in the gap at
-// the bottom is "sessions done  +  what a hold does".
+// the bottom is "sessions done  +  what a double tap does".
 constexpr uint32_t POMO_MUTED = 0x7C8598;  // idle / paused: the ring waits, so it is grey
 
 GaugeAnim g_pomoAnim;
@@ -609,30 +609,30 @@ void pomodoroCard(const PomoView &v, Card &card, RingStyle &style) {
   switch (v.state) {
     case POMO_IDLE:
       strlcpy(card.sub1, "Ready", sizeof(card.sub1));
-      hint = "Hold to start";
+      hint = "2 taps: start";
       style.rgb = POMO_MUTED;
       break;
     case POMO_FOCUS:
       strlcpy(card.sub1, "Focus", sizeof(card.sub1));
-      hint = "Hold to pause";
+      hint = "2 taps: pause";
       style.rgb = phaseRgb(PHASE_FOCUS);
       break;
     case POMO_BREAK:
       strlcpy(card.sub1, phaseName(v.phase), sizeof(card.sub1));
-      hint = "Hold to pause";
+      hint = "2 taps: pause";
       style.rgb = phaseRgb(v.phase);
       break;
     case POMO_PAUSED:
       strlcpy(card.sub1, "Paused", sizeof(card.sub1));
-      hint = "Hold to resume";
+      hint = "2 taps: resume";
       style.rgb = POMO_MUTED;
       break;
     case POMO_DONE:
       strlcpy(card.value, "Done", sizeof(card.value));
       card.gauge = 100;  // a finished ring: it is what the alert flash pulses
       snprintf(card.sub1, sizeof(card.sub1), "%s done", phaseName(v.phase));
-      hint = v.next == PHASE_FOCUS ? "Hold for focus"
-                                   : (v.next == PHASE_SHORT ? "Hold for break" : "Hold for long break");
+      hint = v.next == PHASE_FOCUS ? "2 taps: focus"
+                                   : (v.next == PHASE_SHORT ? "2 taps: break" : "2 taps: long break");
       style.rgb = phaseRgb(v.phase);
       break;
   }
