@@ -199,6 +199,9 @@ void drawDots(LovyanGFX *g, uint8_t n, uint8_t active) {
   }
 }
 
+// Set by uiRender for the frame being drawn; drawTopBar reads it.
+UiLink g_link = UiLink::None;
+
 // Battery glyph + "NN%", top-left. Fixed in position: the glyph sits at `leftX`
 // and the number starts at a constant offset from it, so neither moves when the
 // percentage changes width. Returns the x where the run ends (sized for "100%").
@@ -260,8 +263,20 @@ void drawTopBar(LovyanGFX *g, const char *left, bool online, uint32_t ageMs,
   int ageW = g->textWidth("59s");
   if (g->textWidth("99m") > ageW) ageW = g->textWidth("99m");
   if (g->textWidth("OFF") > ageW) ageW = g->textWidth("OFF");
+
+  // Transport marker just left of the age readout. The slot is always sized for
+  // "WIFI" so the label's room does not change when the link switches.
+  const int linkW = g->textWidth("WIFI");
+  const int linkRight = LCD_WIDTH - 46 - ageW - 8;
+  if (online && g_link != UiLink::None) {
+    g->setFont(&V_S12.font);
+    g->setTextDatum(middle_right);
+    g->setTextColor(DIM, BG);
+    g->drawString(g_link == UiLink::Ble ? "BLE" : "WIFI", linkRight, Y);
+  }
+
   const int x0 = batRight + 10;
-  const int maxW = LCD_WIDTH - 46 - ageW - 6 - x0;
+  const int maxW = linkRight - linkW - 6 - x0;
   for (; n > 1 && capsWidth(g, name) > maxW; n--) name[n - 1] = '\0';
   if (n) drawCaps(g, name, x0, Y, DIM, middle_left);
 }
@@ -672,8 +687,9 @@ uint8_t uiDeckSize(const Payload &p) { return (p.valid ? p.nCards : 0) + 1; }
 uint8_t uiPomodoroIndex(const Payload &p) { return p.valid ? p.nCards : 0; }
 
 void uiRender(Display &lcd, const Payload &p, uint8_t index, bool online, uint32_t ageMs,
-              const PomoView &pomo, const BatteryView &bat) {
+              const PomoView &pomo, const BatteryView &bat, UiLink link) {
   g_animating = false;
+  g_link = link;
 
   float flash = 0.0f;
   if (g_alertOn) {
