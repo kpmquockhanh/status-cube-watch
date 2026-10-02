@@ -38,6 +38,7 @@ negotiated write length (`maximumWriteValueLength(for: .withResponse)`, about 50
 | `01`         | send now: sent when the Mac subscribes, so the screen fills at once |
 | `02 <seq>`   | the payload with that seq was reassembled (not necessarily valid JSON) |
 | `03 <result>`| a Settings write was handled: `00` saved, `01` rejected (nothing changed), `02` saved and the cube is rebooting |
+| `04 <ended> <next>` | a Pomodoro phase just ended (added in fw_rev 3, protocol still 1). `<ended>` is the phase that finished and `<next>` the one a long-press would start: `00` focus, `01` short break, `02` long break. Fire and forget: no ack, and it is dropped if no Mac is subscribed |
 
 ## Liveness
 

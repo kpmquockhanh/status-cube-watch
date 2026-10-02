@@ -9,7 +9,7 @@
 #include <string.h>
 
 constexpr uint8_t BLE_PROTO_VER = 1;
-constexpr uint8_t BLE_FW_REV = 2;  // bumped when behaviour the Mac can see changes
+constexpr uint8_t BLE_FW_REV = 3;  // bumped when behaviour the Mac can see changes
 constexpr size_t BLE_HDR = 4;      // ver, seq, idx, total
 constexpr uint8_t BLE_MAX_CHUNKS = 16;
 constexpr size_t BLE_MAX_PAYLOAD = 2048;
@@ -17,6 +17,16 @@ constexpr size_t BLE_MAX_PAYLOAD = 2048;
 constexpr uint8_t BLE_CTRL_SEND_NOW = 0x01;  // cube -> Mac: send the payload now
 constexpr uint8_t BLE_CTRL_ACK = 0x02;       // cube -> Mac: [0x02, seq] payload reassembled
 constexpr uint8_t BLE_CTRL_SETTINGS = 0x03;  // cube -> Mac: [0x03, SettingsResult] a Settings write was handled
+constexpr uint8_t BLE_CTRL_POMO_ENDED = 0x04;  // cube -> Mac: [0x04, ended, next] a Pomodoro phase ended (0 focus, 1 short, 2 long)
+constexpr size_t BLE_POMO_ENDED_LEN = 3;
+
+// Writes the Control frame for a finished Pomodoro phase into `out`; returns its length.
+inline size_t bleEncodePomoEnded(uint8_t ended, uint8_t next, uint8_t out[BLE_POMO_ENDED_LEN]) {
+  out[0] = BLE_CTRL_POMO_ENDED;
+  out[1] = ended;
+  out[2] = next;
+  return BLE_POMO_ENDED_LEN;
+}
 
 constexpr char BLE_SERVICE_UUID[] = "6e6d3c10-5d1a-4c1e-9f0b-7c4a2b8e1a01";
 constexpr char BLE_PAYLOAD_UUID[] = "6e6d3c10-5d1a-4c1e-9f0b-7c4a2b8e1a02";

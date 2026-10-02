@@ -5,6 +5,7 @@
 
 #include "ble_frame.h"
 #include "check.h"
+#include "pomodoro.h"
 
 namespace {
 
@@ -168,9 +169,34 @@ void testClearForgetsLastDone() {  // reconnect after a helper restart that reus
   CHECK(feed(a, frame(9, 0, 1, "ok")) == FrameResult::Complete);
 }
 
+// The Control byte for a phase is the PomoPhase value itself, so main.cpp can pass the enum.
+static_assert(PHASE_FOCUS == 0 && PHASE_SHORT == 1 && PHASE_LONG == 2, "wire phase codes");
+
+void testPomoEndedFixture() {
+  std::ifstream f("fixtures/ble-frames.txt");
+  std::string line;
+  int n = 0;
+  while (std::getline(f, line)) {
+    if (line.rfind("pomo_ended ", 0) != 0) continue;
+    std::istringstream in(line.substr(11));
+    unsigned ended = 0, next = 0;
+    in >> ended >> next;
+    std::string rest;
+    std::getline(in, rest);
+    const Bytes want = hex(rest);
+    uint8_t out[BLE_POMO_ENDED_LEN];
+    const size_t len = bleEncodePomoEnded((uint8_t)ended, (uint8_t)next, out);
+    CHECK(len == BLE_POMO_ENDED_LEN);
+    CHECK(Bytes(out, out + len) == want);
+    n++;
+  }
+  CHECK(n == 4);  // a missing fixture must fail, not pass vacuously
+}
+
 }  // namespace
 
 int main() {
+  testPomoEndedFixture();
   testGoldenFixture();
   testNewSeqDiscardsPartial();
   testSeqRestartAfterPartial();

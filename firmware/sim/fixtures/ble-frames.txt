@@ -14,3 +14,8 @@ seq 255
 chunk 16
 json {"v":1}
 frame 01 ff 00 01 7b 22 76 22 3a 31 7d
+# Control (cube -> Mac): a Pomodoro phase ended. pomo_ended <ended> <next> <bytes>; 0 focus, 1 short, 2 long.
+pomo_ended 0 1 04 00 01
+pomo_ended 0 2 04 00 02
+pomo_ended 1 0 04 01 00
+pomo_ended 2 0 04 02 00
