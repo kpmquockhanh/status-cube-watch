@@ -43,6 +43,7 @@ struct ServerCb : NimBLEServerCallbacks {
   void onDisconnect(NimBLEServer *, NimBLEConnInfo &, int reason) override {
     Serial.printf("[ble] disconnect %d\n", reason);
     g_passkey = 0;
+    g_sendNow = false;
     g_state = BleState::Advertising;
     NimBLEDevice::startAdvertising();
   }
@@ -133,9 +134,11 @@ void bleBegin() {
   svc->start();
   NimBLEAdvertising *adv = NimBLEDevice::getAdvertising();
   adv->addServiceUUID(BLE_SERVICE_UUID);  // in the advertisement: the Mac scans by it
-  adv->setName("Claude Cube");            // too long for the same packet: goes in the scan response
-  adv->enableScanResponse(true);
-  adv->start();
+  adv->enableScanResponse(true);  // must precede setName(): only then does the name go to the scan response
+  adv->setName("Claude Cube");    // too long beside a 128-bit UUID in one packet
+  const bool started = adv->start();
+  Serial.printf("[ble] advertising start=%d\n", (int)started);
+  if (!started) Serial.println("[ble] ERROR: advertising failed to start");
   g_state = BleState::Advertising;
   Serial.printf("[ble] advertising, bonds %d\n", NimBLEDevice::getNumBonds());
 }
