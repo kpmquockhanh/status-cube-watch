@@ -14,27 +14,26 @@ enum class Gesture : uint8_t {
   SwipePrev,
   SwipeUp,     // finger moved up the screen (opens the Pomodoro editor; closes the display panel)
   SwipeDown,   // finger moved down (closes the Pomodoro editor; opens the display panel)
-  LongPress,   // held in place for LONG_PRESS_MS; fires while the finger is still down
-  ResetPress,  // still held at RESET_PRESS_MS, after a LongPress; fires once
+  DoubleTap,   // two taps in quick succession (multi-tap on only); start / pause / resume
+  TripleTap,   // three taps in quick succession (multi-tap on only); reset
 };
 
 constexpr int SWIPE_MIN_PX = 40;
 constexpr uint32_t SWIPE_MAX_MS = 700;
 constexpr int TAP_MAX_PX = 16;
 constexpr uint32_t TAP_MAX_MS = 400;
-constexpr uint32_t LONG_PRESS_MS = 600;
-constexpr uint32_t RESET_PRESS_MS = 2000;
-// Samples further apart than this mean the loop was stalled (a blocking fetch):
-// how long the finger really held is then unknown, so holds are off for the touch.
-constexpr uint32_t SAMPLE_GAP_MS = 150;
+// Longest pause between one tap lifting and the next touching for them to count
+// as one multi-tap. It is also how long a double tap waits to rule out a third.
+constexpr uint32_t MULTI_TAP_GAP_MS = 350;
 
 class GestureTracker {
  public:
-  // Feed one sample per poll. At most one gesture comes back per call.
-  // `holdEnabled` says whether holds mean anything right now (only the
-  // Pomodoro card uses them). When false, a long touch is ignored on release,
-  // exactly as a slow drag always was.
-  Gesture update(bool down, int16_t x, int16_t y, uint32_t now, bool holdEnabled);
+  // Feed one sample per poll, including polls with no finger down: a double tap
+  // is only known to be one once MULTI_TAP_GAP_MS passes with no third tap.
+  // At most one gesture comes back per call.
+  // `multiTap` says whether taps group into DoubleTap/TripleTap (only the
+  // Pomodoro card uses them). When false every tap is a plain Tap, at once.
+  Gesture update(bool down, int16_t x, int16_t y, uint32_t now, bool multiTap);
 
   // Where the latest touch began. A tap carries no coordinates of its own, so
   // the editor hit-tests here: a few pixels of drift between down and up must
@@ -44,13 +43,9 @@ class GestureTracker {
 
  private:
   bool _down = false;
-  bool _moved = false;       // travelled past TAP_MAX_PX: no longer a stationary hold
-  bool _longFired = false;
-  bool _resetFired = false;
-  bool _holdBlocked = false;  // holds meant nothing at some point in this touch
+  uint8_t _taps = 0;         // taps so far in the sequence waiting on its gap
   int16_t _sx = 0, _sy = 0;  // where the touch began
   int16_t _lx = 0, _ly = 0;  // the latest sample
   uint32_t _t0 = 0;
-  uint32_t _lastT = 0;       // time of the previous sample
-  uint32_t _longAt = 0;      // when LongPress fired
+  uint32_t _tapUp = 0;       // when the last counted tap lifted
 };

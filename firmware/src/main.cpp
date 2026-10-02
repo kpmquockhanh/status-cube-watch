@@ -1,7 +1,7 @@
 // Claude status cube -- Waveshare ESP32-S3-Touch-LCD-1.69
 //
 // Polls the host bridge for a small pre-formatted JSON payload and renders it
-// as a swipeable deck of cards. Swipe or tap to change card; the deck can
+// as a swipeable deck of cards. Swipe left/right to change card; the deck can
 // also auto-advance (the rotate setting).
 
 #include <Arduino.h>
@@ -90,7 +90,7 @@ bool waitingToPair() { return pairWaitAtBoot(bleBonded(), settingsHaveWifi()) &&
 GestureTracker gestures;
 
 // The Pomodoro settings editor (swipe up on the idle Pomodoro card). While it
-// is open nothing else moves the deck, and holds are off so a long press
+// is open nothing else moves the deck, and multi-tap is off so a double tap
 // cannot start a session behind it. `editSettings` is the working copy.
 bool editing = false;
 bool editingDevice = false;  // the display panel, not the Pomodoro editor, is the open one
@@ -242,8 +242,8 @@ void pollTouch() {
     if (!down) swallowTouch = false;
     return;
   }
-  // Holds only mean something on the Pomodoro card. Everywhere else a long
-  // touch is ignored when the finger lifts, as a slow press always was.
+  // Multi-taps only mean something on the Pomodoro card. Everywhere else a tap
+  // is a plain Tap, delivered at once (the editors hit-test it).
   const bool onPomodoro = cardIndex == uiPomodoroIndex(payload);
   const Gesture gesture = gestures.update(down, x, y, now, onPomodoro && !editing);
   if (editing) {
@@ -252,18 +252,17 @@ void pollTouch() {
     return;
   }
   switch (gesture) {
-    case Gesture::SwipeNext:  // swipe left advances
-    case Gesture::Tap:
+    case Gesture::SwipeNext:  // swipe left advances (a tap does nothing)
       step(1);
       break;
     case Gesture::SwipePrev:
       step(-1);
       break;
-    case Gesture::LongPress:  // start / pause / resume / next phase
+    case Gesture::DoubleTap:  // start / pause / resume / next phase
       pomo.longPress(now);
       dirty = true;
       break;
-    case Gesture::ResetPress:  // still held after the long-press: start over
+    case Gesture::TripleTap:  // start over
       pomo.reset();
       dirty = true;
       break;
@@ -355,8 +354,8 @@ void loop() {
 
   pomo.tick(now);
   if (pomo.takeAlert()) {
-    // Phase over: pull the deck to the Pomodoro card wherever you were. A tap
-    // or swipe leaves it again; the DONE state waits for a long-press.
+    // Phase over: pull the deck to the Pomodoro card wherever you were. A swipe
+    // leaves it again; the DONE state waits for a double tap.
     cardIndex = uiPomodoroIndex(payload);
     lastRotate = now;
     uiReplayPomodoro();
