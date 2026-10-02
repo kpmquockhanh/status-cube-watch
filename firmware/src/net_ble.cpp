@@ -28,8 +28,9 @@ volatile bool g_pendingReady = false;
 
 void notifyControl(const uint8_t *data, size_t len) {
   if (!g_control) return;
-  g_control->setValue(data, len);
-  g_control->notify();
+  // The (data, len) overload leaves the characteristic's stored value alone, so
+  // the main loop and the NimBLE host task cannot race on it.
+  g_control->notify(data, len);
 }
 
 struct ServerCb : NimBLEServerCallbacks {
@@ -50,7 +51,7 @@ struct ServerCb : NimBLEServerCallbacks {
 
   // Display-only IO capability: the stack asks us for the code to show.
   uint32_t onPassKeyDisplay() override {
-    g_passkey = esp_random() % 1000000;
+    g_passkey = 100000 + esp_random() % 900000;  // never 0: main.cpp reads 0 as "no code"
     g_state = BleState::Pairing;
     Serial.printf("[ble] pairing passkey %06u\n", (unsigned)g_passkey);
     return g_passkey;
