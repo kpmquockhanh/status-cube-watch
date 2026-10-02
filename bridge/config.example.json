@@ -1,0 +1,13 @@
+{
+  "source": "local",
+  "port": 8787,
+  "refreshMs": 5000,
+  "extraCards": false,
+
+  "//source": "'local' reads ~/.claude/projects transcripts. 'admin' calls the",
+  "//source2": "Anthropic Usage & Cost Admin API and needs one of the keys below.",
+  "//adminKey": "sk-ant-admin01-...  (or set ANTHROPIC_ADMIN_KEY)",
+  "//oauthToken": "org:admin OAuth token (or set ANTHROPIC_ADMIN_OAUTH_TOKEN)",
+  "//extraCards": "true adds the spend/token/model/project cards after the two",
+  "//extraCards2": "rate-limit gauges. Or set CUBE_EXTRA_CARDS=1."
+}

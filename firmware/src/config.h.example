@@ -1,0 +1,25 @@
+#pragma once
+// Copy to config.h and fill in. config.h is gitignored so your SSID and the
+// bridge address stay out of version control.
+
+#define WIFI_SSID      "your-network"
+#define WIFI_PASSWORD  "your-password"
+
+// The machine running bridge/server.mjs. Its LAN address is printed when the
+// bridge starts. Plain HTTP on the local network -- no credentials cross it.
+#define BRIDGE_URL     "http://192.168.1.50:8787/api/status"
+
+#define POLL_INTERVAL_MS   5000   // how often to refresh from the bridge
+#define CARD_ROTATE_MS       0   // auto-advance every N ms; 0 disables it
+#define BACKLIGHT          160   // 0-255
+
+// Optional: default OTA password. The setup portal can set or change it; with
+// neither, OTA still works but anyone on the network can flash the cube.
+// #define OTA_PASSWORD  "choose-one"
+
+// Pomodoro card (the last card in the deck). Minutes, 1-99. These are the
+// defaults: swipe up on the idle card to change them on the device itself.
+#define POMO_FOCUS_MIN     25
+#define POMO_BREAK_MIN      5
+#define POMO_LONG_MIN      15   // the long break, after POMO_SESSIONS focus sessions
+#define POMO_SESSIONS       4   // 1-9

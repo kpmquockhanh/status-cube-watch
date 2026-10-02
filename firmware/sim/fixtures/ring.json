@@ -1,0 +1,10 @@
+{"v":1,"ts":0,"src":"oauth","est":false,"cards":[
+ {"t":"5H LIMIT","v":"4h 10m","s1":"resets in","s2":"of 5h limit","c":"green","g":0},
+ {"t":"5H LIMIT","v":"3h 05m","s1":"resets in","s2":"of 5h limit","c":"green","g":14},
+ {"t":"5H LIMIT","v":"2h 20m","s1":"resets in","s2":"of 5h limit","c":"green","g":59},
+ {"t":"7D LIMIT","v":"3d 02h","s1":"resets in","s2":"of 7d limit","c":"amber","g":60},
+ {"t":"7D LIMIT","v":"1d 08h","s1":"resets in","s2":"of 7d limit","c":"amber","g":84},
+ {"t":"7D LIMIT","v":"0d 06h","s1":"resets in","s2":"of 7d limit","c":"red","g":86},
+ {"t":"7D LIMIT","v":"--","s1":"no reading","s2":"","c":"ink","g":-1},
+ {"t":"TODAY","v":"$12.40","s1":"34k tokens","s2":"est. spend","c":"accent"}
+]}

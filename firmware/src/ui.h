@@ -1,0 +1,38 @@
+#pragma once
+#include "battery_util.h"
+#include "display.h"
+#include "payload.h"
+#include "pomo_settings.h"
+#include "pomodoro.h"
+
+void uiBegin(Display &lcd);
+// The deck is the bridge's cards plus one local card at the end: the Pomodoro
+// timer. It exists even with no payload (bridge down), where it is the only card.
+uint8_t uiDeckSize(const Payload &p);       // always >= 1
+uint8_t uiPomodoroIndex(const Payload &p);  // the last index
+
+// Draws one card plus the shared chrome. Everything is composed into an
+// off-screen sprite and pushed in one go, so the panel never tears.
+void uiRender(Display &lcd, const Payload &p, uint8_t index, bool online, uint32_t ageMs,
+              const PomoView &pomo, const BatteryView &bat);
+// True when the last uiRender left a ring or a colour part-way through its
+// transition, so the caller knows to keep drawing frames.
+bool uiAnimating();
+// Makes the next uiRender of card `index` sweep its ring in from empty again.
+void uiReplay(uint8_t index);
+// Makes the Pomodoro card sweep its ring in from empty again (as uiReplay does
+// for payload cards).
+void uiReplayPomodoro();
+// Starts the Pomodoro phase-end alert: the ring and the backlight pulse for
+// about two seconds. uiAnimating() stays true while it runs.
+void uiAlertStart();
+// The Pomodoro settings editor: four rows of - / + and a RESET / DONE bar.
+// One static frame; hit-testing is in pomo_editor.h, which owns the layout.
+void uiPomodoroEditor(Display &lcd, const PomoSettings &s);
+void uiMessage(Display &lcd, const char *title, const char *body);
+// Setup screen shown while the config portal runs: the cube's own WiFi name
+// as text and as a join-QR, and the address of the form.
+void uiPortal(Display &lcd, const char *apName);
+
+// Progress screen while an OTA image is arriving.
+void uiOta(Display &lcd, uint8_t percent);
