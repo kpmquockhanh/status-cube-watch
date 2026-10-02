@@ -7,7 +7,8 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 A desk display for Claude rate-limit usage. Two halves that talk over plain HTTP on the LAN:
 
 - `bridge/` — Node ≥20 ESM, **zero npm dependencies**. Gathers data on the host and serves one small, fully pre-formatted JSON document at `GET /api/status` (plus `/` = browser mock, `/health`).
-- `firmware/` — PlatformIO / Arduino for a Waveshare ESP32-S3-Touch-LCD-1.69 (240x280 ST7789V2, CST816 touch), drawn with LovyanGFX (no LVGL) + ArduinoJson. It only polls the bridge and draws strings; it never talks to Anthropic.
+- `firmware/` — PlatformIO / Arduino for a Waveshare ESP32-S3-Touch-LCD-1.69 (240x280 ST7789V2, CST816 touch), drawn with LovyanGFX (no LVGL) + ArduinoJson. It only polls the bridge (or takes the same payload over BLE) and draws strings; it never talks to Anthropic.
+- `mac-helper/` — Swift package building `ClaudeCubeLink.app`: supervises the bridge (`node bridge/server.mjs`) and pushes `/api/status` to the cube over BLE (CoreBluetooth). Optional; BLE users run its `install.sh` instead of `bridge/agent.sh`.
 
 The README is detailed and authoritative for setup, troubleshooting and design rationale.
 
@@ -28,12 +29,20 @@ pio run                               # build (also fetches libdeps the simulato
 pio run -t upload && pio device monitor
 ```
 
+Mac helper (from `mac-helper/`):
+```sh
+swift test                                          # frame encoding, push policy, supervisor decisions, shared fixture
+./install.sh install|status|logs|restart|uninstall  # LaunchAgent; install needs a terminal (Bluetooth-permission prompt)
+```
+App env: `CUBE_PORT`, `CUBE_BRIDGE_DIR`, `CUBE_NODE`; flag `--port`.
+
 Desktop simulator (from `firmware/sim/`, needs `brew install sdl2` and one prior `pio run`):
 ```sh
 make run                                   # SDL window; SCALE=3, CUBE_BRIDGE_URL=... to override
 make shot                                  # headless: one PNG per card of the live bridge payload -> build/shot-N.png
 ./build/cube-shot build/state states.json  # render a saved payload (e.g. red ring, empty track)
-./build/cube-shot build/shot @portal       # a screen that is not a payload card: @portal, @ota, @pomo-ready|focus|paused|break|done|long
+./build/cube-shot build/shot @portal       # a screen that is not a payload card: @portal, @ota, @ble-pair|@ble-wait, @pomo-ready|focus|paused|break|done|long
+CUBE_BLE=live|stale|pair|none make run     # what the sim cube believes about Bluetooth (default none); also @ble-pair, @ble-wait shots
 make test                                  # host-side unit tests (pomodoro, gesture, portal helpers); no SDL or board needed
 make run POMO_FAST=60                      # Pomodoro minutes become seconds: watch a full cycle and the phase-end alert (make clean after)
 ```
@@ -59,6 +68,8 @@ There is no linter, and the only automated tests are the host-side unit tests ab
 - `firmware/src/ui.cpp` — the real one: whole frame composed in one full-screen sprite then pushed. Ring notches at 60%/85% (`NOTCHES`), animations (700ms first sweep, 260ms retarget, 400ms colour crossfade); `uiAnimating()` tells `main.cpp` to keep drawing frames.
 - `bridge/preview.html` — a separate JS/SVG reimplementation for browser previewing; it shows whether the data reads well, not whether the firmware draws it correctly. Layout/threshold changes in `ui.cpp` must be mirrored here by hand.
 - `firmware/sim/` — compiles the real `main.cpp`, `ui.cpp`, `payload.cpp` against LovyanGFX's SDL backend (`-DLGFX_SDL`). Only hardware layers are swapped: `net_sim.cpp` (socket HTTP GET) for `net.cpp`, `touch_sim.cpp` (mouse) for `touch.cpp`, and `sim/Arduino.h` is a tiny shim (millis/delay/Serial/min/max/constrain). Firmware code shared with the sim must stay within that shim; `display.h` has an `#ifdef LGFX_SDL` branch for the sim panel.
+
+**Transports.** The cube takes the same payload over BLE (preferred) or WiFi polling. BLE: `net_ble.cpp` is a NimBLE GATT server (Payload write / Control notify / Info read, passkey pairing, one bond); `ble_frame.h` (`FrameAssembler`) reassembles chunked JSON and `bleTake()` feeds it to the unchanged `payloadFromJson()`. `transport_policy.h` (pure, host-tested) decides when WiFi runs: off while a BLE payload arrived in the last 15 s, on when it goes stale (or there is no bond), off again after 30 s of steady BLE; `WIFI_ALWAYS_ON` (`config.h`) keeps it up for OTA. Boot no longer forces the setup portal when there is no SSID; the portal auto-opens on a failed join only with no bond; "Forget paired Mac" (`bleForgetBonds()`) lives in the portal. The wire format is `docs/ble-protocol.md`, pinned by `firmware/sim/fixtures/ble-frames.txt`, which both `make test` and `swift test` read. The Mac side is `mac-helper/` (`BridgeSupervisor` runs `node bridge/server.mjs` or adopts one already serving the port, `CubeLink` is CoreBluetooth, `PushPolicy` sends on change / every 5 s / on "send now" and never when the bridge is down). In the simulator `ble_sim.cpp` stands in for `net_ble.cpp` (`CUBE_BLE`). The BLE path has not been run on a real cube; `docs/ble-acceptance.md` is the open checklist. The payload contract and `cards.mjs` are unchanged.
 
 **Hardware specifics** are isolated in `firmware/src/board_pins.h` (all pins, `LCD_OFFSET_Y`) and `firmware/src/display.h` (LovyanGFX panel config, `cfg.invert`). Board reference (peripherals, full GPIO map, I2C addresses) is in `docs/ESP32-S3-Touch-LCD-1.69.md`.
 

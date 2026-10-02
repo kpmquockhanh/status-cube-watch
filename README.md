@@ -169,9 +169,49 @@ pio run -t upload && pio device monitor
 board-specific value is in that one file; cross-check it against the pin table
 on your board's product wiki.
 
+### 3. Pairing over Bluetooth (optional, recommended)
+
+The Mac can push the data to the cube over Bluetooth, so the cube needs no WiFi at all. With WiFi
+also configured, it is the automatic fallback when the Mac is out of range or asleep.
+
+```sh
+cd mac-helper
+./install.sh install      # builds the app, asks for Bluetooth permission, installs the LaunchAgent
+./install.sh status|logs|restart|uninstall
+```
+
+1. Flash the cube. With no WiFi configured and no Mac paired it shows **Waiting for a Mac**.
+2. `./install.sh install`, click **Allow** on the macOS Bluetooth prompt. The script pauses
+   (`read`) until you press Enter, so run it from a terminal, not a script without stdin.
+3. The cube shows a 6-digit code; macOS asks for it. Type it. That is the whole pairing.
+4. From then on it reconnects by itself. The app also runs the Node bridge for you
+   (`node bridge/server.mjs`, restarted if it dies); if something already serves the port, such as
+   a running `bridge/agent.sh` job, the app adopts that bridge instead of starting its own.
+
+**`install.sh` replaces `bridge/agent.sh`.** BLE users run `mac-helper/install.sh` instead of
+`bridge/agent.sh install`. If the `agent.sh` job is already installed, run
+`bridge/agent.sh uninstall` first; otherwise both LaunchAgents fight for the same port.
+The app reads `CUBE_PORT` (default 8787), `CUBE_BRIDGE_DIR` and `CUBE_NODE` (path to `node`) from
+the environment, and takes `--port N` on its command line; `install.sh` writes them into the
+LaunchAgent, which restarts the app only after a crash (`KeepAlive` with `SuccessfulExit=false`).
+
+The cube takes data from Bluetooth while it arrives (a payload every 5 s) and turns WiFi off. If
+nothing arrives for 15 s and WiFi is configured it polls the bridge instead, and goes back to
+Bluetooth after it has been steady for 30 s. `WIFI_ALWAYS_ON 1` in `config.h` keeps WiFi up
+(needed for OTA while Bluetooth is working). With no WiFi configured and the Mac away, the last
+cards stay on screen and the freshness counter keeps counting; the setup portal does not open by
+itself unless the cube has no paired Mac.
+
+**Pairing again.** Hold the screen at boot, join the cube's `claude-cube-XXXX` network, press
+**Forget paired Mac**, then also remove "Claude Cube" in System Settings > Bluetooth. If the cube's
+flash was erased the Mac keeps the old bond and the log says so (`./install.sh logs`).
+
+The protocol is in `docs/ble-protocol.md`. The manual hardware checklist (nothing in it has been run
+on a real cube yet) is `docs/ble-acceptance.md`.
+
 ### Changing WiFi without reflashing (setup portal)
 
-The cube shows a setup screen when it has no network to join, when it cannot join the stored one within ~20 s, or when you touch the screen while the boot screen says "hold screen for WiFi setup" (the first 3 s after power-up) and keep holding for 5 s. Join the open `claude-cube-XXXX` network (scan the QR on the screen); the setup page opens by itself, or browse to `192.168.4.1`. Enter the WiFi name and password, the bridge URL and, optionally, an OTA password. A WiFi password must be 8 to 63 characters (or empty for an open network). A blank password keeps the saved one unless you change the network. If nobody joins within a minute the cube reboots and retries the stored network, so a router that was slow to come back after a power cut does not strand it. The setup network is open by design: while it is up (setup screen showing), anyone in radio range can change the cube's settings, including the OTA password. Only reconfigure when you are at the cube, and set an OTA password.
+The cube shows a setup screen when it cannot join the stored network within ~20 s and has no paired Mac (a cube with no WiFi and no Mac shows "Waiting for a Mac" instead, see Pairing over Bluetooth), or when you touch the screen while the boot screen says "hold screen for WiFi setup" (the first 3 s after power-up) and keep holding for 5 s. Join the open `claude-cube-XXXX` network (scan the QR on the screen); the setup page opens by itself, or browse to `192.168.4.1`. Enter the WiFi name and password, the bridge URL and, optionally, an OTA password. A WiFi password must be 8 to 63 characters (or empty for an open network). A blank password keeps the saved one unless you change the network. If nobody joins within a minute the cube reboots and retries the stored network, so a router that was slow to come back after a power cut does not strand it. The setup network is open by design: while it is up (setup screen showing), anyone in radio range can change the cube's settings, including the OTA password. Only reconfigure when you are at the cube, and set an OTA password. The page also has a **Forget paired Mac** button.
 
 ### Updating over WiFi (OTA)
 
@@ -193,6 +233,8 @@ bridge/
   preview.html        browser mock of the device
   sources/local.mjs   incremental ~/.claude transcript reader
   sources/admin.mjs   Usage & Cost Admin API client
+mac-helper/           Swift app: runs the bridge, pushes /api/status to the cube over BLE
+  install.sh          install/remove the LaunchAgent
 firmware/
   src/board_pins.h    all board-specific pins — check this first
   src/config.h        your WiFi + bridge URL (gitignored)
@@ -201,6 +243,9 @@ firmware/
   src/ui.cpp          card rendering
   src/payload.cpp     bridge JSON → Payload (shared with the simulator)
   src/net.cpp         WiFi transport
+  src/net_ble.cpp     BLE transport (NimBLE GATT server)
+  src/ble_frame.h     chunk reassembly for the BLE wire format
+  src/transport_policy.h  when WiFi runs versus BLE (pure, host-tested)
   src/main.cpp        poll loop and swipe handling
   sim/                desktop simulator — runs the UI without hardware
   sim/shot.cpp        headless frame grab: one PNG per card
@@ -235,6 +280,12 @@ cd sim && make run
 Drag across the window to swipe, click to tap, `SCALE=3 make run` for a bigger
 window, and `CUBE_BRIDGE_URL=http://localhost:8787/api/status make run` to point
 it somewhere other than the `BRIDGE_URL` in `config.h`.
+
+**Bluetooth in the simulator.** There is no BLE radio on the desktop, so `CUBE_BLE` picks what the
+cube believes: `none` (default, WiFi-only as before), `live` (bonded, a payload arrives every 5 s),
+`stale` (bonded, nothing arrives, so WiFi takes over after 15 s), `pair` (the passkey screen).
+`./build/cube-shot build/shot @ble-pair` and `@ble-wait` render the passkey and "Waiting for a Mac"
+screens.
 
 **Frame grabs.** `make shot` renders every card of the live payload through the
 same `ui.cpp` and writes one PNG per card to `build/`, with no window and no
@@ -320,6 +371,7 @@ as you swipe. One long value therefore shrinks every ring, which is why
 | `[touch] not responding` | `PIN_I2C_SDA` / `PIN_I2C_SCL` / `PIN_TP_RST` wrong |
 | Device shows `OFFLINE` | Bridge not reachable — check it's bound to the LAN address it printed, and that the host firewall allows the port |
 | Costs look too low | An unrecognised model falls back to Sonnet-tier rates; add it to `bridge/pricing.mjs` |
+| Cube never pairs | Check `./install.sh logs`; the app needs the Bluetooth permission (System Settings > Privacy & Security > Bluetooth) |
 | `pio run` stalls at `Downloading 0%` | PlatformIO's CDN, not your network. See below. |
 
 ### When the PlatformIO registry is down
