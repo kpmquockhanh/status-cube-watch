@@ -43,6 +43,7 @@ make shot                                  # headless: one PNG per card of the l
 ./build/cube-shot build/state states.json  # render a saved payload (e.g. red ring, empty track)
 ./build/cube-shot build/shot @portal       # a screen that is not a payload card: @portal, @ota, @ble-pair|@ble-wait, @pomo-ready|focus|paused|break|done|long
 CUBE_BLE=live|stale|pair|none make run     # what the sim cube believes about Bluetooth (default none); also @ble-pair, @ble-wait shots
+CUBE_ORIENT=2 make run                     # sim cube is upside down: flips ~1 s after start (default 0); the window is the only place the flip shows, `make shot` reads back the logical frame and is unaffected
 make test                                  # host-side unit tests (pomodoro, gesture, portal helpers); no SDL or board needed
 make run POMO_FAST=60                      # Pomodoro minutes become seconds: watch a full cycle and the phase-end alert (make clean after)
 ```
@@ -68,6 +69,8 @@ There is no linter, and the only automated tests are the host-side unit tests ab
 **Battery indicator.** The top bar of every card shows a battery glyph + percent, read on-device from `PIN_BAT_ADC` (`battery.cpp`; logic in `battery_util.h`, host-tested). It is local-only: not in the payload contract and not in `preview.html`. With no cell fitted (mV < 2500) the cube is on USB and shows a full 100%. The glyph is dropped (number only) when the card name would not fit beside it. In the simulator set `CUBE_BATTERY=<0..100>|none` (default 78).
 
 **Screen sleep.** After `SCREEN_SLEEP_MS` (`config.h`, default 15 min, 0 = never) with no touch and no fresh data, `main.cpp` turns the backlight off and puts the panel to sleep; a touch wakes it (and is swallowed), data alone does not. Never while a Pomodoro session runs/pauses, the editor is open, or a pairing screen is up. Logic is `idle_sleep.h` (pure, host-tested). Local-only, not in the payload or `preview.html`; the sim ignores brightness, so only the state machine is testable off-device.
+
+**Auto-rotate.** The cube flips its display 180° when stood on its other end, always on (no setting). `imu.cpp` reads the QMI8658C accelerometer (I2C `0x6B`, shared bus) and `main.cpp` polls it at 5 Hz into `Orientation` (`orientation.h`, pure, host-tested: `|up| > 0.6 g`, `|up| > |az|`, held 1 s, deferred while a finger is down; flat or tilted never flips). The result goes to `lcd.setRotation(0|2)`, so `ui.cpp` and `preview.html` are untouched; raw CST816 coordinates are mirrored by `touchToScreen` (`touch_map.h`) before gesture code sees them. The panel is not written while the screen sleeps; the rotation is applied on wake before the first frame. Local-only: not in the payload contract. `IMU_UP_SIGN` in `board_pins.h` is the sign of IMU Y when the screen top is up and is unverified on hardware; `docs/imu-acceptance.md` is the open checklist. The simulator stand-in is `imu_sim.cpp` (`CUBE_ORIENT`); `touch_sim.cpp` undoes the mirror so `main.cpp` sees raw coordinates as on the board.
 
 **Three renderers of the same layout.**
 - `firmware/src/ui.cpp` — the real one: whole frame composed in one full-screen sprite then pushed. Ring notches at 60%/85% (`NOTCHES`), animations (700ms first sweep, 260ms retarget, 400ms colour crossfade); `uiAnimating()` tells `main.cpp` to keep drawing frames.
