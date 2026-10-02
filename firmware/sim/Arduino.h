@@ -9,6 +9,7 @@
 #include <chrono>
 #include <cstdarg>
 #include <cstdint>
+#include <cstdlib>
 #include <cstdio>
 #include <cstring>
 #include <thread>
@@ -20,6 +21,11 @@ inline uint32_t millis() {
 }
 
 inline void delay(uint32_t ms) { std::this_thread::sleep_for(std::chrono::milliseconds(ms)); }
+
+struct EspShim {
+  [[noreturn]] void restart() { std::printf("[esp] restart requested (sim exits)\n"); std::exit(0); }
+};
+inline EspShim ESP;
 
 inline bool setCpuFrequencyMhz(uint32_t) { return true; }  // no-op on the desktop
 inline int max(int a, int b) { return a > b ? a : b; }

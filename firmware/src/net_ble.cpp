@@ -6,6 +6,7 @@
 
 #include "ble.h"
 #include "ble_frame.h"
+#include "settings_json.h"
 
 // GATT server for the Mac app. NimBLE calls these callbacks from its own
 // task, so they only copy bytes and set flags; parsing happens in bleTake(),
@@ -27,11 +28,24 @@ char g_pending[BLE_MAX_PAYLOAD + 1];
 size_t g_pendingLen = 0;
 volatile bool g_pendingReady = false;
 
+NimBLECharacteristic *g_settingsChar = nullptr;
+char g_setPending[SETTINGS_JSON_MAX + 1];
+volatile bool g_setReady = false;
+
 void notifyControl(const uint8_t *data, size_t len) {
   if (!g_control) return;
   // The (data, len) overload leaves the characteristic's stored value alone, so
   // the main loop and the NimBLE host task cannot race on it.
   g_control->notify(data, len);
+}
+
+// What a read of the Settings characteristic returns. Called from the main
+// loop (and once at boot), never from the NimBLE task.
+void publishSettings() {
+  if (!g_settingsChar) return;
+  char buf[SETTINGS_JSON_MAX + 1];
+  const size_t n = settingsToJson(buf, sizeof(buf));
+  if (n) g_settingsChar->setValue((const uint8_t *)buf, n);
 }
 
 struct ServerCb : NimBLEServerCallbacks {
@@ -100,6 +114,24 @@ struct PayloadCb : NimBLECharacteristicCallbacks {
   }
 };
 
+// A Settings write is one ATT value (up to 512 bytes): copy it out and let the
+// main loop apply it, since saving to NVS from the NimBLE task is not safe.
+struct SettingsCb : NimBLECharacteristicCallbacks {
+  void onWrite(NimBLECharacteristic *chr, NimBLEConnInfo &) override {
+    const NimBLEAttValue v = chr->getValue();
+    if (v.size() == 0 || v.size() > SETTINGS_JSON_MAX) {
+      const uint8_t r[2] = {BLE_CTRL_SETTINGS, (uint8_t)SettingsResult::Invalid};
+      notifyControl(r, sizeof(r));
+      return;
+    }
+    portENTER_CRITICAL(&g_mux);
+    memcpy(g_setPending, v.data(), v.size());
+    g_setPending[v.size()] = '\0';
+    g_setReady = true;
+    portEXIT_CRITICAL(&g_mux);
+  }
+};
+
 struct ControlCb : NimBLECharacteristicCallbacks {
   void onSubscribe(NimBLECharacteristic *, NimBLEConnInfo &, uint16_t subValue) override {
     if (subValue & 1) g_sendNow = true;  // sent from bleTake(), on the main loop
@@ -109,6 +141,7 @@ struct ControlCb : NimBLECharacteristicCallbacks {
 ServerCb g_serverCb;
 PayloadCb g_payloadCb;
 ControlCb g_controlCb;
+SettingsCb g_settingsCb;
 
 }  // namespace
 
@@ -132,6 +165,12 @@ void bleBegin() {
       BLE_INFO_UUID, NIMBLE_PROPERTY::READ | NIMBLE_PROPERTY::READ_ENC | NIMBLE_PROPERTY::READ_AUTHEN);
   const uint8_t infoVal[2] = {BLE_PROTO_VER, BLE_FW_REV};
   info->setValue(infoVal, sizeof(infoVal));
+
+  g_settingsChar = svc->createCharacteristic(
+      BLE_SETTINGS_UUID, NIMBLE_PROPERTY::READ | NIMBLE_PROPERTY::READ_ENC | NIMBLE_PROPERTY::READ_AUTHEN |
+                             NIMBLE_PROPERTY::WRITE | NIMBLE_PROPERTY::WRITE_ENC | NIMBLE_PROPERTY::WRITE_AUTHEN);
+  g_settingsChar->setCallbacks(&g_settingsCb);
+  publishSettings();
 
   svc->start();
   NimBLEAdvertising *adv = NimBLEDevice::getAdvertising();
@@ -188,5 +227,20 @@ bool bleTake(Payload &out) {
   const uint32_t now = millis();
   g_lastGood = now ? now : 1;  // 0 means "never"
   return true;
+}
+
+bool bleTakeSettings(char *out, size_t cap) {
+  if (!g_setReady) return false;
+  portENTER_CRITICAL(&g_mux);
+  strlcpy(out, g_setPending, cap);
+  g_setReady = false;
+  portEXIT_CRITICAL(&g_mux);
+  return true;
+}
+
+void bleSettingsReply(uint8_t result) {
+  publishSettings();
+  const uint8_t m[2] = {BLE_CTRL_SETTINGS, result};
+  notifyControl(m, sizeof(m));
 }
 #endif  // CUBE_NO_BLE

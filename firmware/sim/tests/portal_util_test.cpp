@@ -81,6 +81,18 @@ void testIdleReboot() {
 
 }  // namespace
 
+void testParseInt() {
+  int v = -1;
+  CHECK(portalParseInt("42", 1, 99, 7, v) && v == 42);
+  CHECK(portalParseInt("  ", 1, 99, 7, v) && v == 7);  // blank keeps
+  CHECK(portalParseInt("0", 0, 9, 5, v) && v == 0);
+  CHECK(!portalParseInt("100", 1, 99, 7, v));
+  CHECK(!portalParseInt("0", 1, 99, 7, v));
+  CHECK(!portalParseInt("1x", 1, 99, 7, v));
+  CHECK(!portalParseInt("-3", 0, 99, 7, v));
+  CHECK(!portalParseInt("12345", 0, 99999, 7, v));
+}
+
 int main() {
   testIdleReboot();
   testBondTransition();
@@ -90,5 +102,6 @@ int main() {
   testTrim();
   testPassword();
   testKeepIfBlank();
+  testParseInt();
   return checksDone("portal_util_test");
 }

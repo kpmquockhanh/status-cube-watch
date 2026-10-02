@@ -2,12 +2,14 @@
 
 namespace {
 
-constexpr int ROW_Y0 = 44;
-constexpr int ROW_H = 46;
-constexpr int BTN_W = 48;
+constexpr int ROW_Y0 = 46;
+constexpr int ROW_H = 44;
+constexpr int BTN_W = 46;  // touch zone around each round stepper
 constexpr int MARGIN = 10;
+constexpr int MINUS_X = 101;  // centred on the stepper circles drawn by ui.cpp
+constexpr int PLUS_X = 193;
 constexpr int PANEL_W = 240;
-constexpr int BAR_Y = 234;
+constexpr int BAR_Y = 232;
 constexpr int BAR_H = 44;
 
 struct RowSpec {
@@ -52,10 +54,10 @@ EditRect editorRow(int row) {
   return EditRect{0, (int16_t)(ROW_Y0 + row * ROW_H), PANEL_W, ROW_H};
 }
 EditRect editorMinus(int row) {
-  return EditRect{MARGIN, (int16_t)(ROW_Y0 + row * ROW_H), BTN_W, ROW_H};
+  return EditRect{MINUS_X, (int16_t)(ROW_Y0 + row * ROW_H), BTN_W, ROW_H};
 }
 EditRect editorPlus(int row) {
-  return EditRect{(int16_t)(PANEL_W - MARGIN - BTN_W), (int16_t)(ROW_Y0 + row * ROW_H), BTN_W, ROW_H};
+  return EditRect{PLUS_X, (int16_t)(ROW_Y0 + row * ROW_H), BTN_W, ROW_H};
 }
 EditRect editorResetBtn() { return EditRect{MARGIN, BAR_Y, 108, BAR_H}; }
 EditRect editorDoneBtn() { return EditRect{122, BAR_Y, 108, BAR_H}; }

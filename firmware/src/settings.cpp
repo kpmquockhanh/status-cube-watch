@@ -4,6 +4,7 @@
 #include <Preferences.h>
 
 #include "config.h"
+#include "device_defaults.h"
 #include "pomo_defaults.h"
 
 #ifndef OTA_PASSWORD
@@ -15,6 +16,7 @@ namespace {
 constexpr char NS[] = "cube";
 Settings g_settings;
 PomoSettings g_pomo = POMO_DEFAULTS;
+DeviceSettings g_dev = DEVICE_DEFAULTS;
 
 uint8_t loadU8(Preferences &p, const char *key, uint8_t fallback) {
   return p.isKey(key) ? p.getUChar(key, fallback) : fallback;
@@ -34,6 +36,7 @@ void useDefaults() {
   strlcpy(g_settings.bridge, BRIDGE_URL, sizeof(g_settings.bridge));
   strlcpy(g_settings.otaPass, OTA_PASSWORD, sizeof(g_settings.otaPass));
   g_pomo = POMO_DEFAULTS;
+  g_dev = DEVICE_DEFAULTS;
 }
 
 }  // namespace
@@ -55,6 +58,10 @@ void settingsLoad() {
                                   loadU8(p, "ps", POMO_DEFAULTS.shortMin),
                                   loadU8(p, "pl", POMO_DEFAULTS.longMin),
                                   loadU8(p, "pn", POMO_DEFAULTS.sessions)});
+  g_dev = deviceClamp(DeviceSettings{loadU8(p, "bl", DEVICE_DEFAULTS.backlight),
+                                     loadU8(p, "sl", DEVICE_DEFAULTS.sleepMin),
+                                     loadU8(p, "rt", DEVICE_DEFAULTS.rotateSec),
+                                     loadU8(p, "pi", DEVICE_DEFAULTS.pollSec)});
   p.end();
 }
 
@@ -90,6 +97,22 @@ bool pomoSettingsSave(const PomoSettings &s) {
   p.putUChar("ps", g_pomo.shortMin);
   p.putUChar("pl", g_pomo.longMin);
   p.putUChar("pn", g_pomo.sessions);
+  p.end();
+  return true;
+}
+
+DeviceSettings deviceDefaults() { return DEVICE_DEFAULTS; }
+
+const DeviceSettings &deviceSettings() { return g_dev; }
+
+bool deviceSettingsSave(const DeviceSettings &s) {
+  g_dev = deviceClamp(s);
+  Preferences p;
+  if (!p.begin(NS, false)) return false;
+  p.putUChar("bl", g_dev.backlight);
+  p.putUChar("sl", g_dev.sleepMin);
+  p.putUChar("rt", g_dev.rotateSec);
+  p.putUChar("pi", g_dev.pollSec);
   p.end();
   return true;
 }

@@ -9,18 +9,20 @@
 #include <string.h>
 
 constexpr uint8_t BLE_PROTO_VER = 1;
-constexpr uint8_t BLE_FW_REV = 1;  // bumped when behaviour the Mac can see changes
+constexpr uint8_t BLE_FW_REV = 2;  // bumped when behaviour the Mac can see changes
 constexpr size_t BLE_HDR = 4;      // ver, seq, idx, total
 constexpr uint8_t BLE_MAX_CHUNKS = 16;
 constexpr size_t BLE_MAX_PAYLOAD = 2048;
 
 constexpr uint8_t BLE_CTRL_SEND_NOW = 0x01;  // cube -> Mac: send the payload now
 constexpr uint8_t BLE_CTRL_ACK = 0x02;       // cube -> Mac: [0x02, seq] payload reassembled
+constexpr uint8_t BLE_CTRL_SETTINGS = 0x03;  // cube -> Mac: [0x03, SettingsResult] a Settings write was handled
 
 constexpr char BLE_SERVICE_UUID[] = "6e6d3c10-5d1a-4c1e-9f0b-7c4a2b8e1a01";
 constexpr char BLE_PAYLOAD_UUID[] = "6e6d3c10-5d1a-4c1e-9f0b-7c4a2b8e1a02";
 constexpr char BLE_CONTROL_UUID[] = "6e6d3c10-5d1a-4c1e-9f0b-7c4a2b8e1a03";
 constexpr char BLE_INFO_UUID[] = "6e6d3c10-5d1a-4c1e-9f0b-7c4a2b8e1a04";
+constexpr char BLE_SETTINGS_UUID[] = "6e6d3c10-5d1a-4c1e-9f0b-7c4a2b8e1a05";
 
 enum class FrameResult : uint8_t {
   Partial,   // stored; more chunks expected

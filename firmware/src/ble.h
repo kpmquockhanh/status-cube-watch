@@ -1,4 +1,5 @@
 #pragma once
+#include <stddef.h>
 #include <stdint.h>
 
 #include "payload.h"
@@ -24,3 +25,11 @@ bool bleBonded();       // a Mac is bonded
 bool bleTake(Payload &out);
 uint32_t bleLastGood();  // millis() of the last valid payload, 0 = never
 void bleForgetBonds();   // forget the bonded Mac (the caller reboots)
+
+// Settings the Mac writes over BLE (settings_json.h). True when a JSON object
+// arrived since the last call; it is copied to `out` (NUL-terminated, at most
+// `cap` bytes). The main loop applies it, then calls bleSettingsReply().
+bool bleTakeSettings(char *out, size_t cap);
+// Tells the Mac how the write went (a SettingsResult) and refreshes what a
+// read of the Settings characteristic returns.
+void bleSettingsReply(uint8_t result);

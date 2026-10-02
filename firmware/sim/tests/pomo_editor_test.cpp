@@ -41,7 +41,7 @@ void testHitEveryButton() {
 void testMissesDoNothing() {
   const EditRect m = editorMinus(1);
   const EditRect p = editorPlus(1);
-  CHECK(pomoEditorHit(120, m.y + 20).action == EditAction::None);                    // value area
+  CHECK(pomoEditorHit(170, m.y + 20).action == EditAction::None);                    // value area
   CHECK(pomoEditorHit((int16_t)(m.x - 1), m.y + 20).action == EditAction::None);     // left margin
   CHECK(pomoEditorHit((int16_t)(p.x + p.w), p.y + 20).action == EditAction::None);   // right margin
   CHECK(pomoEditorHit(30, 10).action == EditAction::None);                           // title

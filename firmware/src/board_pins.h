@@ -20,6 +20,9 @@
 // The ST7789 controller addresses a 240x320 frame, so a 240x280 panel starts
 // 20 rows in. If the image is shifted vertically, this is the number to change.
 #define LCD_OFFSET_Y 20
+// Corner radius of the glass, in px. The settings sheets round their screen-edge
+// corners to this so they sit flush with the bezel; tune it if they do not.
+#define LCD_CORNER_R 40
 
 // --- CST816 capacitive touch, I2C (shared with the IMU and RTC) --------
 #define PIN_I2C_SDA  11

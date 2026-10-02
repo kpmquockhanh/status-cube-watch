@@ -1,5 +1,6 @@
 #pragma once
 #include "battery_util.h"
+#include "device_settings.h"
 #include "display.h"
 #include "payload.h"
 #include "pomo_settings.h"
@@ -37,6 +38,11 @@ void uiPomodoroEditor(Display &lcd, const PomoSettings &s);
 // reports false the open editor is drawn by uiPomodoroEditor.
 void uiEditorSlide(bool open, const PomoSettings &s);
 bool uiEditorSliding();
+// The display settings panel (brightness, sleep, auto-advance, refresh): same
+// layout as the Pomodoro editor, but it drops down from the top. The slide
+// state is shared, so uiEditorSliding() covers both.
+void uiDeviceSlide(bool open, const DeviceSettings &s);
+void uiDeviceEditor(Display &lcd, const DeviceSettings &s);
 void uiMessage(Display &lcd, const char *title, const char *body);
 // Setup screen shown while the config portal runs: the cube's own WiFi name
 // as text and as a join-QR, and the address of the form.

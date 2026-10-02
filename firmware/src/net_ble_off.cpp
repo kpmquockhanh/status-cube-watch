@@ -10,4 +10,6 @@ bool bleBonded() { return false; }
 bool bleTake(Payload &) { return false; }
 uint32_t bleLastGood() { return 0; }
 void bleForgetBonds() {}
+bool bleTakeSettings(char *, size_t) { return false; }
+void bleSettingsReply(uint8_t) {}
 #endif  // CUBE_NO_BLE

@@ -2,7 +2,7 @@
 //
 // Polls the host bridge for a small pre-formatted JSON payload and renders it
 // as a swipeable deck of cards. Swipe or tap to change card; the deck can
-// also auto-advance (CARD_ROTATE_MS).
+// also auto-advance (the rotate setting).
 
 #include <Arduino.h>
 #include "battery.h"
@@ -15,11 +15,14 @@
 #include "net.h"
 #include "ota.h"
 #include "payload.h"
+#include "dev_editor.h"
+#include "dev_editor.h"
 #include "pomo_editor.h"
 #include "pomo_settings.h"
 #include "pomodoro.h"
 #include "portal.h"
 #include "settings.h"
+#include "settings_json.h"
 #include "touch.h"
 #include "transport_policy.h"
 #include "ui.h"
@@ -41,10 +44,6 @@ namespace {
 
 constexpr uint32_t CPU_MHZ_AWAKE = 240;  // matches board_build.f_cpu
 constexpr uint32_t CPU_MHZ_ASLEEP = 80;  // lowest clock WiFi/BLE still run at
-
-#ifndef SCREEN_SLEEP_MS
-#define SCREEN_SLEEP_MS 900000  // older config.h files: 15 min
-#endif
 
 Display lcd;
 Touch touch;
@@ -81,6 +80,8 @@ GestureTracker gestures;
 // is open nothing else moves the deck, and holds are off so a long press
 // cannot start a session behind it. `editSettings` is the working copy.
 bool editing = false;
+bool editingDevice = false;  // the display panel, not the Pomodoro editor, is the open one
+DeviceSettings editDevice{};
 PomoSettings editSettings{};
 
 constexpr uint32_t SETUP_HOLD_MS = 5000;
@@ -125,11 +126,66 @@ void step(int delta) {
   dirty = true;
 }
 
+// The Mac edited settings over BLE: apply, tell it how it went, and reboot when
+// the network settings changed (they are only read at boot).
+void handleBleSettings() {
+  char json[SETTINGS_JSON_MAX + 1];
+  if (!bleTakeSettings(json, sizeof(json))) return;
+  const SettingsResult r = settingsApplyJson(json);
+  Serial.printf("[ble] settings write -> %d\n", (int)r);
+  bleSettingsReply((uint8_t)r);
+  if (r == SettingsResult::Invalid) return;
+  pomo.setConfig(pomoConfigFrom(pomoSettings(), POMO_TIME_DIV));  // only acts while idle
+  if (screenOn) lcd.setBrightness(deviceSettings().backlight);
+  lastRotate = millis();
+  dirty = true;
+  if (r == SettingsResult::OkReboot) {
+    delay(500);  // let the notification leave
+    ESP.restart();
+  }
+}
+
 void openEditor() {
   editSettings = pomoSettings();
   editing = true;
   uiEditorSlide(true, editSettings);
   dirty = true;
+}
+
+void openDeviceEditor() {
+  editDevice = deviceSettings();
+  editing = true;
+  editingDevice = true;
+  uiDeviceSlide(true, editDevice);
+  dirty = true;
+}
+
+// DONE and swipe-up both land here. Brightness was previewed live while
+// editing; the rest takes effect now.
+void closeDeviceEditor() {
+  deviceSettingsSave(editDevice);
+  lcd.setBrightness(deviceSettings().backlight);
+  editing = false;
+  editingDevice = false;
+  uiDeviceSlide(false, editDevice);
+  lastRotate = millis();
+  idle.data(millis());  // the sleep timer starts over from the edit
+  dirty = true;
+}
+
+void deviceEditorGesture(Gesture g) {
+  if (g == Gesture::SwipeUp) {
+    closeDeviceEditor();
+  } else if (g == Gesture::Tap) {
+    const EditHit hit = pomoEditorHit(gestures.startX(), gestures.startY());
+    if (hit.action == EditAction::Done) {
+      closeDeviceEditor();
+    } else if (hit.action != EditAction::None) {
+      devEditorApply(editDevice, hit, deviceDefaults());
+      lcd.setBrightness(editDevice.backlight);
+      dirty = true;
+    }
+  }
 }
 
 // DONE and swipe-down both land here: what is on screen is what is saved.
@@ -176,7 +232,8 @@ void pollTouch() {
   const bool onPomodoro = cardIndex == uiPomodoroIndex(payload);
   const Gesture gesture = gestures.update(down, x, y, now, onPomodoro && !editing);
   if (editing) {
-    editorGesture(gesture);
+    if (editingDevice) deviceEditorGesture(gesture);
+    else editorGesture(gesture);
     return;
   }
   switch (gesture) {
@@ -198,10 +255,17 @@ void pollTouch() {
     case Gesture::SwipeUp:  // open the Pomodoro editor (idle timer only)
       if (editorMayOpen(onPomodoro, pomo.view().state)) openEditor();
       break;
+    case Gesture::SwipeDown:  // open the display settings panel, from any card
+      if (devEditorMayOpen(editing)) openDeviceEditor();
+      break;
     default:
       break;
   }
 }
+
+uint32_t pollMs() { return (uint32_t)deviceSettings().pollSec * 1000u; }
+uint32_t rotateMs() { return (uint32_t)deviceSettings().rotateSec * 1000u; }
+uint32_t sleepMs() { return (uint32_t)deviceSettings().sleepMin * 60000u; }
 
 }  // namespace
 
@@ -214,7 +278,7 @@ void setup() {
 
   lcd.init();
   lcd.setRotation(0);
-  lcd.setBrightness(BACKLIGHT);
+  lcd.setBrightness(deviceSettings().backlight);
   uiBegin(lcd);
 
   touch.begin();
@@ -246,7 +310,7 @@ void setup() {
   idle.begin(millis());
   policy.begin(millis());
   // First poll on the first loop pass rather than a full interval from now.
-  lastPoll = millis() - POLL_INTERVAL_MS;
+  lastPoll = millis() - pollMs();
   lastRotate = millis();
   dirty = true;
 }
@@ -291,7 +355,8 @@ void loop() {
   bool gotData = false;
   const bool wasOnPomodoro = cardIndex == uiPomodoroIndex(payload);
   if (bleTake(payload)) gotData = true;
-  if (wifiUp && now - lastPoll >= POLL_INTERVAL_MS) {
+  handleBleSettings();
+  if (wifiUp && now - lastPoll >= pollMs()) {
     lastPoll = now;
     if (netFetch(payload)) {
       gotData = true;
@@ -308,7 +373,7 @@ void loop() {
     dirty = true;
   }
 
-  if (CARD_ROTATE_MS > 0 && !editing && now - lastRotate >= CARD_ROTATE_MS) {
+  if (rotateMs() > 0 && !editing && now - lastRotate >= rotateMs()) {
     step(1);
   }
 
@@ -332,13 +397,13 @@ void loop() {
   const PomoState ps = pv.state;
   const bool keepOn = ps == POMO_FOCUS || ps == POMO_BREAK || ps == POMO_PAUSED || editing ||
                       bleState() == BleState::Pairing || (!pairWaitDismissed && waitingToPair());
-  const bool wantOn = idle.update(now, keepOn, SCREEN_SLEEP_MS);
+  const bool wantOn = idle.update(now, keepOn, sleepMs());
   if (wantOn != screenOn) {
     screenOn = wantOn;
     if (screenOn) {
       setCpuFrequencyMhz(CPU_MHZ_AWAKE);
       lcd.wakeup();
-      lcd.setBrightness(BACKLIGHT);
+      lcd.setBrightness(deviceSettings().backlight);
       dirty = true;
     } else {
       lcd.setBrightness(0);
@@ -357,7 +422,10 @@ void loop() {
     const uint32_t age = lastGood ? now - lastGood : now;
     if (bleState() == BleState::Pairing) uiBlePair(lcd, blePasskey());  // the code must be seen
     else if (!pairWaitDismissed && waitingToPair()) uiBlePair(lcd, 0);
-    else if (editing && !uiEditorSliding()) uiPomodoroEditor(lcd, editSettings);
+    else if (editing && !uiEditorSliding()) {
+      if (editingDevice) uiDeviceEditor(lcd, editDevice);
+      else uiPomodoroEditor(lcd, editSettings);
+    }
     else uiRender(lcd, payload, cardIndex, td.bleLive || netOnline(), age, pv, bv,
                     td.bleLive ? UiLink::Ble : (wifiUp && netOnline() ? UiLink::Wifi : UiLink::None));
     lastDraw = now;

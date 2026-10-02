@@ -174,6 +174,8 @@ bool renderSpecial(Display &lcd, const char *name) {
     uiBlePair(lcd, 0);
   } else if (!strcmp(name, "pomo-edit")) {
     uiPomodoroEditor(lcd, PomoSettings{30, 5, 15, 4});
+  } else if (!strcmp(name, "dev-edit")) {
+    uiDeviceEditor(lcd, DeviceSettings{160, 15, 0, 5});
   } else if (!strncmp(name, "pomo-", 5)) {
     if (!pomodoroShot(lcd, name + 5)) return false;
   } else {

@@ -12,8 +12,8 @@ enum class Gesture : uint8_t {
   Tap,
   SwipeNext,   // finger moved left: advance
   SwipePrev,
-  SwipeUp,     // finger moved up the screen (opens the Pomodoro editor)
-  SwipeDown,   // finger moved down (closes it)
+  SwipeUp,     // finger moved up the screen (opens the Pomodoro editor; closes the display panel)
+  SwipeDown,   // finger moved down (closes the Pomodoro editor; opens the display panel)
   LongPress,   // held in place for LONG_PRESS_MS; fires while the finger is still down
   ResetPress,  // still held at RESET_PRESS_MS, after a LongPress; fires once
 };

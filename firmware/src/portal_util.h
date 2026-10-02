@@ -72,3 +72,19 @@ inline std::string portalResolvePassword(const std::string &oldSsid, const std::
 inline std::string portalKeepIfBlank(const std::string &oldValue, const std::string &newValue) {
   return newValue.empty() ? oldValue : newValue;
 }
+
+// Parses a whole-string decimal integer in [lo, hi]. A blank field keeps
+// `keep`; anything else (letters, trailing junk, out of range) is rejected.
+inline bool portalParseInt(const std::string &raw, int lo, int hi, int keep, int &out) {
+  const std::string t = portalTrim(raw);
+  if (t.empty()) { out = keep; return true; }
+  if (t.size() > 4) return false;
+  int v = 0;
+  for (char c : t) {
+    if (c < '0' || c > '9') return false;
+    v = v * 10 + (c - '0');
+  }
+  if (v < lo || v > hi) return false;
+  out = v;
+  return true;
+}

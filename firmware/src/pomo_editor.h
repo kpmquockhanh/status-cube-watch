@@ -8,9 +8,9 @@
 // here and ui.cpp draws from them, so what is drawn and what is hit-tested
 // cannot drift apart. Pure: no Arduino, no LovyanGFX.
 //
-//   y= 0..44    title
-//   y=44..228   four rows of 46 px:  [ - ]   LABEL / value   [ + ]
-//   y=234..278  [ RESET ] [ DONE ]
+//   y= 0..46    handle + icon/title
+//   y=46..222   four rows of 44 px:  LABEL ......  ( - )  value  ( + )
+//   y=232..276  RESET (text)  [ DONE ] (pill)
 constexpr int EDIT_ROWS = 4;  // FOCUS, SHORT, LONG, SESSIONS
 
 struct EditRect {

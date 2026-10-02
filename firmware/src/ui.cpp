@@ -5,7 +5,9 @@
 #include "battery_util.h"
 #include "config.h"
 #include "fonts_gen.h"
+#include "dev_editor.h"
 #include "pomo_editor.h"
+#include "settings.h"
 
 namespace {
 
@@ -24,7 +26,7 @@ constexpr uint32_t RGB888[7] = {
 };
 
 uint16_t g_palette[7];
-uint16_t DIM, FAINT, INK;
+uint16_t DIM, FAINT, INK, PANEL, ACC_POMO, ACC_DEV;
 constexpr uint16_t BG = 0x0000;
 
 LGFX_Sprite g_canvas;
@@ -649,44 +651,137 @@ void drawPomodoroCard(LovyanGFX *g, const PomoView &v, float flash, bool online,
   drawGaugeCard(g, card, style, fitFont(g, "88:88", VALUE_MAX_W, VALUE_MAX_H), g_pomoAnim, millis(), online, ageMs, bat);
 }
 
-// --- the Pomodoro editor ---------------------------------------------------
-// A button is its hit rectangle inset by 3 px, so neighbours never touch while
-// the full rectangle stays the touch target.
-void drawEditorButton(LovyanGFX *g, const EditRect &r0, const char *text, uint16_t fill,
-                      uint16_t ink, int yOff = 0) {
-  constexpr int GAP = 3;
-  EditRect r = r0;
-  r.y += yOff;
-  g->fillRoundRect(r.x + GAP, r.y + GAP, r.w - 2 * GAP, r.h - 2 * GAP, 8, fill);
-  g->setFont(text[1] == '\0' ? &V_B24.font : &V_B18.font);  // a lone - or + is drawn big
-  g->setTextDatum(middle_center);
-  g->setTextColor(ink, fill);
-  g->drawString(text, r.x + r.w / 2, r.y + r.h / 2);
+// --- the settings sheets -----------------------------------------------------
+// Both the Pomodoro editor (rises from the bottom) and the display panel (drops
+// from the top) are sheets: a lifted background with rounded corners on the edge
+// facing the card, a grab handle on that edge, an icon + title, hairline-divided
+// rows of  LABEL ... ( - ) value ( + ),  and a RESET / DONE bar. Each has its own
+// accent. Geometry comes from pomo_editor.cpp so drawing and hit-testing agree.
+constexpr int STEP_R = 12;      // stepper circle radius
+constexpr int STEP_MINUS_CX = 124;
+constexpr int STEP_PLUS_CX = 216;
+constexpr int VALUE_CX = 170;
+constexpr int ROW_PAD = 14;     // side inset of the labels and dividers
+constexpr int SHEET_R = LCD_CORNER_R;  // matches the glass, so the sheet sits flush at rest
+
+void drawStepper(LovyanGFX *g, int cx, int cy, bool plus, uint16_t accent) {
+  (void)accent;
+  g->fillCircle(cx, cy, STEP_R, FAINT);
+  g->fillRect(cx - 5, cy - 1, 11, 2, INK);
+  if (plus) g->fillRect(cx - 1, cy - 5, 2, 11, INK);
 }
 
-// The editor panel, drawn `yOff` px down from its resting place so it can slide.
+// One row: [LABEL ...... ( - ) value ( + )], with an optional meter (0..100)
+// under the label and a hairline above (not on the first row).
+void drawSheetRow(LovyanGFX *g, int r, const char *label, const char *value, int meterPct,
+                  uint16_t accent, int yOff) {
+  const EditRect row = editorRow(r);
+  const int top = row.y + yOff;
+  const int cy = top + row.h / 2;
+  if (r > 0) g->drawFastHLine(ROW_PAD, top, LCD_WIDTH - 2 * ROW_PAD, FAINT);
+  const int labelY = meterPct >= 0 ? cy - 5 : cy;
+  drawCaps(g, label, ROW_PAD, labelY, DIM, middle_left);
+  if (meterPct >= 0) {
+    constexpr int MW = 70;
+    g->fillRoundRect(ROW_PAD, cy + 7, MW, 3, 1, FAINT);
+    const int fill = MW * meterPct / 100;
+    if (fill > 0) g->fillRoundRect(ROW_PAD, cy + 7, fill < 3 ? 3 : fill, 3, 1, accent);
+  }
+  drawStepper(g, STEP_MINUS_CX, cy, false, accent);
+  drawStepper(g, STEP_PLUS_CX, cy, true, accent);
+  g->setFont(&V_B18.font);
+  g->setTextDatum(middle_center);
+  g->setTextColor(INK, PANEL);
+  g->drawString(value, VALUE_CX, cy);
+}
+
+void drawSheetBar(LovyanGFX *g, uint16_t accent, int yOff) {
+  const EditRect reset = editorResetBtn();
+  const EditRect done = editorDoneBtn();
+  g->setFont(&V_B18.font);
+  g->setTextDatum(middle_center);
+  g->setTextColor(DIM, PANEL);
+  g->drawString("RESET", reset.x + reset.w / 2, reset.y + reset.h / 2 + yOff);
+  g->fillRoundRect(done.x, done.y + 5 + yOff, done.w, done.h - 10, (done.h - 10) / 2, accent);
+  g->setTextColor(BG, accent);
+  g->drawString("DONE", done.x + done.w / 2, done.y + done.h / 2 + yOff);
+}
+
+// The sheet body, `yOff` px down from its resting place so it can slide. `atTop`
+// marks the panel that drops in from the top: its rounded edge and handle are at
+// the bottom. The outline is only drawn while sliding: at rest the sheet is the
+// whole screen and the glass supplies the corners, so an arc of our own radius
+// could only disagree with the bezel.
+void drawSheetFrame(LovyanGFX *g, int yOff, bool atTop, uint16_t accent) {
+  if (atTop) {
+    g->fillRoundRect(0, yOff - SHEET_R - 2, LCD_WIDTH, LCD_HEIGHT + SHEET_R + 2, SHEET_R, PANEL);
+    if (yOff) g->drawRoundRect(0, yOff - SHEET_R - 2, LCD_WIDTH, LCD_HEIGHT + SHEET_R + 2, SHEET_R, FAINT);
+    g->fillRoundRect(LCD_WIDTH / 2 - 16, yOff + LCD_HEIGHT - 8, 32, 4, 2, FAINT);
+  } else {
+    g->fillRoundRect(0, yOff, LCD_WIDTH, LCD_HEIGHT + SHEET_R + 2, SHEET_R, PANEL);
+    if (yOff) g->drawRoundRect(0, yOff, LCD_WIDTH, LCD_HEIGHT + SHEET_R + 2, SHEET_R, FAINT);
+    g->fillRoundRect(LCD_WIDTH / 2 - 16, yOff + 7, 32, 4, 2, FAINT);
+  }
+  (void)accent;
+}
+
+void drawSheetTitle(LovyanGFX *g, const char *title, bool sun, uint16_t accent, int yOff) {
+  const int cy = (sun ? 22 : 26) + yOff;
+  constexpr int IX = ROW_PAD + 7;
+  if (sun) {
+    g->fillCircle(IX, cy, 4, accent);
+    for (int i = 0; i < 8; i++) {
+      const float a = i * 0.7853982f;
+      g->drawLine(IX + (int)lroundf(cosf(a) * 6.5f), cy + (int)lroundf(sinf(a) * 6.5f),
+                  IX + (int)lroundf(cosf(a) * 8.5f), cy + (int)lroundf(sinf(a) * 8.5f), accent);
+    }
+  } else {
+    g->fillCircle(IX, cy + 1, 7, accent);
+    g->drawLine(IX, cy - 6, IX + 3, cy - 9, g_palette[ACC_GREEN]);
+    g->drawLine(IX + 1, cy - 6, IX + 4, cy - 9, g_palette[ACC_GREEN]);
+  }
+  g->setFont(&V_B18.font);
+  g->setTextDatum(middle_left);
+  g->setTextColor(accent, PANEL);
+  char buf[16];
+  size_t i = 0;
+  for (; title[i] && i < sizeof(buf) - 1; i++) buf[i] = toupper((unsigned char)title[i]);
+  buf[i] = '\0';
+  g->drawString(buf, IX + 16, cy);
+}
+
 void drawEditorPanel(LovyanGFX *g, const PomoSettings &s, int yOff) {
-  g->fillRect(0, yOff, LCD_WIDTH, LCD_HEIGHT, BG);
-  g->drawFastHLine(0, yOff, LCD_WIDTH, FAINT);  // edge that separates it from the card behind
-
-  drawCaps(g, "Pomodoro", LCD_WIDTH / 2, 24 + yOff, g_palette[ACC_ACCENT], middle_center);
-
+  drawSheetFrame(g, yOff, false, ACC_POMO);
+  drawSheetTitle(g, "Pomodoro", false, ACC_POMO, yOff + 4);
   const uint8_t vals[EDIT_ROWS] = {s.focusMin, s.shortMin, s.longMin, s.sessions};
   for (int r = 0; r < EDIT_ROWS; r++) {
-    const EditRect row = editorRow(r);
-    drawEditorButton(g, editorMinus(r), "-", FAINT, INK, yOff);
-    drawEditorButton(g, editorPlus(r), "+", FAINT, INK, yOff);
-    drawCaps(g, editorLabel(r), LCD_WIDTH / 2, row.y + 12 + yOff, DIM, middle_center);
     char buf[12];
     if (r == EDIT_ROWS - 1) snprintf(buf, sizeof(buf), "%u", (unsigned)vals[r]);
     else snprintf(buf, sizeof(buf), "%u min", (unsigned)vals[r]);
-    g->setFont(&V_B24.font);
-    g->setTextDatum(middle_center);
-    g->setTextColor(INK, BG);
-    g->drawString(buf, LCD_WIDTH / 2, row.y + 31 + yOff);
+    drawSheetRow(g, r, editorLabel(r), buf, -1, ACC_POMO, yOff);
   }
-  drawEditorButton(g, editorResetBtn(), "RESET", FAINT, INK, yOff);
-  drawEditorButton(g, editorDoneBtn(), "DONE", g_palette[ACC_ACCENT], BG, yOff);
+  drawSheetBar(g, ACC_POMO, yOff);
+}
+
+void drawDevicePanel(LovyanGFX *g, const DeviceSettings &s, int yOff) {
+  drawSheetFrame(g, yOff, true, ACC_DEV);
+  drawSheetTitle(g, "Display", true, ACC_DEV, yOff + 4);
+  for (int r = 0; r < DEV_EDIT_ROWS; r++) {
+    char buf[12];
+    devEditorValue(r, s, buf, sizeof(buf));
+    drawSheetRow(g, r, devEditorLabel(r), buf, r == 0 ? (int)s.backlight * 100 / 255 : -1,
+                 ACC_DEV, yOff);
+  }
+  drawSheetBar(g, ACC_DEV, yOff);
+}
+
+// Scanline-dims the part of the card still showing beside a sliding sheet, more
+// the further the sheet has come. Every other row, or every fourth early on.
+void dimCard(LovyanGFX *g, int y0, int y1, float pos) {
+  if (pos < 0.25f) return;
+  const int stride = pos < 0.7f ? 4 : 2;
+  for (int y = y0 - (y0 % stride); y < y1; y += stride)
+    if (y >= y0) g->drawFastHLine(0, y, LCD_WIDTH, BG);
 }
 
 // Slide of the editor over the Pomodoro card: 0 = hidden below the screen,
@@ -694,6 +789,8 @@ void drawEditorPanel(LovyanGFX *g, const PomoSettings &s, int yOff) {
 constexpr uint32_t EDITOR_SLIDE_MS = 260;
 bool g_edSliding = false;
 bool g_edOpening = false;
+bool g_edFromTop = false;  // the display panel drops in from the top; the Pomodoro one rises from the bottom
+DeviceSettings g_edDevice{};
 uint32_t g_edStart = 0;
 PomoSettings g_edSettings{};
 
@@ -732,6 +829,9 @@ void uiBegin(Display &lcd) {
   INK = g_palette[ACC_INK];
   DIM = to565(0x7C8598);
   FAINT = to565(0x2A3242);
+  PANEL = BG;  // drawCaps paints text on BG, so the sheet shares it
+  ACC_POMO = to565(0xFF6A4D);  // tomato
+  ACC_DEV = to565(0x4DA3FF);   // sky
 
   // 240x280x16bpp is 134 KB. It fits in internal RAM on an S3 and is much
   // faster there than in PSRAM, so try internal first and fall back to
@@ -781,10 +881,11 @@ void uiRender(Display &lcd, const Payload &p, uint8_t index, bool online, uint32
     const uint32_t now = millis();
     if (now - g_alertStart >= ALERT_MS) {
       g_alertOn = false;
-      lcd.setBrightness(BACKLIGHT);
+      lcd.setBrightness(deviceSettings().backlight);
     } else {
       flash = alertPulse(now);
-      lcd.setBrightness((uint8_t)(BACKLIGHT + (255 - BACKLIGHT) * flash));
+      const uint8_t base = deviceSettings().backlight;
+      lcd.setBrightness((uint8_t)(base + (255 - base) * flash));
       g_animating = true;
     }
   }
@@ -815,7 +916,16 @@ void uiRender(Display &lcd, const Payload &p, uint8_t index, bool online, uint32
 
   if (g_edSliding) {
     const float pos = editorSlidePos(millis());
-    if (pos > 0.0f) drawEditorPanel(g, g_edSettings, (int)((1.0f - pos) * LCD_HEIGHT));
+    if (pos > 0.0f) {
+      const int off = (int)((1.0f - pos) * LCD_HEIGHT);
+      if (g_edFromTop) {
+        dimCard(g, LCD_HEIGHT - off, LCD_HEIGHT, pos);
+        drawDevicePanel(g, g_edDevice, -off);
+      } else {
+        dimCard(g, 0, off, pos);
+        drawEditorPanel(g, g_edSettings, off);
+      }
+    }
     // The last frame of the slide stays animating so it is pushed before the
     // static editor (or the plain card) takes over.
     g_animating = true;
@@ -824,7 +934,24 @@ void uiRender(Display &lcd, const Payload &p, uint8_t index, bool online, uint32
   if (g_sprite) g_canvas.pushSprite(&lcd, 0, 0);
 }
 
+void uiDeviceSlide(bool open, const DeviceSettings &s) {
+  g_edDevice = s;
+  g_edFromTop = true;
+  g_edOpening = open;
+  g_edSliding = true;
+  g_edStart = millis();
+}
+
+void uiDeviceEditor(Display &lcd, const DeviceSettings &s) {
+  g_animating = false;
+  LovyanGFX *g = target(lcd);
+  g->fillScreen(BG);
+  drawDevicePanel(g, s, 0);
+  if (g_sprite) g_canvas.pushSprite(&lcd, 0, 0);
+}
+
 void uiEditorSlide(bool open, const PomoSettings &s) {
+  g_edFromTop = false;
   g_edSettings = s;
   g_edOpening = open;
   g_edSliding = true;
@@ -849,6 +976,7 @@ void uiMessage(Display &lcd, const char *title, const char *body) {
 void uiPomodoroEditor(Display &lcd, const PomoSettings &s) {
   g_animating = false;
   LovyanGFX *g = target(lcd);
+  g->fillScreen(BG);
   drawEditorPanel(g, s, 0);
   if (g_sprite) g_canvas.pushSprite(&lcd, 0, 0);
 }

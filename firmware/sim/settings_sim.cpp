@@ -4,6 +4,7 @@
 #include <Arduino.h>
 
 #include "../src/config.h"
+#include "../src/device_defaults.h"
 #include "../src/pomo_defaults.h"
 #include "../src/settings.h"
 
@@ -14,6 +15,7 @@
 namespace {
 Settings g_settings;
 PomoSettings g_pomo = POMO_DEFAULTS;
+DeviceSettings g_dev = DEVICE_DEFAULTS;
 }
 
 void settingsLoad() {
@@ -22,6 +24,7 @@ void settingsLoad() {
   strlcpy(g_settings.bridge, BRIDGE_URL, sizeof(g_settings.bridge));
   strlcpy(g_settings.otaPass, OTA_PASSWORD, sizeof(g_settings.otaPass));
   g_pomo = POMO_DEFAULTS;
+  g_dev = DEVICE_DEFAULTS;
 }
 
 const Settings &settings() { return g_settings; }
@@ -41,5 +44,15 @@ const PomoSettings &pomoSettings() { return g_pomo; }
 bool pomoSettingsSave(const PomoSettings &s) {
   g_pomo = pomoClamp(s);
   Serial.println("[settings] (sim) pomodoro not persisted");
+  return true;
+}
+
+DeviceSettings deviceDefaults() { return DEVICE_DEFAULTS; }
+
+const DeviceSettings &deviceSettings() { return g_dev; }
+
+bool deviceSettingsSave(const DeviceSettings &s) {
+  g_dev = deviceClamp(s);
+  Serial.println("[settings] (sim) device settings not persisted");
   return true;
 }

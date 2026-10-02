@@ -12,6 +12,7 @@ Everything here is pinned by `firmware/src/ble_frame.h` and `firmware/sim/fixtur
 | Payload | `6e6d3c10-5d1a-4c1e-9f0b-7c4a2b8e1a02` | write (encrypted + authenticated)        |
 | Control | `6e6d3c10-5d1a-4c1e-9f0b-7c4a2b8e1a03` | notify                                   |
 | Info    | `6e6d3c10-5d1a-4c1e-9f0b-7c4a2b8e1a04` | read (encrypted + authenticated)         |
+| Settings| `6e6d3c10-5d1a-4c1e-9f0b-7c4a2b8e1a05` | read + write (encrypted + authenticated) |
 
 Info is 2 bytes: `[proto_ver, fw_rev]`. Reading it is what triggers pairing, so the Mac reads
 Info first, checks `proto_ver == 1`, then subscribes to Control, then writes payloads.
@@ -36,6 +37,7 @@ negotiated write length (`maximumWriteValueLength(for: .withResponse)`, about 50
 |--------------|---------|
 | `01`         | send now: sent when the Mac subscribes, so the screen fills at once |
 | `02 <seq>`   | the payload with that seq was reassembled (not necessarily valid JSON) |
+| `03 <result>`| a Settings write was handled: `00` saved, `01` rejected (nothing changed), `02` saved and the cube is rebooting |
 
 ## Liveness
 
@@ -50,3 +52,26 @@ Display-only IO capability, MITM, Secure Connections, bonding. A cube with no bo
 6-digit passkey; macOS asks for it. One bond at a time: if a second device completes pairing while
 a bond exists, the cube deletes the new bond and disconnects. To pair again, use "Forget paired
 Mac" in the setup portal and also remove "Claude Cube" in the Mac's Bluetooth settings.
+
+## Settings (added in fw_rev 2, protocol still 1)
+
+Optional: a Mac that does not find this characteristic simply has no settings UI. It carries what
+the setup portal edits, as one JSON object of at most 512 bytes (a single ATT value, no framing).
+
+| Key | Meaning | Range |
+|-----|---------|-------|
+| `bl` | backlight | 10..255 |
+| `sl` | screen sleep, minutes (0 = never) | 0..240 |
+| `rt` | auto-advance cards, seconds (0 = off) | 0..255 |
+| `pi` | WiFi poll interval, seconds | 2..60 |
+| `pf` `ps` `pl` | Pomodoro focus / short / long break, minutes | 1..99 |
+| `pn` | Pomodoro sessions before the long break | 1..9 |
+| `ssid` `bridge` | WiFi network, bridge URL | portal rules |
+| `pass` `otapass` | WiFi / OTA password (write only) | portal rules |
+
+**Read** returns every key above except `pass` / `otapass`, plus `v` and booleans `wifiPass` /
+`otaPass` (whether one is set). **Write** is a partial object: only the keys present change, and one
+bad value rejects the whole write. A new `ssid` without a `pass` means an open network, as in the
+portal. The cube answers with Control `03 <result>`; it saves on its main loop, and reboots (after
+the reply) when a network key changed, since those are only read at boot. After a non-reboot result
+the Mac reads Settings again to see what was stored.

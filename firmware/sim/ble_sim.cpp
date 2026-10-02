@@ -62,3 +62,7 @@ bool bleTake(Payload &out) {
 uint32_t bleLastGood() { return g_lastGood; }
 
 void bleForgetBonds() { Serial.println("[ble] (sim) forget bonds"); }
+
+bool bleTakeSettings(char *, size_t) { return false; }
+
+void bleSettingsReply(uint8_t) {}
