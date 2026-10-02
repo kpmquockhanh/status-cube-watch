@@ -780,6 +780,34 @@ void uiPortal(Display &lcd, const char *apName) {
   if (g_sprite) g_canvas.pushSprite(&lcd, 0, 0);
 }
 
+void uiBlePair(Display &lcd, uint32_t passkey) {
+  LovyanGFX *g = target(lcd);
+  g->fillScreen(BG);
+  drawCaps(g, "Pair with Mac", LCD_WIDTH / 2, 40, g_palette[ACC_ACCENT], middle_center);
+
+  g->setTextDatum(middle_center);
+  if (passkey) {
+    char code[8];
+    snprintf(code, sizeof(code), "%06u", (unsigned)passkey);
+    g->setFont(&V_B24.font);
+    g->setTextColor(INK, BG);
+    g->drawString(code, LCD_WIDTH / 2, 118);
+    drawCaps(g, "Type this on your Mac", LCD_WIDTH / 2, 156, DIM, middle_center);
+  } else {
+    g->setFont(&V_B18.font);
+    g->setTextColor(INK, BG);
+    g->drawString("Waiting for a Mac", LCD_WIDTH / 2, 112);
+    drawCaps(g, "Open Claude Cube Link", LCD_WIDTH / 2, 150, DIM, middle_center);
+  }
+
+  g->setFont(&V_S12.font);
+  g->setTextColor(DIM, BG);
+  g->drawString("Stuck? Forget Claude Cube", LCD_WIDTH / 2, 226);
+  g->drawString("in Mac Bluetooth settings", LCD_WIDTH / 2, 244);
+
+  if (g_sprite) g_canvas.pushSprite(&lcd, 0, 0);
+}
+
 void uiOta(Display &lcd, uint8_t percent) {
   LovyanGFX *g = target(lcd);
   g->fillScreen(BG);

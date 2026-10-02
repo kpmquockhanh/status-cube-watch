@@ -39,5 +39,9 @@ void uiMessage(Display &lcd, const char *title, const char *body);
 // as text and as a join-QR, and the address of the form.
 void uiPortal(Display &lcd, const char *apName);
 
+// Pairing screen. With a passkey (non-zero) it shows the 6-digit code to type
+// on the Mac; with 0 it shows the "waiting for a Mac" variant.
+void uiBlePair(Display &lcd, uint32_t passkey);
+
 // Progress screen while an OTA image is arriving.
 void uiOta(Display &lcd, uint8_t percent);

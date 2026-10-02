@@ -6,7 +6,7 @@
 //   ./build/cube-shot out card.json # <out>-0.png, <out>-1.png, ...
 //   ./build/cube-shot out @portal   # <out>-portal.png: a screen that is not a
 //                                   # payload card (see renderSpecial):
-//                                   # @portal, @ota, @pomo-ready|focus|paused|break|done|long|edit
+//                                   # @portal, @ota, @ble-pair, @ble-wait, @pomo-ready|focus|paused|break|done|long|edit
 //
 // Reads the payload JSON from the file named on the command line, or stdin.
 
@@ -168,6 +168,10 @@ bool renderSpecial(Display &lcd, const char *name) {
     uiPortal(lcd, "claude-cube-A1B2");
   } else if (!strcmp(name, "ota")) {
     uiOta(lcd, 62);
+  } else if (!strcmp(name, "ble-pair")) {
+    uiBlePair(lcd, 482913);
+  } else if (!strcmp(name, "ble-wait")) {
+    uiBlePair(lcd, 0);
   } else if (!strcmp(name, "pomo-edit")) {
     uiPomodoroEditor(lcd, PomoSettings{30, 5, 15, 4});
   } else if (!strncmp(name, "pomo-", 5)) {
