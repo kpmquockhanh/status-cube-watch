@@ -19,4 +19,11 @@ public enum Trace {
         let line = "\(stamp.string(from: Date())) [trace:\(tag)] \(message())\n"
         queue.async { FileHandle.standardError.write(Data(line.utf8)) }
     }
+
+    /// An always-on line (the app's `log`). Same stamp and same serial queue as trace lines, so the
+    /// two never land out of order; synchronous, so a line logged right before `exit` is not lost.
+    public static func info(_ message: String) {
+        let line = "\(stamp.string(from: Date())) \(message)\n"
+        queue.sync { FileHandle.standardError.write(Data(line.utf8)) }
+    }
 }

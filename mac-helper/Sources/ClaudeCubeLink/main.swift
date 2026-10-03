@@ -13,10 +13,7 @@ if fstat(STDERR_FILENO, &stderrStat) != 0 || (stderrStat.st_mode & S_IFMT) != S_
     freopen(logURL.path, "a", stderr)
 }
 
-func log(_ s: String) {
-    let f = ISO8601DateFormatter()
-    FileHandle.standardError.write(Data("\(f.string(from: Date())) \(s)\n".utf8))
-}
+func log(_ s: String) { Trace.info(s) }  // one writer for log and trace lines, so they stay in order
 
 // One instance only: a second launch (e.g. `open` after the LaunchAgent started one) exits quietly.
 func acquireSingleInstanceLock() -> Bool {
@@ -42,19 +39,61 @@ var port = Int(env["CUBE_PORT"] ?? "") ?? 8787
 let argv = CommandLine.arguments
 if let i = argv.firstIndex(of: "--port"), i + 1 < argv.count, let p = Int(argv[i + 1]) { port = p }
 
-let bridgeDir = URL(fileURLWithPath: env["CUBE_BRIDGE_DIR"] ?? FileManager.default.currentDirectoryPath + "/bridge")
-let node = BridgeSupervisor.findNode(env: env, exists: { FileManager.default.isExecutableFile(atPath: $0) })
+// After the environment, what install.sh recorded in the app's defaults: a launch from Finder or
+// `open` has no LaunchAgent environment and "/" as its working directory, and nvm's node is not on
+// any fixed path. Last, a bridge/ near the working directory or the app bundle (a build in the repo).
+let cwd = FileManager.default.currentDirectoryPath
+let bridgeDir = URL(fileURLWithPath: BridgeSupervisor.findBridgeDir(
+    env: env, recorded: UserDefaults.standard.string(forKey: "bridgeDir"),
+    searchFrom: [cwd, Bundle.main.bundlePath], exists: { FileManager.default.fileExists(atPath: $0) })
+    ?? env["CUBE_BRIDGE_DIR"] ?? cwd + "/bridge")
+let node = BridgeSupervisor.findNode(env: env, recorded: UserDefaults.standard.string(forKey: "nodePath"),
+                                     exists: { FileManager.default.isExecutableFile(atPath: $0) })
 
-let supervisor = BridgeSupervisor(bridgeDir: bridgeDir, port: port, node: node, log: log)
 let client = BridgeClient(port: port)
+let supervisor = BridgeSupervisor(bridgeDir: bridgeDir, port: port, node: node, client: client, log: log)
 let link = CubeLink(log: log)
 var policy = PushPolicy(heartbeat: 5)
 var lastBridgeError = ""
 var lastBody: Data?
 var bridgeUp = false
 
+/// An accessory app shows no menu bar, but key equivalents still go through the main menu: without an
+/// Edit menu, Cmd-C/V/X/A/Z do nothing in the settings window's text fields.
+func makeMainMenu() -> NSMenu {
+    let appMenu = NSMenu()
+    appMenu.addItem(withTitle: "Close Window", action: #selector(NSWindow.performClose(_:)), keyEquivalent: "w")
+    let edit = NSMenu(title: "Edit")
+    edit.addItem(withTitle: "Undo", action: Selector(("undo:")), keyEquivalent: "z")
+    let redo = edit.addItem(withTitle: "Redo", action: Selector(("redo:")), keyEquivalent: "z")
+    redo.keyEquivalentModifierMask = [.command, .shift]
+    edit.addItem(.separator())
+    edit.addItem(withTitle: "Cut", action: #selector(NSText.cut(_:)), keyEquivalent: "x")
+    edit.addItem(withTitle: "Copy", action: #selector(NSText.copy(_:)), keyEquivalent: "c")
+    edit.addItem(withTitle: "Paste", action: #selector(NSText.paste(_:)), keyEquivalent: "v")
+    edit.addItem(withTitle: "Select All", action: #selector(NSText.selectAll(_:)), keyEquivalent: "a")
+    let bar = NSMenu()
+    for sub in [appMenu, edit] {
+        let i = NSMenuItem()
+        i.submenu = sub
+        bar.addItem(i)
+    }
+    return bar
+}
+
+/// Every way out that goes through NSApp.terminate (the menu's Quit, logout, shutdown) ends here.
+final class AppDelegate: NSObject, NSApplicationDelegate {
+    var onTerminate: () -> Void = {}
+    func applicationDidFinishLaunching(_ notification: Notification) { NSApp.mainMenu = makeMainMenu() }
+    func applicationWillTerminate(_ notification: Notification) { onTerminate() }
+}
+
 let app = NSApplication.shared
 app.setActivationPolicy(.accessory)
+let appDelegate = AppDelegate()  // NSApp.delegate is weak; this global keeps it alive
+// Stop the bridge child, or it outlives the app and the next launch adopts it, stale code and config included.
+appDelegate.onTerminate = { supervisor.stop() }
+app.delegate = appDelegate
 let statusMenu = StatusMenu()
 
 func refreshMenu() {
@@ -111,9 +150,13 @@ notifier.start()
 link.onStateChange = { Trace.log("link", "state -> \($0)"); refreshMenu() }
 statusMenu.onSendNow = { tick(force: true) }
 statusMenu.onRestartBridge = { supervisor.restart() }
+statusMenu.onForgetCube = { link.forgetCube() }
 statusMenu.logURL = logURL
 supervisor.start()
-Timer.scheduledTimer(withTimeInterval: 5, repeats: true) { _ in tick(force: false) }
+// In .common modes, not just .default: the heartbeat must keep going while the status menu is open,
+// or after 15 s the cube calls the link stale and falls back to WiFi.
+let tickTimer = Timer(timeInterval: 5, repeats: true) { _ in tick(force: false) }
+RunLoop.main.add(tickTimer, forMode: .common)
 log("Claude Cube Link started (bridge :\(port), dir \(bridgeDir.path))")
 Trace.log("main", "tracing on; node \(node ?? "not found")")
 

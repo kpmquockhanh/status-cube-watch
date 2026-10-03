@@ -1,4 +1,5 @@
-// Draws AppIcon.icns: swift icon/make-icon.swift  (run by build-app.sh only when the .icns is missing)
+// Draws the AppIcon PNGs into an .iconset. AppIcon.icns is committed and build-app.sh only copies it;
+// regenerate it with: swift icon/make-icon.swift X.iconset && iconutil -c icns X.iconset -o icon/AppIcon.icns
 import AppKit
 
 func render(_ px: Int) -> Data {

@@ -44,3 +44,32 @@ private let sample = Data(#"{"v":1,"bl":100,"sl":0,"rt":30,"pi":10,"pf":50,"ps":
     s = CubeSettings(); s.sessions = 0
     #expect(!s.isValid)
 }
+
+@Test func aNewNetworkWithoutAPasswordIsAnOpenOne() throws {
+    let old = try #require(CubeSettings.parse(sample))
+    var new = old
+    #expect(!new.joinsOpenNetwork(from: old, wifiPass: nil))  // same network: the stored password stays
+    new.ssid = "office"
+    #expect(new.joinsOpenNetwork(from: old, wifiPass: nil))
+    #expect(new.joinsOpenNetwork(from: old, wifiPass: ""))
+    #expect(!new.joinsOpenNetwork(from: old, wifiPass: "hunter22hunter"))
+    new.ssid = ""
+    #expect(!new.joinsOpenNetwork(from: old, wifiPass: nil))  // no network at all is not an open one
+}
+
+@Test func rebaseKeepsEditsAndFollowsTheCubeElsewhere() throws {
+    let shown = try #require(CubeSettings.parse(sample))
+    var form = shown
+    form.focusMin = 45          // being edited
+    form.ssid = "office"        // being edited
+    var fresh = shown
+    fresh.backlight = 200       // changed on the cube's own screen
+    fresh.focusMin = 30         // also changed there, but the user's edit wins
+    fresh.wifiPassSet = false
+    let out = CubeSettings.rebase(form: form, shown: shown, onto: fresh)
+    #expect(out.backlight == 200 && out.focusMin == 45 && out.ssid == "office")
+    #expect(out.sleepMin == fresh.sleepMin && out.bridge == fresh.bridge)
+    #expect(!out.wifiPassSet)   // flags always come from the cube
+    #expect(CubeSettings.rebase(form: form, shown: nil, onto: fresh) == fresh)  // nothing shown yet
+    #expect(CubeSettings.rebase(form: shown, shown: shown, onto: fresh) == fresh)  // no edits
+}

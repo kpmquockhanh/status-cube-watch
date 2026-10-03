@@ -84,4 +84,32 @@ public struct CubeSettings: Equatable {
         guard let o = try? JSONSerialization.jsonObject(with: patch) as? [String: Any] else { return false }
         return !Set(o.keys).isDisjoint(with: ["ssid", "pass", "bridge", "otapass"])
     }
+
+    /// True when writing `self` over `old` with this WiFi password (nil = none typed) makes the cube
+    /// join an open network: a new SSID without a password erases the stored one, as in the portal.
+    public func joinsOpenNetwork(from old: CubeSettings, wifiPass: String?) -> Bool {
+        ssid != old.ssid && !ssid.isEmpty && (wifiPass ?? "").isEmpty
+    }
+
+    /// What the settings form shows when the cube reports `fresh` while the form holds `form`, which
+    /// was filled from `shown`: fields the user has not edited (still equal to `shown`) follow the cube,
+    /// edited ones are kept, so a re-read never wipes what is being typed. No `shown`: all from the cube.
+    public static func rebase(form: CubeSettings, shown: CubeSettings?, onto fresh: CubeSettings) -> CubeSettings {
+        guard let shown else { return fresh }
+        var out = fresh
+        func keepEdit<T: Equatable>(_ k: WritableKeyPath<CubeSettings, T>) {
+            if form[keyPath: k] != shown[keyPath: k] { out[keyPath: k] = form[keyPath: k] }
+        }
+        keepEdit(\.backlight)
+        keepEdit(\.sleepMin)
+        keepEdit(\.rotateSec)
+        keepEdit(\.pollSec)
+        keepEdit(\.focusMin)
+        keepEdit(\.shortMin)
+        keepEdit(\.longMin)
+        keepEdit(\.sessions)
+        keepEdit(\.ssid)
+        keepEdit(\.bridge)
+        return out  // wifiPassSet / otaPassSet always come from the cube
+    }
 }

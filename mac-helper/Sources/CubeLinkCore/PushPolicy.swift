@@ -14,7 +14,7 @@ public struct PushPolicy {
 
     public init(heartbeat: TimeInterval = 5) { self.heartbeat = heartbeat }
 
-    public mutating func shouldSend(body: Data?, now: Date, force: Bool) -> Bool {
+    public func shouldSend(body: Data?, now: Date, force: Bool) -> Bool {
         guard let body else { return false }
         if force { return true }
         guard let lastSent, let lastBody else { return true }

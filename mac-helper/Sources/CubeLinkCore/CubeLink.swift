@@ -132,6 +132,20 @@ public final class CubeLink: NSObject, CBCentralManagerDelegate, CBPeripheralDel
         }
     }
 
+    /// Forgets the stored cube and scans again, for a replacement cube. The same cube, if it is still
+    /// around and bonded with macOS, is simply found and reconnected.
+    public func forgetCube() {
+        log("forgetting the stored cube; scanning")
+        UserDefaults.standard.removeObject(forKey: idKey)
+        let old = peripheral
+        peripheral = nil
+        setReady(false)
+        if let old { central.cancelPeripheralConnection(old) }  // also ends a pending connect
+        backoff.reset()
+        if central.state == .poweredOn { state = .searching }
+        connect()
+    }
+
     private func connect() {
         guard central.state == .poweredOn else { return }
         if let s = UserDefaults.standard.string(forKey: idKey), let id = UUID(uuidString: s),
@@ -157,17 +171,20 @@ public final class CubeLink: NSObject, CBCentralManagerDelegate, CBPeripheralDel
     public func centralManager(_ c: CBCentralManager, didConnect p: CBPeripheral) {
         Trace.log("ble", "didConnect \(p.identifier)")
         log("connected")
+        seq = 0  // the cube clears its frame state on every connection; so does the Mac
         state = .connecting
         p.delegate = self
         p.discoverServices([serviceID])
     }
 
     public func centralManager(_ c: CBCentralManager, didFailToConnect p: CBPeripheral, error: Error?) {
+        guard isCurrent(p) else { return }
         explain(error)
         reconnectLater()
     }
 
     public func centralManager(_ c: CBCentralManager, didDisconnectPeripheral p: CBPeripheral, error: Error?) {
+        guard isCurrent(p) else { return }
         log("disconnected")
         explain(error)
         setReady(false)
@@ -288,6 +305,13 @@ public final class CubeLink: NSObject, CBCentralManagerDelegate, CBPeripheralDel
     }
 
     // MARK: helpers
+
+    /// False for a cube dropped by forgetCube(): its late disconnect must not tear down the new link.
+    private func isCurrent(_ p: CBPeripheral) -> Bool {
+        if p.identifier == peripheral?.identifier { return true }
+        Trace.log("ble", "ignoring a callback from forgotten cube \(p.identifier)")
+        return false
+    }
 
     /// A setup step failed while the link is still up. CoreBluetooth would keep it
     /// connected forever, so drop it: didDisconnect then backs off and retries.
