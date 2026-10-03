@@ -12,6 +12,10 @@
 // the bottom. A `g2` adds a second, inner ring (see usageCard). A card without
 // `g` keeps the old big-number layout. The spend and token breakdowns are still computed below
 // and are one config flag away (`extraCards`), but they are off by default.
+//
+// Every string leaves here as printable ASCII cut to the firmware's buffer
+// sizes (see `fit` at the bottom): the device fonts have no glyphs past 0x7E,
+// and a byte-truncated UTF-8 sequence would draw as garbage.
 
 const money = (usd) => {
   if (usd >= 1000) return `$${(usd / 1000).toFixed(usd >= 10_000 ? 0 : 1)}k`;
@@ -48,12 +52,20 @@ const until = (ms) => {
   return `${Math.floor(h / 24)}d ${h % 24}h`;
 };
 
-const prettyModel = (id) =>
-  (id ?? 'unknown')
-    .replace(/^claude-/, '')
-    .replace(/-(\d)-(\d)$/, ' $1.$2')
-    .replace(/-(\d)$/, ' $1')
-    .replace(/^(\w)/, (c) => c.toUpperCase());
+// "claude-haiku-4-5-20251001" -> "Haiku 4.5", "claude-opus-4-0" -> "Opus 4",
+// "claude-3-5-haiku" -> "Haiku 3.5". Anything else just loses the prefix.
+const prettyModel = (id) => {
+  const name = (id ?? 'unknown').replace(/^claude-/, '').replace(/-\d{8}$/, '');
+  const m = name.match(/^([a-z]+)-(\d+)(?:-(\d{1,2}))?$/) ?? name.match(/^(\d+)(?:-(\d{1,2}))?-([a-z]+)$/);
+  if (!m) return name.replace(/^(\w)/, (c) => c.toUpperCase());
+  const [family, major, minor] = /^\d/.test(m[1]) ? [m[3], m[1], m[2]] : [m[1], m[2], m[3]];
+  const version = minor && minor !== '0' ? `${major}.${minor}` : major;
+  return `${family[0].toUpperCase()}${family.slice(1)} ${version}`;
+};
+
+// 'YYYY-MM-DD' of `d` on the local calendar (toISOString would give UTC's).
+const localDay = (d) =>
+  `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`;
 
 function totals(events) {
   const t = { cost: 0, input: 0, cacheRead: 0, cacheWrite: 0, output: 0, count: 0 };
@@ -91,13 +103,33 @@ const tone = (pct) => (pct >= 85 ? 'red' : pct >= 60 ? 'amber' : 'green');
 
 function windowView(window, now) {
   if (!window || typeof window.utilization !== 'number') return null;
-  const pct = Math.round(window.utilization);
   const resetsAt = Date.parse(window.resets_at ?? '');
   const known = Number.isFinite(resetsAt);
   // A reset already in the past means the window lapsed and you are starting
   // clean, which is worth saying outright rather than counting down to zero.
+  // The percentage it carried belongs to the old window (a cached or stale
+  // reading), so it is dropped: the ring goes to an empty track, not a full one.
   const lapsed = known && resetsAt <= now;
-  return { pct, known, lapsed, left: known ? (lapsed ? 'idle' : until(resetsAt - now)) : '--' };
+  return {
+    pct: lapsed ? null : Math.round(window.utilization),
+    known,
+    lapsed,
+    left: known ? (lapsed ? 'idle' : until(resetsAt - now)) : '--',
+  };
+}
+
+// The usage card's caption has room for a word or two, so a failed limits
+// read is boiled down to one; the full message rides along in `s2` (the
+// firmware does not draw a dual card's s2, the browser preview does).
+function shortReason(error) {
+  const e = String(error);
+  if (/no Claude Code login/i.test(e)) return 'no login';
+  if (/starting/i.test(e)) return 'starting';
+  if (/timeout/i.test(e)) return 'timeout';
+  const status = e.match(/\b([1-5]\d\d)\b/);
+  if (status) return `HTTP ${status[1]}`;
+  if (/bad JSON/i.test(e)) return 'bad reply';
+  return 'offline';
 }
 
 // Unread inbox count, shown as a number beside an envelope in the gap of the
@@ -115,16 +147,24 @@ function mailBadge(mail) {
 function usageCard(limits, mail, now) {
   const five = windowView(limits?.five_hour, now);
   const seven = windowView(limits?.seven_day, now);
-  const row = (k, w) => ({ k, p: w ? `${w.pct}%` : '--', r: w && w.known ? w.left : '' });
+  const has = (w) => w != null && w.pct != null;
+  const row = (k, w) => ({
+    k,
+    p: has(w) ? `${w.pct}%` : '--',
+    r: !w || !w.known ? '' : w.lapsed ? 'reset' : w.left,
+  });
+  const error = limits?.error;
   return {
     t: 'CLAUDE',
     v: five ? five.left : '--',
-    s1: !five ? 'no data' : !five.known ? '' : five.lapsed ? 'reset' : 'to reset',
-    s2: !five && !seven ? String(limits?.error ?? 'unavailable').slice(0, 39) : '',
-    c: five ? tone(five.pct) : 'ink',
-    g: five ? five.pct : -1,
-    c2: seven ? tone(seven.pct) : 'ink',
-    g2: seven ? seven.pct : -1,
+    // While a read is failing the caption says why, even over a last good
+    // reading that is still on screen (limits.mjs keeps one for 10 minutes).
+    s1: error ? shortReason(error) : !five ? 'no data' : !five.known ? '' : five.lapsed ? 'reset' : 'to reset',
+    s2: error ? String(error) : !five && !seven ? 'unavailable' : '',
+    c: has(five) ? tone(five.pct) : 'ink',
+    g: has(five) ? five.pct : -1,
+    c2: has(seven) ? tone(seven.pct) : 'ink',
+    g2: has(seven) ? seven.pct : -1,
     rows: [row('5H', five), row('7D', seven)],
     ...mailBadge(mail),
   };
@@ -140,18 +180,58 @@ export function buildPayload(events, opts = {}) {
   if (extraCards) cards.push(...spendCards(events, { source, hasRequestCounts, billed, now }));
 
   if (error) {
-    cards.unshift({ t: 'BRIDGE ERROR', v: 'offline', s1: String(error).slice(0, 28), s2: '', c: 'red' });
+    // 28 characters is what fits across the panel in the text card's s1 font.
+    cards.unshift({ t: 'BRIDGE ERROR', v: 'offline', s1: fit(error, 29), s2: '', c: 'red' });
   }
 
   return {
     v: 1,
+    // For people reading /api/status; the cube ignores both. A stale or
+    // failed reading is flagged on the usage card itself (its caption).
     ts: Math.floor(now / 1000),
     src: source,
-    // The gauges come straight from the server, so nothing on screen is an
-    // estimate unless the extra spend cards are switched on.
-    est: !limits?.five_hour || extraCards,
-    cards,
+    cards: cards.map(fitCard),
   };
+}
+
+// Firmware buffer sizes (payload.h), NUL included, so a field gets one less.
+const CARD_BYTES = { t: 24, v: 24, s1: 40, s2: 40, m: 8 };
+const ROW_BYTES = { k: 6, p: 8, r: 12 };
+
+// Typographic characters the copy (or a transcript path) is likely to carry,
+// and letters NFKD does not split into base + accent, mapped to an ASCII
+// look-alike before everything else non-ASCII is dropped.
+const ASCII_LOOKALIKE = {
+  '\u00b7': '-', '\u2022': '-', '\u2013': '-', '\u2014': '-', '\u2212': '-',
+  '\u2018': "'", '\u2019': "'", '\u201c': '"', '\u201d': '"',
+  '\u2026': '...', '\u00d7': 'x',
+  '\u0111': 'd', '\u0110': 'D', '\u00f8': 'o', '\u00d8': 'O', '\u0142': 'l', '\u0141': 'L',
+  '\u00df': 'ss', '\u00e6': 'ae', '\u00c6': 'AE',
+};
+const LOOKALIKE_RE = new RegExp(`[${Object.keys(ASCII_LOOKALIKE).join('')}]`, 'g');
+
+// Printable ASCII (0x20-0x7E) only, at most `bytes - 1` long. Accents are
+// stripped ("e" for "\u00e9"), whitespace becomes a space, the rest is dropped.
+function fit(value, bytes) {
+  const s = String(value ?? '')
+    .replace(LOOKALIKE_RE, (c) => ASCII_LOOKALIKE[c])
+    .normalize('NFKD')
+    .replace(/\s/g, ' ')
+    .replace(/[^\x20-\x7e]/g, '');
+  return s.slice(0, bytes - 1).trimEnd();
+}
+
+function fitCard(card) {
+  const out = { ...card };
+  for (const [k, n] of Object.entries(CARD_BYTES)) if (typeof out[k] === 'string') out[k] = fit(out[k], n);
+  if (out.rows) {
+    out.rows = out.rows.map((r) => {
+      const row = { ...r };
+      for (const [k, n] of Object.entries(ROW_BYTES)) if (typeof row[k] === 'string') row[k] = fit(row[k], n);
+      return row;
+    });
+  }
+  return out;
 }
 
 // The original spend deck. Off by default; set `extraCards: true` in
@@ -169,11 +249,15 @@ function spendCards(events, { source, hasRequestCounts, billed, now }) {
   const monthT = totals(month);
 
   // The cost report is billing truth; prefer it over our estimate when present.
+  // Its days are keyed by the local calendar date (admin.mjs asks for the
+  // month from the local 1st), so look today up the same way. The buckets
+  // themselves are UTC days, which Anthropic fixes, so away from UTC "today"
+  // is the billing day carrying today's date rather than local midnight on.
   let monthCost = monthT.cost;
   let todayCost = dayT.cost;
   if (billed) {
     monthCost = billed.total;
-    const key = new Date().toISOString().slice(0, 10);
+    const key = localDay(new Date(now));
     if (billed.byDay.has(key)) todayCost = billed.byDay.get(key);
   }
 
@@ -217,14 +301,14 @@ function spendCards(events, { source, hasRequestCounts, billed, now }) {
       t: 'TOP MODEL',
       v: modelRank.length ? prettyModel(modelRank[0][0]) : '--',
       s1: modelRank.length
-        ? `${money(modelRank[0][1])} · ${Math.round((modelRank[0][1] / (dayT.cost || 1)) * 100)}% of spend`
+        ? `${money(modelRank[0][1])} - ${Math.round((modelRank[0][1] / (dayT.cost || 1)) * 100)}% of spend`
         : 'no usage today',
       s2: modelRank[1] ? `then ${prettyModel(modelRank[1][0])}` : 'only model today',
       c: 'violet',
     },
     {
       t: source === 'admin' ? 'TOP WORKSPACE' : 'TOP PROJECT',
-      v: projectRank.length ? projectRank[0][0].slice(0, 23) : '--',
+      v: projectRank.length ? projectRank[0][0] : '--',
       s1: projectRank.length ? money(projectRank[0][1]) : 'idle',
       s2: last ? `active ${ago(now - last.t)}` : 'no activity',
       c: 'green',

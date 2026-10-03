@@ -19,6 +19,7 @@ import { costUSD } from '../pricing.mjs';
 
 const BASE = 'https://api.anthropic.com/v1/organizations';
 const UA = 'claude-status-cube/1.0';
+const TIMEOUT_MS = 15_000; // per page; a hung request must not stall the refresh loop
 
 export class AdminSource {
   constructor({ adminKey, oauthToken, usageWindowHours = 168 } = {}) {
@@ -56,7 +57,10 @@ export class AdminSource {
     for (let i = 0; i < 20; i++) {
       const qs = new URLSearchParams(params);
       if (page) qs.set('page', page);
-      const res = await fetch(`${BASE}${endpoint}?${qs}`, { headers: this.#headers() });
+      const res = await fetch(`${BASE}${endpoint}?${qs}`, {
+        headers: this.#headers(),
+        signal: AbortSignal.timeout(TIMEOUT_MS),
+      });
       if (!res.ok) {
         const body = await res.text().catch(() => '');
         throw new Error(`${endpoint} -> ${res.status} ${res.statusText}: ${body.slice(0, 300)}`);
@@ -72,7 +76,11 @@ export class AdminSource {
   async refresh() {
     const now = new Date();
     const usageStart = new Date(now.getTime() - this.usageWindowHours * 3_600_000);
-    const monthStart = new Date(Date.UTC(now.getUTCFullYear(), now.getUTCMonth(), 1));
+    // The month is the local calendar's, like every other date on the cube.
+    // Cost buckets are whole UTC days, so it starts at the billing day dated
+    // the local 1st, and each day is keyed by its date (cards.mjs looks today
+    // up by the local date).
+    const monthStart = new Date(Date.UTC(now.getFullYear(), now.getMonth(), 1));
 
     const [usageBuckets, costBuckets] = await Promise.all([
       this.#getAll('/usage_report/messages', [
@@ -81,6 +89,8 @@ export class AdminSource {
         ['bucket_width', '1h'],
         ['limit', String(this.usageWindowHours)],
         ['group_by[]', 'model'],
+        ['group_by[]', 'workspace_id'], // without it every row's workspace_id is null
+        ['group_by[]', 'inference_geo'], // US-only rows cost 1.1x (pricing.mjs)
       ]),
       this.#getAll('/cost_report', [
         ['starting_at', monthStart.toISOString()],
@@ -100,6 +110,7 @@ export class AdminSource {
           cache_read_input_tokens: r.cache_read_input_tokens ?? 0,
           cache_creation: r.cache_creation ?? {},
           output_tokens: r.output_tokens ?? 0,
+          inference_geo: r.inference_geo,
         };
         const cw =
           (r.cache_creation?.ephemeral_5m_input_tokens ?? 0) +

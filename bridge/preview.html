@@ -84,13 +84,14 @@
   .device.text .mid .value { font-size: 76px; margin-top: 34px; }
   .device.text .mid .cap { font-size: 11px; letter-spacing: 0; color: #aab4c6; margin-top: 30px; }
   .device.text .read { top: 230px; }
-  /* The card's name sits at the bottom of a ring card (NAME_Y in ui.cpp). */
+  /* The card's name sits at the bottom of a ring card (NAME_Y in ui.cpp), and
+     under the top bar on a text card (drawTextCard draws it at y=60). */
   .name {
     position: absolute; top: 224px; left: 0; width: 240px; text-align: center;
     font-size: 9px; font-weight: 600; letter-spacing: .22em; color: var(--dim);
     text-transform: uppercase;
   }
-  .device.text .name { display: none; }
+  .device.text .name { top: 60px; }
   /* The Pomodoro card: a ring that is time left, so no percentage and no
      threshold notches (see drawPomodoroCard in firmware/src/ui.cpp). */
   .device.nopct .read .pct { display: none; }
@@ -125,12 +126,15 @@
   .hint code { font-family: ui-monospace, SFMono-Regular, Menlo, monospace; }
   .hint code { color: var(--ink); }
   .stale { color: var(--red); }
+  /* A dual card's s2 (the full reason a limits read failed) is not drawn on
+     the device; the mock shows it here, outside the panel. */
+  .note { color: var(--red); font-size: 12px; margin: 0; min-height: 1.5em; }
 </style>
 </head>
 <body>
 <div class="wrap">
   <div class="device" id="device">
-    <div class="bar"><span id="t">CONNECTING</span><span class="fresh" id="fresh">--<i id="led"></i></span></div>
+    <div class="bar"><span id="t"></span><span class="fresh" id="fresh">--<i id="led"></i></span></div>
     <!-- 270 degrees starting at 135, so the gap sits under the readout. The
          two notches are cut in the background colour at the amber and red
          thresholds; same numbers as RING_* in firmware/src/ui.cpp. -->
@@ -161,6 +165,7 @@
     <div class="name" id="nm"></div>
     <div class="dots" id="dots"></div>
   </div>
+  <p class="note" id="note"></p>
   <p class="hint">
     Click the screen or press <code>&larr; &rarr;</code> to change card.
     This is the same payload the firmware renders, from <code>/api/status</code>.
@@ -169,16 +174,18 @@
 <script>
 const COLORS = { accent:'--accent', blue:'--blue', green:'--green', amber:'--amber', violet:'--violet', red:'--red', muted:'--dim' };
 let data = null, idx = 0, lastFetch = 0;
+let online = null; // unknown until the first poll settles
 
 // The Pomodoro card is local to the device (firmware/src/pomodoro.cpp), so it
 // is not in /api/status. The mock shows fixed fake timer data; pick the state
 // with ?pomo=ready|focus|paused|break|done.
+// Strings are pomodoroCard's in firmware/src/ui.cpp, word for word.
 const POMO = {
-  ready:  { v:'25:00', s1:'Ready',      s2:'0/4  Hold to start',  c:'muted', g:100 },
-  focus:  { v:'17:57', s1:'Focus',      s2:'0/4  Hold to pause',  c:'amber', g:72 },
-  paused: { v:'17:57', s1:'Paused',     s2:'0/4  Hold to resume', c:'muted', g:72 },
-  break:  { v:'03:30', s1:'Break',      s2:'1/4  Hold to pause',  c:'green', g:70 },
-  done:   { v:'Done',  s1:'Focus done', s2:'1/4  Hold for break', c:'amber', g:0 },
+  ready:  { v:'25:00', s1:'Ready',      s2:'0/4  2 taps: start',  c:'muted', g:100 },
+  focus:  { v:'17:57', s1:'Focus',      s2:'0/4  2 taps: pause',  c:'amber', g:72 },
+  paused: { v:'17:57', s1:'Paused',     s2:'0/4  2 taps: resume', c:'muted', g:72 },
+  break:  { v:'03:30', s1:'Break',      s2:'1/4  2 taps: pause',  c:'green', g:70 },
+  done:   { v:'Done',  s1:'Focus done', s2:'1/4  2 taps: break',  c:'amber', g:100 },
 };
 const pomoState = new URLSearchParams(location.search).get('pomo');
 const pomoCard = { t:'Pomodoro', local:true, ...(POMO[pomoState] || POMO.ready) };
@@ -197,13 +204,15 @@ function paint() {
   device.classList.toggle('nopct', !!card.local);
   device.classList.toggle('nonotch', !!card.local);
 
-  // A ring card names itself at the bottom; a text card keeps it in the bar.
-  t.textContent = gauge ? '' : card.t;
-  nm.textContent = gauge ? card.t : '';
+  // The top bar carries no name (drawTopBar: battery left, age right; the
+  // battery is not mocked). The name is drawn below the bar on a text card
+  // and at the bottom of a ring.
+  nm.textContent = card.t;
   v.textContent = card.v;
   v.style.color = gauge ? 'var(--ink)' : color;
   s1.textContent = card.s1 || '';
   s2.textContent = card.s2 || '';
+  note.textContent = dual && card.s2 ? `${card.t}: ${card.s2}` : '';
 
   if (gauge) {
     const pctVal = Math.max(0, Math.min(100, card.g));
@@ -233,12 +242,20 @@ function paint() {
 }
 
 // The device shows how old the reading is rather than a clock, because it has
-// no NTP sync and what matters is whether the number is current.
+// no NTP sync and what matters is whether the number is current. Mirrors
+// ageLabel (firmware/src/age_label.h) and the red-at-30s rule in drawTopBar.
+function ageLabel(s) {
+  if (!online) return 'OFF';
+  if (s < 60) return `${s}s`;
+  if (s < 3600) return `${Math.floor(s / 60)}m`;
+  if (s < 100 * 3600) return `${Math.floor(s / 3600)}h`;
+  return 'OLD';
+}
 function tick() {
-  if (!lastFetch) return;
-  const s = Math.round((Date.now() - lastFetch) / 1000);
-  const stale = s > 20;
-  fresh.firstChild.textContent = s < 60 ? `${s}s` : `${Math.round(s / 60)}m`;
+  if (online === null) return;
+  const s = Math.floor((Date.now() - lastFetch) / 1000);
+  const stale = !online || s >= 30;
+  fresh.firstChild.textContent = ageLabel(s);
   fresh.className = 'fresh' + (stale ? ' stale' : '');
   led.className = stale ? 'off' : '';
 }
@@ -248,11 +265,11 @@ async function poll() {
     const res = await fetch('/api/status', { cache: 'no-store' });
     data = await res.json();
     lastFetch = Date.now();
+    online = true;
     paint();
   } catch (e) {
-    fresh.firstChild.textContent = 'offline';
-    fresh.className = 'fresh stale';
-    led.className = 'off';
+    online = false;
+    tick();
   }
 }
 

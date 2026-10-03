@@ -1,6 +1,7 @@
 {
   "source": "local",
   "port": 8787,
+  "host": "",
   "refreshMs": 5000,
   "extraCards": false,
   "gmail": { "user": "", "appPassword": "" },
@@ -10,7 +11,10 @@
   "//adminKey": "sk-ant-admin01-...  (or set ANTHROPIC_ADMIN_KEY)",
   "//oauthToken": "org:admin OAuth token (or set ANTHROPIC_ADMIN_OAUTH_TOKEN)",
   "//extraCards": "true adds the spend/token/model/project cards after the two",
-  "//extraCards2": "rate-limit gauges. Or set CUBE_EXTRA_CARDS=1.",
+  "//extraCards2": "rate-limit gauges. CUBE_EXTRA_CARDS=1 / =0 overrides this either way.",
+  "//host": "Address to listen on (or set CUBE_HOST). Empty = every interface, which a",
+  "//host2": "cube polling over WiFi needs. 127.0.0.1 keeps the bridge off the LAN; the",
+  "//host3": "Mac helper still reaches it there, since it always uses 127.0.0.1.",
   "//gmail": "Adds a MAIL card with your unread count, read over IMAP. Needs 2-step",
   "//gmail2": "verification and an app password (myaccount.google.com/apppasswords).",
   "//gmail3": "Or set CUBE_GMAIL_USER / CUBE_GMAIL_PASSWORD. Leave empty for no card."

@@ -20,7 +20,23 @@ DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 PLIST="$HOME/Library/LaunchAgents/$LABEL.plist"
 LOG_DIR="$HOME/Library/Logs/claude-status-cube"
 TARGET="gui/$(id -u)/$LABEL"
-PORT="$(node -e "try{process.stdout.write(String(JSON.parse(require('fs').readFileSync('$DIR/config.json','utf8')).port??8787))}catch{process.stdout.write('8787')}" 2>/dev/null || echo 8787)"
+# The config path goes in as an argument, not spliced into the script, so a
+# directory name with a quote in it cannot break (or inject into) the JS.
+read_config() { # key default
+  node -e 'try{const v=JSON.parse(require("fs").readFileSync(process.argv[1],"utf8"))[process.argv[2]];process.stdout.write(String(v||process.argv[3]))}catch{process.stdout.write(process.argv[3])}' \
+    "$DIR/config.json" "$1" "$2" 2>/dev/null || echo "$2"
+}
+PORT="$(read_config port 8787)"
+# Where status_agent knocks: the configured host, or loopback when it listens everywhere.
+HOST="$(read_config host 127.0.0.1)"
+case "$HOST" in 0.0.0.0|::) HOST=127.0.0.1 ;; esac
+case "$HOST" in *:*) URL_HOST="[$HOST]" ;; *) URL_HOST="$HOST" ;; esac
+
+# For values spliced into the plist: a path with &, < or > would be invalid XML.
+# (sed, not ${s//&/...}: bash 5.2 expands & in a replacement to the match.)
+xml_escape() {
+  printf '%s' "$1" | sed -e 's/&/\&amp;/g' -e 's/</\&lt;/g' -e 's/>/\&gt;/g' -e 's/"/\&quot;/g' -e "s/'/\&apos;/g"
+}
 
 # launchd does not read your shell profile, so the interpreter has to be an
 # absolute path that will still exist after an nvm version is cleaned up.
@@ -40,12 +56,17 @@ install_agent() {
   echo "logs    $LOG_DIR/bridge.log"
   mkdir -p "$LOG_DIR" "$(dirname "$PLIST")"
 
-  # Anything already bound to the port would make launchd respawn-loop.
-  if lsof -ti "tcp:$PORT" >/dev/null 2>&1; then
-    echo "stopping whatever is already on port $PORT"
-    lsof -ti "tcp:$PORT" | xargs kill 2>/dev/null || true
+  # Anything already listening on the port would make launchd respawn-loop.
+  # Only the listener: a bare tcp:PORT match also hits clients that merely have
+  # a connection open to it (a browser on the preview, the Mac helper).
+  if lsof -ti "tcp:$PORT" -sTCP:LISTEN >/dev/null 2>&1; then
+    echo "stopping whatever is already listening on port $PORT"
+    lsof -ti "tcp:$PORT" -sTCP:LISTEN | xargs kill 2>/dev/null || true
     sleep 1
   fi
+
+  local x_node x_dir x_log
+  x_node="$(xml_escape "$node")"; x_dir="$(xml_escape "$DIR")"; x_log="$(xml_escape "$LOG_DIR")"
 
   cat > "$PLIST" <<PLIST_EOF
 <?xml version="1.0" encoding="UTF-8"?>
@@ -55,21 +76,21 @@ install_agent() {
   <key>Label</key><string>$LABEL</string>
   <key>ProgramArguments</key>
   <array>
-    <string>$node</string>
-    <string>$DIR/server.mjs</string>
+    <string>$x_node</string>
+    <string>$x_dir/server.mjs</string>
   </array>
-  <key>WorkingDirectory</key><string>$DIR</string>
+  <key>WorkingDirectory</key><string>$x_dir</string>
   <key>RunAtLoad</key><true/>
   <key>KeepAlive</key>
   <dict>
-    <!-- Restart on a crash, but not on a clean exit -- a deliberate stop
+    <!-- Restart on a crash, but not on a clean exit: a deliberate stop
          should stay stopped rather than fight launchd. -->
     <key>SuccessfulExit</key><false/>
   </dict>
   <!-- Back off between respawns so a config mistake cannot spin the CPU. -->
   <key>ThrottleInterval</key><integer>10</integer>
-  <key>StandardOutPath</key><string>$LOG_DIR/bridge.log</string>
-  <key>StandardErrorPath</key><string>$LOG_DIR/bridge.log</string>
+  <key>StandardOutPath</key><string>$x_log/bridge.log</string>
+  <key>StandardErrorPath</key><string>$x_log/bridge.log</string>
   <key>ProcessType</key><string>Background</string>
 </dict>
 </plist>
@@ -95,9 +116,9 @@ status_agent() {
     echo "  not loaded"
     return
   fi
-  if curl -fsS --max-time 3 "http://localhost:$PORT/api/status" >/dev/null 2>&1; then
+  if curl -fsS --max-time 3 "http://$URL_HOST:$PORT/api/status" >/dev/null 2>&1; then
     echo "  serving on port $PORT:"
-    curl -fsS "http://localhost:$PORT/api/status" |
+    curl -fsS "http://$URL_HOST:$PORT/api/status" |
       node -e "let s='';process.stdin.on('data',d=>s+=d).on('end',()=>{for(const c of JSON.parse(s).cards)console.log('    '+[c.t,c.v,c.s1,c.s2].join(' | '))})"
   else
     echo "  not answering on port $PORT -- see $LOG_DIR/bridge.log"
