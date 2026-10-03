@@ -21,7 +21,8 @@ uint32_t blePasskey();  // the 6-digit code while Pairing, else 0
 bool bleBonded();       // a Mac is bonded
 // True when a complete, valid payload arrived since the last call; it is
 // copied to `out`. `out` is untouched otherwise, so the display keeps the last
-// good data.
+// good data. Call it every loop pass: it also does the BLE housekeeping that
+// must run off the NimBLE task (dropping a link that never secured itself).
 bool bleTake(Payload &out);
 uint32_t bleLastGood();  // millis() of the last valid payload, 0 = never
 void bleForgetBonds();   // forget the bonded Mac (the caller reboots)

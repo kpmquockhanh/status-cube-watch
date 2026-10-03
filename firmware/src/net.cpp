@@ -6,6 +6,12 @@
 
 namespace {
 char g_error[64] = "";
+// A join plus DHCP takes several seconds, and the core retries a dropped link
+// by itself, so a poll that finds WiFi down must not restart the join. Only a
+// link that has stayed down this long since the last start, nudge or poll that
+// found it up gets a WiFi.reconnect().
+constexpr uint32_t REJOIN_AFTER_MS = 30000;
+uint32_t g_joinSince = 0;
 
 void fail(const char *msg) { strlcpy(g_error, msg, sizeof(g_error)); }
 }  // namespace
@@ -21,6 +27,7 @@ void netStart() {
   WiFi.mode(WIFI_STA);
   WiFi.setSleep(true);  // the radio idles between 5s polls
   netJoinSaved();
+  g_joinSince = millis();
 }
 
 void netStop() {
@@ -51,15 +58,22 @@ const char *netLastError() { return g_error; }
 
 bool netFetch(Payload &out) {
   if (!netOnline()) {
-    WiFi.reconnect();
+    if (millis() - g_joinSince >= REJOIN_AFTER_MS) {
+      WiFi.reconnect();
+      g_joinSince = millis();
+    }
     fail("wifi down");
     return false;
   }
+  g_joinSince = millis();
 
+  // This runs on the main loop, so a dead bridge freezes touch and animation
+  // for as long as these allow. The bridge is on the LAN and serves a prebuilt
+  // document, so a healthy one answers well inside both. No keep-alive: the
+  // client is rebuilt every poll, so a reused socket would only linger.
   HTTPClient http;
-  http.setConnectTimeout(3000);
-  http.setTimeout(5000);
-  http.setReuse(true);
+  http.setConnectTimeout(800);
+  http.setTimeout(2000);
   if (!http.begin(settings().bridge)) {
     fail("bad BRIDGE_URL");
     return false;

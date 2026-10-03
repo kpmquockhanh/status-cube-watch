@@ -77,21 +77,36 @@ SettingsResult settingsApplyJson(const char *json) {
   if (!readStr(o, "ssid", ssid, hasSsid) || !readStr(o, "pass", pass, hasPass) ||
       !readStr(o, "bridge", bridge, hasBridge) || !readStr(o, "otapass", ota, hasOta))
     return SettingsResult::Invalid;
-  bridge = portalTrim(bridge);
+  if (hasBridge) bridge = portalTrim(bridge);
   // Same rules as the portal form. A new SSID without a new password means an
   // open network, exactly as there.
   if (hasSsid && !hasPass) pass = portalResolvePassword(n.ssid, ssid, n.pass, "");
-  if (!portalValidSsid(ssid) || !portalValidBridgeUrl(bridge) || !portalValidWifiPassword(pass) || ota.size() > 63)
+  // Only the keys the patch names are checked (a new SSID also re-checks the
+  // password it resolved to). The stored ones may be empty on a BLE-only cube,
+  // or config.h values the portal would refuse; neither may block a display change.
+  if ((hasSsid && !portalValidSsid(ssid)) || ((hasSsid || hasPass) && !portalValidWifiPassword(pass)) ||
+      (hasBridge && !portalValidBridgeUrl(bridge)) || ota.size() > 63)
     return SettingsResult::Invalid;
 
-  const bool netChanged = ssid != n.ssid || pass != n.pass || bridge != n.bridge || ota != n.otaPass;
-  if (netChanged) {
-    strlcpy(n.ssid, ssid.c_str(), sizeof(n.ssid));
-    strlcpy(n.pass, pass.c_str(), sizeof(n.pass));
-    strlcpy(n.bridge, bridge.c_str(), sizeof(n.bridge));
-    strlcpy(n.otaPass, ota.c_str(), sizeof(n.otaPass));
-    if (!settingsSave(n)) return SettingsResult::Invalid;
+  // Only the groups that changed are written, network last: it is the one that
+  // reboots, and a write reported as rejected must not have reached flash. Once
+  // a group is stored a later failure still reports Ok (no reboot), and the
+  // Mac's read-back after Ok shows what made it.
+  bool saved = false;
+  if (d != deviceSettings()) {
+    if (!deviceSettingsSave(d)) return SettingsResult::Invalid;
+    saved = true;
   }
-  if (!deviceSettingsSave(d) || !pomoSettingsSave(p)) return SettingsResult::Invalid;
-  return netChanged ? SettingsResult::OkReboot : SettingsResult::Ok;
+  if (p != pomoSettings()) {
+    if (!pomoSettingsSave(p)) return saved ? SettingsResult::Ok : SettingsResult::Invalid;
+    saved = true;
+  }
+  const bool netChanged = ssid != n.ssid || pass != n.pass || bridge != n.bridge || ota != n.otaPass;
+  if (!netChanged) return SettingsResult::Ok;
+  strlcpy(n.ssid, ssid.c_str(), sizeof(n.ssid));
+  strlcpy(n.pass, pass.c_str(), sizeof(n.pass));
+  strlcpy(n.bridge, bridge.c_str(), sizeof(n.bridge));
+  strlcpy(n.otaPass, ota.c_str(), sizeof(n.otaPass));
+  if (!settingsSave(n)) return saved ? SettingsResult::Ok : SettingsResult::Invalid;
+  return SettingsResult::OkReboot;
 }

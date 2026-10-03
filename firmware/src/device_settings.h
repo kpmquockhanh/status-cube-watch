@@ -11,6 +11,12 @@ struct DeviceSettings {
   uint8_t pollSec;      // WiFi poll interval in seconds
 };
 
+inline bool operator==(const DeviceSettings &a, const DeviceSettings &b) {
+  return a.backlight == b.backlight && a.sleepMin == b.sleepMin && a.rotateSec == b.rotateSec &&
+         a.pollSec == b.pollSec;
+}
+inline bool operator!=(const DeviceSettings &a, const DeviceSettings &b) { return !(a == b); }
+
 constexpr int DEV_MIN_BACKLIGHT = 10;
 constexpr int DEV_MAX_BACKLIGHT = 255;
 constexpr int DEV_MAX_SLEEP_MIN = 240;  // stored as uint8_t, so 255 is the hard cap anyway
@@ -19,6 +25,10 @@ constexpr int DEV_MIN_POLL_SEC = 2;
 constexpr int DEV_MAX_POLL_SEC = 60;
 
 constexpr uint8_t devClampU8(int v, int lo, int hi) { return (uint8_t)(v < lo ? lo : (v > hi ? hi : v)); }
+
+// config.h milliseconds to whole units, rounding up: a short non-zero value must
+// not become 0, which means never / off.
+constexpr long devMsToUnits(long ms, long unitMs) { return (ms + unitMs - 1) / unitMs; }
 
 inline DeviceSettings deviceClamp(DeviceSettings s) {
   s.backlight = devClampU8(s.backlight, DEV_MIN_BACKLIGHT, DEV_MAX_BACKLIGHT);

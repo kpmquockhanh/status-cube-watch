@@ -49,9 +49,12 @@ $(BIN): $(OBJS)
 	$(CXX) $(OBJS) $(LDFLAGS) -o $@
 	@echo "built $@"
 
+# -MMD -MP: each object also writes a .d file listing the headers it read, so
+# editing a header (several modules are header-only) rebuilds what includes it
+# instead of reusing a stale object. The tests get the same below.
 build/%.o: %.cpp
 	@mkdir -p $(dir $@)
-	$(CXX) $(CXXFLAGS) -c $< -o $@
+	$(CXX) $(CXXFLAGS) -MMD -MP -c $< -o $@
 
 build/lgfx/%.o: $(LGFX)/%.cpp
 	@mkdir -p $(dir $@)
@@ -84,22 +87,32 @@ shot: $(SHOT)
 TESTS := build/portal_util_test build/pomodoro_test build/gesture_test build/deck_test \
          build/pomo_settings_test build/pomo_editor_test build/battery_util_test \
          build/ble_frame_test build/transport_policy_test build/idle_sleep_test build/device_settings_test \
-         build/settings_json_test build/dev_editor_test build/orientation_test build/touch_map_test
+         build/settings_json_test build/dev_editor_test build/orientation_test build/touch_map_test \
+         build/ble_auth_test build/age_label_test
 
 build/pomodoro_test: ../src/pomodoro.cpp
 build/gesture_test: ../src/gesture.cpp
 build/pomo_editor_test: ../src/pomo_editor.cpp
 build/dev_editor_test: ../src/dev_editor.cpp ../src/pomo_editor.cpp
-build/settings_json_test: ../src/settings_json.cpp settings_sim.cpp
+build/settings_json_test: ../src/settings_json.cpp tests/settings_fake.cpp
 
+TEST_FLAGS := -std=c++17 -Wall -Wextra -I../src -Itests -I. -I$(AJSON)
+
+# A test builds from several sources in one command, where -MMD would keep only
+# the last one's headers, so its .d comes from a separate -MM pass over all.
+# The sources are dropped from it: the rules above own them, and a stale .d
+# would otherwise put a source the test no longer uses on the command line.
 build/%_test: tests/%_test.cpp
 	@mkdir -p build
-	$(CXX) -std=c++17 -Wall -Wextra -I../src -Itests -I. -I$(AJSON) $(filter %.cpp,$^) -o $@
+	$(CXX) $(TEST_FLAGS) $(filter %.cpp,$^) -o $@
+	@$(CXX) $(TEST_FLAGS) -MM -MP -MT $@ $(filter %.cpp,$^) | sed -E 's/ [^ ]+\.cpp//g' > $@.d
 
 test: $(TESTS)
 	@for t in $(TESTS); do ./$$t || exit 1; done
 
 clean:
 	rm -rf build
+
+-include $(wildcard build/*.d)
 
 .PHONY: all run shot test clean

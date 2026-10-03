@@ -19,5 +19,6 @@ enum class SettingsResult : uint8_t {
 size_t settingsToJson(char *buf, size_t cap);
 
 // Applies a partial object: only the keys present change, and the whole
-// object is rejected (nothing saved) if any one of them is out of range.
+// object is rejected (nothing saved) if any one of them is out of range. Only
+// the groups that changed are written, the network last.
 SettingsResult settingsApplyJson(const char *json);

@@ -9,9 +9,10 @@ Gesture tapsToGesture(uint8_t n) { return n >= 3 ? Gesture::TripleTap : n == 2 ?
 
 Gesture GestureTracker::update(bool down, int16_t x, int16_t y, uint32_t now, bool multiTap) {
   // Taps waiting on a third that never came (or that stopped meaning anything
-  // because the card changed): settle them. Unsigned: correct across a millis() wrap.
+  // because the card changed): settle them. The gap ends at the next touch, so
+  // never while a finger is down. Unsigned: correct across a millis() wrap.
   Gesture settled = Gesture::None;
-  if (_taps && (!multiTap || now - _tapUp > MULTI_TAP_GAP_MS)) {
+  if (_taps && (!multiTap || (!_down && now - _tapUp > MULTI_TAP_GAP_MS))) {
     if (multiTap) settled = tapsToGesture(_taps);
     _taps = 0;
   }

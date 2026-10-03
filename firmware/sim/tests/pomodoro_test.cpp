@@ -240,7 +240,7 @@ void testFormat() {
 
 void testSetConfigWhileIdle() {
   Rig r;
-  r.p.setConfig(PomoConfig{50 * MIN, 10 * MIN, 30 * MIN, 2});
+  CHECK(r.p.setConfig(PomoConfig{50 * MIN, 10 * MIN, 30 * MIN, 2}));
   PomoView v = r.p.view();
   CHECK(v.state == POMO_IDLE);
   CHECK(v.displaySec == 3000);  // the idle clock shows the new focus length
@@ -254,13 +254,13 @@ void testSetConfigWhileIdle() {
 }
 
 // A running phase is never resized under the user.
-void testSetConfigIgnoredWhenNotIdle() {
+void testSetConfigIgnoredWhileRunning() {
   const PomoConfig other{50 * MIN, 10 * MIN, 30 * MIN, 2};
 
   Rig run;
   run.press();
   run.advance(MIN);
-  run.p.setConfig(other);
+  CHECK(!run.p.setConfig(other));  // main.cpp keeps it pending
   CHECK(run.p.view().displaySec == 24 * 60);
   CHECK(run.p.view().sessions == 4);
 
@@ -268,18 +268,52 @@ void testSetConfigIgnoredWhenNotIdle() {
   pau.press();
   pau.advance(MIN);
   pau.press();  // paused
-  pau.p.setConfig(other);
+  CHECK(!pau.p.setConfig(other));
   CHECK(pau.p.view().state == POMO_PAUSED);
   CHECK(pau.p.view().displaySec == 24 * 60);
+}
 
+// Between phases nothing is running, so a change (from the Mac, mid-set) is
+// taken there: the set never goes back to IDLE by itself, and waiting for a
+// reset would mean it never applies.
+void testSetConfigBetweenPhases() {
   Rig done;
   done.press();
   done.advance(25 * MIN);
-  done.p.setConfig(other);
+  CHECK(done.p.setConfig(PomoConfig{50 * MIN, 10 * MIN, 30 * MIN, 2}));
   CHECK(done.p.view().state == POMO_DONE);
-  CHECK(done.p.view().sessions == 4);
-  done.press();  // starts the break with the ORIGINAL 5 min
-  CHECK(done.p.view().displaySec == 5 * 60);
+  CHECK(done.p.view().phase == PHASE_FOCUS);  // still names the phase that ended
+  CHECK(done.p.view().sessions == 2);
+  CHECK(done.p.view().next == PHASE_SHORT);   // 1 of 2 done
+  done.press();
+  CHECK(done.p.view().displaySec == 10 * 60);  // the new short break
+
+  // Fewer sessions than are already done: the long break is next, and the count
+  // never shows more than the set has.
+  Rig cut;
+  for (int i = 0; i < 3; i++) {
+    cut.press();
+    cut.advance(25 * MIN);  // focus done
+    if (i < 2) {
+      cut.press();
+      cut.advance(5 * MIN);  // short break done
+    }
+  }
+  CHECK(cut.p.view().completed == 3 && cut.p.view().next == PHASE_SHORT);
+  cut.p.setConfig(PomoConfig{25 * MIN, 5 * MIN, 15 * MIN, 2});
+  CHECK(cut.p.view().completed == 2);
+  CHECK(cut.p.view().next == PHASE_LONG);
+
+  // After a break the next phase is focus whatever the count.
+  Rig brk;
+  brk.press();
+  brk.advance(25 * MIN);
+  brk.press();
+  brk.advance(5 * MIN);
+  brk.p.setConfig(PomoConfig{40 * MIN, 5 * MIN, 15 * MIN, 1});
+  CHECK(brk.p.view().next == PHASE_FOCUS);
+  brk.press();
+  CHECK(brk.p.view().displaySec == 40 * 60);
 }
 
 // main.cpp reads view() right after takeAlert() to tell the Mac which phase ended.
@@ -334,7 +368,8 @@ int main() {
   testCustomConfig();
   testFormat();
   testSetConfigWhileIdle();
-  testSetConfigIgnoredWhenNotIdle();
+  testSetConfigIgnoredWhileRunning();
+  testSetConfigBetweenPhases();
   testAlertNamesTheEndedPhase();
   return checksDone("pomodoro_test");
 }

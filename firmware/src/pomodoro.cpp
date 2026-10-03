@@ -23,10 +23,20 @@ void Pomodoro::reset() {
   _alert = false;
 }
 
-void Pomodoro::setConfig(const PomoConfig &cfg) {
-  if (_state != POMO_IDLE) return;
+bool Pomodoro::setConfig(const PomoConfig &cfg) {
+  if (_state == POMO_IDLE) {
+    _cfg = cfg;
+    _left = _cfg.focusMs;
+    return true;
+  }
+  if (_state != POMO_DONE) return false;
+  // Between phases: the one that ended keeps its place on screen (_left is 0),
+  // and the next one begins with the new lengths. A shorter set may now be
+  // complete.
   _cfg = cfg;
-  _left = _cfg.focusMs;
+  if (_completed > _cfg.sessions) _completed = _cfg.sessions;
+  if (_phase == PHASE_FOCUS) _next = _completed >= _cfg.sessions ? PHASE_LONG : PHASE_SHORT;
+  return true;
 }
 
 void Pomodoro::begin(PomoPhase p, uint32_t now) {

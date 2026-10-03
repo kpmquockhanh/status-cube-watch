@@ -30,6 +30,10 @@ void uiReplayPomodoro();
 // Starts the Pomodoro phase-end alert: the ring and the backlight pulse for
 // about two seconds. uiAnimating() stays true while it runs.
 void uiAlertStart();
+// Ends a running alert at once. Only uiRender drives the pulse, so a caller
+// about to draw another screen (an editor, a pairing code) calls this and, when
+// it returns true, puts the backlight back: it may be left mid-pulse.
+bool uiAlertCancel();
 // The Pomodoro settings editor: four rows of - / + and a RESET / DONE bar.
 // One static frame; hit-testing is in pomo_editor.h, which owns the layout.
 void uiPomodoroEditor(Display &lcd, const PomoSettings &s);

@@ -18,7 +18,6 @@
 #include "ota.h"
 #include "payload.h"
 #include "dev_editor.h"
-#include "dev_editor.h"
 #include "pomo_editor.h"
 #include "pomo_settings.h"
 #include "pomodoro.h"
@@ -96,6 +95,9 @@ bool editing = false;
 bool editingDevice = false;  // the display panel, not the Pomodoro editor, is the open one
 DeviceSettings editDevice{};
 PomoSettings editSettings{};
+// The Mac changed the Pomodoro lengths while a phase ran: they reach the timer
+// at the next point where setConfig takes them (pomodoro.h).
+bool pomoConfigPending = false;
 
 constexpr uint32_t SETUP_HOLD_MS = 5000;
 constexpr uint32_t SETUP_WINDOW_MS = 3000;
@@ -130,10 +132,12 @@ bool setupHoldRequested() {
 }
 
 void step(int delta) {
+  // Also when there is nowhere to go: otherwise the timer stays expired and the
+  // first payload to arrive is swiped away from the Pomodoro card at once.
+  lastRotate = millis();
   const uint8_t n = uiDeckSize(payload);
   if (n <= 1) return;
   cardIndex = (cardIndex + n + delta) % n;
-  lastRotate = millis();
   if (cardIndex == uiPomodoroIndex(payload)) uiReplayPomodoro();
   else uiReplay(cardIndex);
   dirty = true;
@@ -148,7 +152,13 @@ void handleBleSettings() {
   Serial.printf("[ble] settings write -> %d\n", (int)r);
   bleSettingsReply((uint8_t)r);
   if (r == SettingsResult::Invalid) return;
-  pomo.setConfig(pomoConfigFrom(pomoSettings(), POMO_TIME_DIV));  // only acts while idle
+  pomoConfigPending = !pomo.setConfig(pomoConfigFrom(pomoSettings(), POMO_TIME_DIV));
+  // The Mac's write wins over an open editor: it shows what is now stored,
+  // rather than saving its older copy over it on DONE.
+  if (editing) {
+    editDevice = deviceSettings();
+    editSettings = pomoSettings();
+  }
   if (screenOn) lcd.setBrightness(deviceSettings().backlight);
   lastRotate = millis();
   dirty = true;
@@ -176,7 +186,7 @@ void openDeviceEditor() {
 // DONE and swipe-up both land here. Brightness was previewed live while
 // editing; the rest takes effect now.
 void closeDeviceEditor() {
-  deviceSettingsSave(editDevice);
+  if (editDevice != deviceSettings()) deviceSettingsSave(editDevice);  // spare the flash
   lcd.setBrightness(deviceSettings().backlight);
   editing = false;
   editingDevice = false;
@@ -203,7 +213,7 @@ void deviceEditorGesture(Gesture g) {
 
 // DONE and swipe-down both land here: what is on screen is what is saved.
 void closeEditor() {
-  pomoSettingsSave(editSettings);
+  if (editSettings != pomoSettings()) pomoSettingsSave(editSettings);  // spare the flash
   pomo.setConfig(pomoConfigFrom(pomoSettings(), POMO_TIME_DIV));
   editing = false;
   uiEditorSlide(false, editSettings);
@@ -246,6 +256,9 @@ void pollTouch() {
   // is a plain Tap, delivered at once (the editors hit-test it).
   const bool onPomodoro = cardIndex == uiPomodoroIndex(payload);
   const Gesture gesture = gestures.update(down, x, y, now, onPomodoro && !editing);
+  // While the panel slides in its buttons are not where the hit-test puts
+  // them, so nothing is pressed until it has landed.
+  if (editing && uiEditorSliding()) return;
   if (editing) {
     if (editingDevice) deviceEditorGesture(gesture);
     else editorGesture(gesture);
@@ -364,6 +377,10 @@ void loop() {
     uiAlertStart();
     dirty = true;
   }
+  if (pomoConfigPending && pomo.setConfig(pomoConfigFrom(pomoSettings(), POMO_TIME_DIV))) {
+    pomoConfigPending = false;
+    dirty = true;
+  }
   pollTouch();
   pollOrientation(now);
   batteryUpdate(now);
@@ -457,9 +474,16 @@ void loop() {
   // second otherwise so the freshness counter ticks.
   if (dirty || uiAnimating() || now - lastDraw >= 1000) {
     const uint32_t age = lastGood ? now - lastGood : now;
-    if (bleState() == BleState::Pairing) uiBlePair(lcd, blePasskey());  // the code must be seen
-    else if (!pairWaitDismissed && waitingToPair()) uiBlePair(lcd, 0);
-    else if (editing && !uiEditorSliding()) {
+    const bool pairing = bleState() == BleState::Pairing;
+    const bool waiting = !pairWaitDismissed && waitingToPair();
+    const bool editorUp = editing && !uiEditorSliding();
+    // Only the deck pulses the backlight for an alert; another screen ends it
+    // and restores the level (the display panel's preview while it is open).
+    if ((pairing || waiting || editorUp) && uiAlertCancel())
+      lcd.setBrightness(editingDevice ? editDevice.backlight : deviceSettings().backlight);
+    if (pairing) uiBlePair(lcd, blePasskey());  // the code must be seen
+    else if (waiting) uiBlePair(lcd, 0);
+    else if (editorUp) {
       if (editingDevice) uiDeviceEditor(lcd, editDevice);
       else uiPomodoroEditor(lcd, editSettings);
     }
