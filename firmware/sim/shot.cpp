@@ -165,7 +165,7 @@ bool pomodoroShot(Display &lcd, const char *state) {
 // line; the grab goes to <prefix>-<name>.png. Returns false for an unknown name.
 bool renderSpecial(Display &lcd, const char *name) {
   if (!strcmp(name, "portal")) {
-    uiPortal(lcd, "claude-cube-A1B2");
+    uiPortal(lcd, "claude-cube-A1B2", "192.168.71.1", "192.168.1.57");
   } else if (!strcmp(name, "ota")) {
     uiOta(lcd, 62);
   } else if (!strcmp(name, "ble-pair")) {

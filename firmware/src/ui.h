@@ -45,8 +45,10 @@ void uiDeviceSlide(bool open, const DeviceSettings &s);
 void uiDeviceEditor(Display &lcd, const DeviceSettings &s);
 void uiMessage(Display &lcd, const char *title, const char *body);
 // Setup screen shown while the config portal runs: the cube's own WiFi name
-// as text and as a join-QR, and the address of the form.
-void uiPortal(Display &lcd, const char *apName);
+// as text and as a join-QR, and the address of the form on that network.
+// `lanIp`: the cube's address on the saved network once the station side has
+// joined it (the form is reachable there too); null or empty = not joined.
+void uiPortal(Display &lcd, const char *apName, const char *apIp, const char *lanIp);
 
 // Pairing screen. With a passkey (non-zero) it shows the 6-digit code to type
 // on the Mac; with 0 it shows the "waiting for a Mac" variant.

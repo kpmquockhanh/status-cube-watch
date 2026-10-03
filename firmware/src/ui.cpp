@@ -981,7 +981,7 @@ void uiPomodoroEditor(Display &lcd, const PomoSettings &s) {
   if (g_sprite) g_canvas.pushSprite(&lcd, 0, 0);
 }
 
-void uiPortal(Display &lcd, const char *apName) {
+void uiPortal(Display &lcd, const char *apName, const char *apIp, const char *lanIp) {
   LovyanGFX *g = target(lcd);
   g->fillScreen(BG);
 
@@ -1006,7 +1006,12 @@ void uiPortal(Display &lcd, const char *apName) {
   drawCaps(g, "Join, then open", LCD_WIDTH / 2, 214, DIM, middle_center);
   g->setFont(&V_S12.font);
   g->setTextColor(DIM, BG);
-  g->drawString("192.168.4.1", LCD_WIDTH / 2, 234);
+  g->drawString(apIp, LCD_WIDTH / 2, 234);
+  if (lanIp && lanIp[0]) {
+    char lan[40];
+    snprintf(lan, sizeof(lan), "or on WiFi %s", lanIp);
+    g->drawString(lan, LCD_WIDTH / 2, 252);
+  }
 
   if (g_sprite) g_canvas.pushSprite(&lcd, 0, 0);
 }
