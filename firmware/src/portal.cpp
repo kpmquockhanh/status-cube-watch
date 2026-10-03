@@ -3,20 +3,27 @@
 #include <DNSServer.h>
 #include <WebServer.h>
 #include <WiFi.h>
+#include <esp_heap_caps.h>
+#include <esp_random.h>
 
 #include <string>
 
 #include "portal_util.h"
 #include "ble.h"
+#include "net.h"
 #include "settings.h"
 #include "ui.h"
 
 namespace {
 
-constexpr uint32_t IDLE_RETRY_MS = 60000;
+// Not the ESP default 192.168.4.1: the station side may join a LAN that uses
+// 192.168.4.x, and two interfaces on one subnet send replies out the wrong one.
+const IPAddress AP_IP(192, 168, 71, 1);
 
 WebServer server(80);
 DNSServer dns;
+// Made fresh each time the portal starts and put in both forms; see portalTokenOk.
+char g_token[17] = "";
 
 std::string numField(const char *label, const char *name, int v, int lo, int hi, const char *hint) {
   return std::string("<label>") + label + "</label><input name=" + name + " type=number inputmode=numeric min=" +
@@ -39,7 +46,8 @@ std::string formPage(const Settings &cur, const std::string &error) {
       ".err{color:#ff6b6b;margin-bottom:8px}.hint{color:#7c8598;font-size:12px;margin-top:4px}"
       "</style></head><body><h1>Claude cube setup</h1>";
   if (!error.empty()) h += "<div class=err>" + portalHtmlEscape(error) + "</div>";
-  h += "<form method=post action=/save>"
+  const std::string token = std::string("<input type=hidden name=t value=") + g_token + ">";
+  h += "<form method=post action=/save>" + token +
        "<label>WiFi network</label><input name=ssid maxlength=32 required value=\"" +
        portalHtmlEscape(cur.ssid) +
        "\">"
@@ -53,8 +61,10 @@ std::string formPage(const Settings &cur, const std::string &error) {
        "<div class=hint>The machine running bridge/server.mjs, e.g. "
        "http://192.168.1.50:8787/api/status</div>"
        "<label>OTA password (optional)</label><input name=otapass type=password maxlength=63 "
-       "placeholder=\"leave blank to keep\">"
-       "<h2>Display</h2>";
+       "placeholder=\"leave blank to keep\">";
+  if (cur.otaPass[0])
+    h += "<label><input type=checkbox name=otaclear style='width:auto'> Remove the OTA password</label>";
+  h += "<h2>Display</h2>";
   const DeviceSettings &d = deviceSettings();
   h += numField("Brightness", "bl", d.backlight, DEV_MIN_BACKLIGHT, DEV_MAX_BACKLIGHT, "10 (dim) to 255 (full)");
   h += numField("Screen sleep (minutes)", "sl", d.sleepMin, 0, DEV_MAX_SLEEP_MIN,
@@ -70,7 +80,7 @@ std::string formPage(const Settings &cur, const std::string &error) {
   h += numField("Sessions before long break", "pn", ps.sessions, POMO_MIN_SESSIONS, POMO_MAX_SESSIONS, "");
   h += "<button>Save and reboot</button></form>";
   if (bleBonded())
-    h += "<form method=post action=/forget><button style='background:#2a3242;color:#e7ecf5'>"
+    h += "<form method=post action=/forget>" + token + "<button style='background:#2a3242;color:#e7ecf5'>"
          "Forget paired Mac</button></form>"
          "<div class=hint>Also remove &ldquo;Claude Cube&rdquo; in the Mac's Bluetooth settings.</div>";
   h += "</body></html>";
@@ -81,9 +91,39 @@ void sendForm(int code, const std::string &error) {
   server.send(code, "text/html", formPage(settings(), error).c_str());
 }
 
-void handleRoot() { sendForm(200, ""); }
+// Phones probe a known URL (/generate_204, /hotspot-detect.html, ...) to
+// decide whether a network needs a sign-in page. Redirecting everything to
+// the form is what makes the page open by itself.
+// Send the client back to the address it used: the AP address on the AP, the
+// cube's LAN address when the form is opened over the station side.
+void handleNotFound() {
+  server.sendHeader("Location", "http://" + server.client().localIP().toString() + "/");
+  server.send(302, "text/plain", "");
+}
+
+// See portalHostIs: the form is only served to a page that names the cube by
+// its address, and a save or forget must also carry the form's token.
+bool hostOk() {
+  return portalHostIs(server.hostHeader().c_str(), server.client().localIP().toString().c_str());
+}
+
+bool postOk() {
+  if (!hostOk()) {
+    handleNotFound();
+    return false;
+  }
+  if (portalTokenOk(server.arg("t").c_str(), g_token)) return true;
+  sendForm(403, "That page was out of date (the cube restarted). Here is a fresh one: try again.");
+  return false;
+}
+
+void handleRoot() {
+  if (!hostOk()) return handleNotFound();
+  sendForm(200, "");
+}
 
 void handleSave() {
+  if (!postOk()) return;
   const Settings &cur = settings();
   const std::string ssid = server.arg("ssid").c_str();
   const std::string bridge = portalTrim(server.arg("bridge").c_str());
@@ -96,7 +136,8 @@ void handleSave() {
       portalResolvePassword(cur.ssid, ssid, cur.pass, server.arg("pass").c_str());
   if (!portalValidWifiPassword(pass))
     return sendForm(400, "A WiFi password must be 8 to 63 characters (or empty for an open network).");
-  const std::string ota = portalKeepIfBlank(cur.otaPass, server.arg("otapass").c_str());
+  const std::string ota =
+      portalOtaPassword(cur.otaPass, server.arg("otapass").c_str(), server.hasArg("otaclear"));
   if (ota.size() > 63) return sendForm(400, "The OTA password can be at most 63 characters.");
 
   const DeviceSettings &dc = deviceSettings();
@@ -138,6 +179,7 @@ void handleSave() {
 }
 
 void handleForget() {
+  if (!postOk()) return;
   bleForgetBonds();
   server.send(200, "text/html",
               "<!doctype html><meta charset=utf-8><meta name=viewport content='width=device-width,initial-scale=1'>"
@@ -147,12 +189,12 @@ void handleForget() {
   ESP.restart();
 }
 
-// Phones probe a known URL (/generate_204, /hotspot-detect.html, ...) to
-// decide whether a network needs a sign-in page. Redirecting everything to
-// the form is what makes the page open by itself.
-void handleNotFound() {
-  server.sendHeader("Location", "http://" + WiFi.softAPIP().toString() + "/");
-  server.send(302, "text/plain", "");
+// AP+STA with BLE up is the most the radio carries at once, and platformio.ini
+// records an out-of-memory crash in that corner: log the internal heap.
+void logHeap(const char *when) {
+  Serial.printf("[portal] %s: internal heap free %u, largest block %u\n", when,
+                (unsigned)heap_caps_get_free_size(MALLOC_CAP_INTERNAL),
+                (unsigned)heap_caps_get_largest_free_block(MALLOC_CAP_INTERNAL));
 }
 
 }  // namespace
@@ -162,11 +204,19 @@ void handleNotFound() {
   WiFi.macAddress(mac);
   char ap[24];
   snprintf(ap, sizeof(ap), "claude-cube-%02X%02X", mac[4], mac[5]);
+  snprintf(g_token, sizeof(g_token), "%08x%08x", (unsigned)esp_random(), (unsigned)esp_random());
 
-  WiFi.disconnect(true);
-  WiFi.mode(WIFI_AP);
+  // AP+STA: the station side can rejoin the saved network while the AP serves
+  // the form (the SoftAP takes the station's channel). The core's own
+  // reconnect is off: PortalSta decides when a join may disturb the AP, and a
+  // join still running from before the portal is stopped, not doubled.
+  WiFi.setAutoReconnect(false);
+  WiFi.mode(WIFI_AP_STA);
+  if (WiFi.status() != WL_CONNECTED) WiFi.disconnect(false);
   WiFi.softAP(ap);
+  WiFi.softAPConfig(AP_IP, AP_IP, IPAddress(255, 255, 255, 0));
   const IPAddress ip = WiFi.softAPIP();
+  const String apIp = ip.toString();
   dns.start(53, "*", ip);
 
   server.on("/", HTTP_GET, handleRoot);
@@ -175,10 +225,15 @@ void handleNotFound() {
   server.onNotFound(handleNotFound);
   server.begin();
 
-  Serial.printf("[portal] AP %s at %s\n", ap, ip.toString().c_str());
-  uiPortal(lcd, ap);
+  Serial.printf("[portal] AP %s at %s\n", ap, apIp.c_str());
+  logHeap("started");
 
-  uint32_t lastActive = millis();
+  PortalSta sta;
+  sta.begin(millis(), !autoRetry);  // autoRetry: a join has just failed, so wait a period
+  bool staWasUp = WiFi.status() == WL_CONNECTED;
+  String lanIp = staWasUp ? WiFi.localIP().toString() : String();
+  uiPortal(lcd, ap, apIp.c_str(), lanIp.c_str());
+
   bool showingPair = false;
   uint32_t paintedKey = 0;
   const bool bondedAtStart = bleBonded();
@@ -197,7 +252,7 @@ void handleNotFound() {
       }
       showingPair = true;
     } else if (showingPair) {
-      uiPortal(lcd, ap);
+      uiPortal(lcd, ap, apIp.c_str(), lanIp.c_str());
       showingPair = false;
     }
     if (portalBondedTransition(bondedAtStart, bleBonded())) {
@@ -205,10 +260,35 @@ void handleNotFound() {
       delay(500);
       ESP.restart();
     }
+
+    const bool phoneOnAp = WiFi.softAPgetStationNum() > 0;
+    const bool staUp = WiFi.status() == WL_CONNECTED;
+    if (staUp != staWasUp) {
+      staWasUp = staUp;
+      lanIp = staUp ? WiFi.localIP().toString() : String();
+      if (staUp) {
+        Serial.printf("[portal] joined %s, form also at %s\n", settings().ssid, lanIp.c_str());
+        logHeap("joined");
+      } else {
+        Serial.println("[portal] station link lost");
+      }
+      if (!showingPair) uiPortal(lcd, ap, apIp.c_str(), lanIp.c_str());
+    }
+    switch (sta.update(millis(), settingsHaveWifi(), !phoneOnAp && bs != BleState::Pairing, staUp)) {
+      case PortalStaAction::Begin:
+        netJoinSaved();
+        break;
+      case PortalStaAction::Stop:
+        WiFi.disconnect(false);  // station only; the AP stays up
+        Serial.println("[portal] join attempt ended");
+        break;
+      case PortalStaAction::None:
+        break;
+    }
     const bool bleBusy = bs == BleState::Pairing || bs == BleState::Connected;
-    if (WiFi.softAPgetStationNum() > 0 || bleBusy) lastActive = millis();
-    if (portalIdleRebootDue(autoRetry, bleBusy, millis() - lastActive, IDLE_RETRY_MS)) {
-      Serial.println("[portal] nobody joined -- rebooting to retry the saved network");
+    if (portalStaRecoveredReboot(autoRetry, staUp, phoneOnAp, bleBusy)) {
+      Serial.println("[portal] saved network is back -- rebooting");
+      delay(500);
       ESP.restart();
     }
     delay(5);

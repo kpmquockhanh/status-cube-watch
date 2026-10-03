@@ -14,7 +14,8 @@
 //
 // Everything in here fails soft. No token, no network, an endpoint that has
 // moved: the result is a null window, the card says so, and the rest of the
-// dashboard carries on.
+// dashboard carries on. Every failure, the missing login included, waits at
+// least CACHE_MS before the next attempt.
 
 import { execFile } from 'node:child_process';
 import { readFile } from 'node:fs/promises';
@@ -27,6 +28,8 @@ const execFileAsync = promisify(execFile);
 const USAGE_URL = 'https://api.anthropic.com/api/oauth/usage';
 const CACHE_MS = 60_000;   // the window moves in whole percent; once a minute is plenty
 const TIMEOUT_MS = 4_000;
+const KEYCHAIN_TIMEOUT_MS = 3_000; // `security` can hang on a locked Keychain
+const MAX_STALE_MS = 10 * 60_000;  // after this long without a good fetch, show nothing
 
 const BACKOFF_MS = 5 * 60_000;      // minimum pause after a 429
 const MAX_BACKOFF_MS = 30 * 60_000; // ignore absurd Retry-After values
@@ -50,7 +53,7 @@ async function tokenFromKeychain() {
   try {
     const { stdout } = await execFileAsync('security', [
       'find-generic-password', '-s', 'Claude Code-credentials', '-w',
-    ]);
+    ], { timeout: KEYCHAIN_TIMEOUT_MS });
     return parseToken(stdout.trim());
   } catch {
     return null;
@@ -75,15 +78,21 @@ export async function getUsageLimits(now = Date.now()) {
 
   const empty = { five_hour: null, seven_day: null, error: null };
   // On failure keep showing the last good reading (it moves in whole percent,
-  // a few minutes stale beats an empty ring) and tag it with the error.
-  const failed = (error) => (cache.data ? { ...cache.data, error } : { ...empty, error });
+  // a few minutes stale beats an empty ring) and tag it with the error -- but
+  // only for MAX_STALE_MS; past that an old percentage is a guess, not a gauge.
+  const failed = (error) =>
+    cache.data && now - cache.at < MAX_STALE_MS
+      ? { ...cache.data, error }
+      : { ...empty, error };
 
   // Backing off after a 429/failure: don't hit the endpoint again until then.
   if (now < retryAt) return failed(lastError);
 
   const token = await getToken();
   if (!token) {
-    return { ...empty, error: 'no Claude Code login found' };
+    lastError = 'no Claude Code login found';
+    retryAt = now + CACHE_MS;
+    return failed(lastError);
   }
 
   try {
@@ -115,7 +124,10 @@ export async function getUsageLimits(now = Date.now()) {
     retryAt = 0;
     return data;
   } catch (err) {
-    lastError = err.name === 'TimeoutError' ? 'usage endpoint timeout' : String(err.message ?? err);
+    lastError =
+      err.name === 'TimeoutError' ? 'usage endpoint timeout'
+      : err instanceof SyntaxError ? 'usage endpoint bad JSON'
+      : String(err.message ?? err);
     retryAt = now + CACHE_MS;
     return failed(lastError);
   }

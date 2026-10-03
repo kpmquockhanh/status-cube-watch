@@ -60,10 +60,12 @@ Authentication reuses the Claude Code login already on this machine -- the
 macOS Keychain item `Claude Code-credentials`, falling back to
 `~/.claude/.credentials.json` elsewhere. The token never leaves the host; the
 device only ever receives the rendered percentage. `bridge/limits.mjs` caches
-the response for 60s and fails soft: with no login, no network, or an endpoint
-that has moved, the ring keeps its empty track and the reason goes on the line
-underneath. An unfilled ring reads as a legible nothing; a missing ring reads
-as a bug.
+the response for 60s and fails soft: a failed read keeps the last good one for
+up to 10 minutes, and after that (or with no login, no network, or an endpoint
+that has moved) the ring keeps its empty track and a short reason (`no login`,
+`timeout`, `HTTP 401`, `offline`...) goes under the countdown. A window whose
+reset time has passed shows the empty track too, until the next read. An
+unfilled ring reads as a legible nothing; a missing ring reads as a bug.
 
 The spend and token breakdowns (`TODAY`, `THIS MONTH`, `TOKENS TODAY`,
 `TOP MODEL`, `TOP PROJECT`) are still built in `bridge/cards.mjs` and are one
@@ -123,6 +125,16 @@ claude-status-cube bridge  source=local  refresh=5000ms
 Open the **preview** URL in a browser: it renders the same payload as a
 240x280 device mock, so you can build and tune the whole dashboard before the
 hardware arrives. Click the screen or use the arrow keys to change cards.
+
+The server answers at once and fills in the data in the background (the card
+says `starting` until the first read lands). `GET /health` is always 200 while
+it runs; read `ok` in the body (`ok:false` with `error` / `limitsError` when
+degraded). It listens on every interface, which the cube needs to poll over
+WiFi; set `"host": "127.0.0.1"` in `config.json` (or `CUBE_HOST`) to keep it off
+the LAN when the cube only uses Bluetooth. Pinned to one LAN address, it also
+listens on `127.0.0.1` for the Mac helper. A bad value in `config.json` or the
+environment is ignored with a warning, and an environment variable wins over
+the file both ways (`CUBE_EXTRA_CARDS=0` turns off `"extraCards": true`).
 
 To keep it running without a terminal open, install it as a LaunchAgent:
 
@@ -197,6 +209,18 @@ cd mac-helper
 The app reads `CUBE_PORT` (default 8787), `CUBE_BRIDGE_DIR` and `CUBE_NODE` (path to `node`) from
 the environment, and takes `--port N` on its command line; `install.sh` writes them into the
 LaunchAgent, which restarts the app only after a crash (`KeepAlive` with `SuccessfulExit=false`).
+`install.sh` also records the bridge directory and node path in the app's defaults
+(`defaults read com.claude-cube.link`), used when the app is started without the LaunchAgent
+(Finder, `open`). Order: `CUBE_BRIDGE_DIR` / `CUBE_NODE`, then the recorded values, then a
+`bridge/` next to the working directory or the app bundle (node: the Homebrew and system paths).
+The app talks to the bridge on `127.0.0.1`; a bridge whose `host` is pinned to a LAN address
+listens on `127.0.0.1` as well, so any `host` works.
+
+**Menu bar.** The item shows the 5-hour percentage. **Cube settings…** edits what the setup portal
+can; changing the WiFi network with the password left blank asks first, because the cube then joins
+it as an open network and forgets the stored password. **Forget cube** drops the stored cube and
+scans again, for when you replace it (also remove the old "Claude Cube" in System Settings >
+Bluetooth). **Quit** also stops the bridge the app started.
 For verbose diagnostics (BLE state changes, frames and ACKs, bridge health checks and child exits,
 HTTP timings, push decisions) set `CUBE_TRACE=1` or pass `--trace`; lines tagged `[trace:...]`
 go to stderr, i.e. `./install.sh logs`.
@@ -218,7 +242,7 @@ on a real cube yet) is `docs/ble-acceptance.md`.
 
 ### Changing WiFi without reflashing (setup portal)
 
-The cube shows a setup screen when it cannot join the stored network within ~20 s and has no paired Mac (a cube with no WiFi and no Mac shows "Waiting for a Mac" instead, see Pairing over Bluetooth), or when you touch the screen while the boot screen says "HOLD SCREEN FOR SETUP" (the first 3 s after power-up) and keep holding for 5 s. Join the open `claude-cube-XXXX` network (scan the QR on the screen); the setup page opens by itself, or browse to `192.168.4.1`. Enter the WiFi name and password, the bridge URL and, optionally, an OTA password. A WiFi password must be 8 to 63 characters (or empty for an open network). A blank password keeps the saved one unless you change the network. If nobody joins within a minute the cube reboots and retries the stored network, so a router that was slow to come back after a power cut does not strand it. The setup network is open by design: while it is up (setup screen showing), anyone in radio range can change the cube's settings, including the OTA password. Only reconfigure when you are at the cube, and set an OTA password. The page also has a **Forget paired Mac** button.
+The cube shows a setup screen when it cannot join the stored network within ~20 s and has no paired Mac (a cube with no WiFi and no Mac shows "Waiting for a Mac" instead, see Pairing over Bluetooth), or when you touch the screen while the boot screen says "HOLD SCREEN FOR SETUP" (the first 3 s after power-up) and keep holding for 5 s. Join the open `claude-cube-XXXX` network (scan the QR on the screen); the setup page opens by itself, or browse to `192.168.71.1`. Enter the WiFi name and password, the bridge URL and, optionally, an OTA password. A WiFi password must be 8 to 63 characters (or empty for an open network). A blank password keeps the saved one unless you change the network; a blank OTA password keeps the saved one too, and **Remove the OTA password** clears it. While nobody is on the setup network the cube keeps trying the stored network (a 10 s attempt every 30 s). Once it joins, the screen also shows the cube's address on that network, where the same page works from any computer on your LAN. If the setup screen came up because WiFi was down (not because you held the screen), the cube goes back to normal by itself the moment the stored network answers, so a router that was slow to come back after a power cut does not strand it. The setup network is open by design: while it is up (setup screen showing), anyone in radio range, and once it has joined, anyone on your LAN, can change the cube's settings, including the OTA password. (The page refuses requests that do not name the cube by address or that do not come from the form it served, so another web page cannot submit it for you.) Only reconfigure when you are at the cube, and set an OTA password. The page also has a **Forget paired Mac** button.
 
 ### Updating over WiFi (OTA)
 
@@ -226,7 +250,7 @@ After the first USB flash the cube is reachable as `claude-cube.local`. In `firm
 
 ### Pomodoro card
 
-The last card in the deck is a Pomodoro timer that runs on the cube itself (so it works with the bridge down). **Double-tap** the screen to start, pause or resume (it acts a third of a second after the second tap, once it is clear no third is coming); **triple-tap** to reset. It runs 25 min focus, 5 min break, and a 15 min break after four focus sessions, each phase started by you. When a phase ends the cube jumps to this card and pulses the ring and backlight until you double-tap to start the next phase. To change the lengths without reflashing, **swipe up** on the Pomodoro card while the timer is idle. A settings screen opens with a `-` and `+` for FOCUS (steps of 5 min), SHORT BREAK (1 min), LONG BREAK (5 min) and SESSIONS (1). RESET returns to the defaults; DONE (or a swipe down) saves them, and they survive power cycles. A running, paused or finished phase is never resized: new lengths apply from the next one you start. The defaults are `POMO_FOCUS_MIN`, `POMO_BREAK_MIN`, `POMO_LONG_MIN` and `POMO_SESSIONS` in `config.h`.
+The last card in the deck is a Pomodoro timer that runs on the cube itself (so it works with the bridge down). **Double-tap** the screen to start, pause or resume (it acts a third of a second after the second tap, once it is clear no third is coming); **triple-tap** to reset. It runs 25 min focus, 5 min break, and a 15 min break after four focus sessions, each phase started by you. When a phase ends the cube jumps to this card and pulses the ring and backlight for about two seconds; the next phase waits for your double tap. To change the lengths without reflashing, **swipe up** on the Pomodoro card while the timer is idle. A settings screen opens with a `-` and `+` for FOCUS (steps of 5 min), SHORT BREAK (1 min), LONG BREAK (5 min) and SESSIONS (1). RESET returns to the defaults; DONE (or a swipe down) saves them, and they survive power cycles. A running or paused phase is never resized: new lengths apply from the next one you start. Lengths changed from the Mac (**Cube settings…**) work the same way, and arrive even mid-set. The defaults are `POMO_FOCUS_MIN`, `POMO_BREAK_MIN`, `POMO_LONG_MIN` and `POMO_SESSIONS` in `config.h`.
 
 ## Layout
 
@@ -345,17 +369,23 @@ as you swipe. One long value therefore shrinks every ring, which is why
 
 ## Notes on the implementation
 
-- **Incremental reads.** The local source keeps a byte offset per transcript
-  and only parses appended bytes, so a 5-second refresh over a busy
+- **Incremental reads.** The local source reads every `.jsonl` under
+  `~/.claude/projects` (subagent transcripts included), keeps a byte offset per
+  file and only parses appended bytes, moving the offset only past complete
+  lines, so a half-written line is read again next time. A file whose size and
+  modified time have not changed is skipped, so a 5-second refresh over a busy
   `~/.claude` stays cheap. Events are de-duplicated on `requestId`, because
   the same request is often written to the log more than once.
+- **Pricing.** `bridge/pricing.mjs` matches model ids on the longest prefix,
+  prices cache reads and writes per model, and prices fast mode and US-only
+  inference (`inference_geo: "us"`, 1.1x) when the usage record says so.
 - **Admin polling.** The Usage & Cost API documents sustained polling at once
   per minute; the bridge enforces that floor in `admin` mode regardless of
   what you configure.
 - **Cost vs. usage endpoints.** In `admin` mode the usage report gives hourly
   granularity per model and the cost report gives authoritative dollars in
-  daily buckets. Both only matter with `extraCards` on; the default gauges come
-  from the OAuth usage endpoint instead.
+  daily buckets (UTC days, shown under the local date). Both only matter with
+  `extraCards` on; the default gauges come from the OAuth usage endpoint instead.
 - **No LVGL.** Two dials don't need a widget toolkit. LovyanGFX with one
   full-screen sprite is simpler to build, has no `lv_conf.h` to maintain, and
   leaves most of RAM free. LVGL 9 is the upgrade path if the UI grows.
@@ -376,7 +406,7 @@ as you swipe. One long value therefore shrinks every ring, which is why
 | Image shifted vertically | Change `LCD_OFFSET_Y` (20 ↔ 0) |
 | Colours inverted | Flip `cfg.invert` in `src/display.h` |
 | `[touch] not responding` | `PIN_I2C_SDA` / `PIN_I2C_SCL` / `PIN_TP_RST` wrong |
-| Device shows `OFFLINE` | Bridge not reachable — check it's bound to the LAN address it printed, and that the host firewall allows the port |
+| Top bar shows `OFF` | Bridge not reachable — check it's bound to the LAN address it printed, and that the host firewall allows the port |
 | Costs look too low | An unrecognised model falls back to Sonnet-tier rates; add it to `bridge/pricing.mjs` |
 | Cube never pairs | Check `./install.sh logs`; the app needs the Bluetooth permission (System Settings > Privacy & Security > Bluetooth) |
 | `pio run` stalls at `Downloading 0%` | PlatformIO's CDN, not your network. See below. |
@@ -412,6 +442,3 @@ charging, none of which this scaffold uses yet:
 - Buzzer when the daily spend crosses a threshold
 - Deep sleep between polls, with the RTC as the wake source, for battery use
 - A "burn rate" card: tokens per minute over the last 10 minutes
-# status-cube-watch
-# status-cube-watch
-# status-cube-watch

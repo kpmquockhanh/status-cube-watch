@@ -2,6 +2,7 @@
 
 #include <math.h>
 
+#include "age_label.h"
 #include "battery_util.h"
 #include "config.h"
 #include "fonts_gen.h"
@@ -211,8 +212,8 @@ UiLink g_link = UiLink::None;
 
 // Battery glyph + "NN%", top-left. Fixed in position: the glyph sits at `leftX`
 // and the number starts at a constant offset from it, so neither moves when the
-// percentage changes width. Returns the x where the run ends (sized for "100%").
-int drawBattery(LovyanGFX *g, int leftX, int y, const BatteryView &bat) {
+// percentage changes width.
+void drawBattery(LovyanGFX *g, int leftX, int y, const BatteryView &bat) {
   const uint16_t col = bat.pct >= 40   ? g_palette[ACC_GREEN]
                        : bat.pct >= 15 ? g_palette[ACC_AMBER]
                                        : g_palette[ACC_RED];
@@ -231,26 +232,20 @@ int drawBattery(LovyanGFX *g, int leftX, int y, const BatteryView &bat) {
   g->setTextColor(col, BG);
   const int textX = leftX + BODY_W + NUB_W + GAP;
   g->drawString(txt, textX, y);
-  return textX + g->textWidth("100%");
 }
 
-// The battery sits top-left. `left` is a label for the card, if it has none of
-// its own elsewhere (the text cards: the data source); a ring card passes "".
-void drawTopBar(LovyanGFX *g, const char *left, bool online, uint32_t ageMs,
-                const BatteryView &bat) {
+// Battery top-left; freshness, and the transport marker beside it, top-right.
+void drawTopBar(LovyanGFX *g, bool online, uint32_t ageMs, const BatteryView &bat) {
   // The panel has rounded corners (~35px radius), so the bar is inset from the
   // edges; at the old 12px margin the text and status dot were clipped.
   constexpr int Y = 24;
   constexpr int LEFT_X = 36;
 
   // Freshness beats a clock here: the board has no NTP sync in this sketch,
-  // and what matters is whether the number on screen is current. "OFF" rather
-  // than "OFFLINE" so the readout never outgrows the slot reserved for it.
-  char right[16];
+  // and what matters is whether the number on screen is current (age_label.h).
+  char right[8];
   const uint32_t s = ageMs / 1000;
-  if (!online) snprintf(right, sizeof(right), "OFF");
-  else if (s < 60) snprintf(right, sizeof(right), "%lus", (unsigned long)s);
-  else snprintf(right, sizeof(right), "%lum", (unsigned long)(s / 60));
+  ageLabel(right, sizeof(right), online, s);
 
   const uint16_t col = online && s < 30 ? g_palette[ACC_GREEN] : g_palette[ACC_RED];
   g->setFont(&V_S12.font);
@@ -259,21 +254,13 @@ void drawTopBar(LovyanGFX *g, const char *left, bool online, uint32_t ageMs,
   g->drawString(right, LCD_WIDTH - 46, Y);
   g->fillCircle(LCD_WIDTH - 36, Y, 3, col);
 
-  const int batRight = drawBattery(g, LEFT_X, Y, bat);
+  drawBattery(g, LEFT_X, Y, bat);
 
-  // The label gets what is left between the battery and the age readout, in
-  // capitals as drawCaps draws it; trim it rather than run into either.
-  char name[48];
-  size_t n = 0;
-  for (; left[n] && n < sizeof(name) - 1; n++) name[n] = toupper((unsigned char)left[n]);
-  name[n] = '\0';
+  // Transport marker just left of the age readout, at a fixed place: the slot
+  // is sized for the widest readout age_label.h can produce.
   int ageW = g->textWidth("59s");
   if (g->textWidth("99m") > ageW) ageW = g->textWidth("99m");
   if (g->textWidth("OFF") > ageW) ageW = g->textWidth("OFF");
-
-  // Transport marker just left of the age readout. The slot is always sized for
-  // "WIFI" so the label's room does not change when the link switches.
-  const int linkW = g->textWidth("WIFI");
   const int linkRight = LCD_WIDTH - 46 - ageW - 8;
   if (online && g_link != UiLink::None) {
     g->setFont(&V_S12.font);
@@ -281,11 +268,6 @@ void drawTopBar(LovyanGFX *g, const char *left, bool online, uint32_t ageMs,
     g->setTextColor(DIM, BG);
     g->drawString(g_link == UiLink::Ble ? "BLE" : "WIFI", linkRight, Y);
   }
-
-  const int x0 = batRight + 10;
-  const int maxW = linkRight - linkW - 6 - x0;
-  for (; n > 1 && capsWidth(g, name) > maxW; n--) name[n - 1] = '\0';
-  if (n) drawCaps(g, name, x0, Y, DIM, middle_left);
 }
 
 // --- the ring ------------------------------------------------------------
@@ -470,7 +452,7 @@ void drawGaugeCard(LovyanGFX *g, const Card &card, const RingStyle &style,
   uint32_t shownRgb;
   stepGauge(a, hasReading ? card.gauge : 0.0f, rgb, now, shownRgb);
 
-  drawTopBar(g, "", online, ageMs, bat);
+  drawTopBar(g, online, ageMs, bat);
   const uint32_t ringRgb = style.flash > 0.0f ? lerpRgb(shownRgb, 0xFFFFFF, style.flash) : shownRgb;
   drawRing(g, g_ringOuter, a.shown, ringRgb, hasReading, style.notches);
 
@@ -539,7 +521,7 @@ void drawDualCard(LovyanGFX *g, const Card &card, GaugeAnim &outer, GaugeAnim &i
   stepGauge(outer, has1 ? card.gauge : 0.0f, RGB888[card.color % 7], now, rgb1);
   stepGauge(inner, has2 ? card.gauge2 : 0.0f, RGB888[card.color2 % 7], now, rgb2);
 
-  drawTopBar(g, "", online, ageMs, bat);
+  drawTopBar(g, online, ageMs, bat);
   drawRing(g, g_ringOuter, outer.shown, rgb1, has1, true);
   drawRing(g, g_ringInner, inner.shown, rgb2, has2, true);
 
@@ -567,7 +549,7 @@ void drawDualCard(LovyanGFX *g, const Card &card, GaugeAnim &outer, GaugeAnim &i
 void drawTextCard(LovyanGFX *g, const Payload &p, const Card &card, uint16_t color,
                   bool online, uint32_t ageMs, const BatteryView &bat) {
   (void)p;
-  drawTopBar(g, "", online, ageMs, bat);
+  drawTopBar(g, online, ageMs, bat);
 
   drawCaps(g, card.title, LCD_WIDTH / 2, 60, DIM, top_center);
   drawFitted(g, card.value, LCD_WIDTH / 2, 145, LCD_WIDTH - 20, 96, color);
@@ -824,7 +806,7 @@ float alertPulse(uint32_t now) {
 
 }  // namespace
 
-void uiBegin(Display &lcd) {
+void uiBegin(Display &) {
   for (int i = 0; i < 7; i++) g_palette[i] = to565(RGB888[i]);
   INK = g_palette[ACC_INK];
   DIM = to565(0x7C8598);
@@ -865,6 +847,12 @@ void uiReplayPomodoro() { g_pomoAnim.seen = false; }
 void uiAlertStart() {
   g_alertStart = millis();
   g_alertOn = true;
+}
+
+bool uiAlertCancel() {
+  const bool was = g_alertOn;
+  g_alertOn = false;
+  return was;
 }
 
 uint8_t uiDeckSize(const Payload &p) { return (p.valid ? p.nCards : 0) + 1; }
@@ -981,7 +969,7 @@ void uiPomodoroEditor(Display &lcd, const PomoSettings &s) {
   if (g_sprite) g_canvas.pushSprite(&lcd, 0, 0);
 }
 
-void uiPortal(Display &lcd, const char *apName) {
+void uiPortal(Display &lcd, const char *apName, const char *apIp, const char *lanIp) {
   LovyanGFX *g = target(lcd);
   g->fillScreen(BG);
 
@@ -1006,12 +994,18 @@ void uiPortal(Display &lcd, const char *apName) {
   drawCaps(g, "Join, then open", LCD_WIDTH / 2, 214, DIM, middle_center);
   g->setFont(&V_S12.font);
   g->setTextColor(DIM, BG);
-  g->drawString("192.168.4.1", LCD_WIDTH / 2, 234);
+  g->drawString(apIp, LCD_WIDTH / 2, 234);
+  if (lanIp && lanIp[0]) {
+    char lan[40];
+    snprintf(lan, sizeof(lan), "or on WiFi %s", lanIp);
+    g->drawString(lan, LCD_WIDTH / 2, 252);
+  }
 
   if (g_sprite) g_canvas.pushSprite(&lcd, 0, 0);
 }
 
 void uiBlePair(Display &lcd, uint32_t passkey) {
+  g_animating = false;  // a static screen: a sweep cut short must not keep main.cpp drawing
   LovyanGFX *g = target(lcd);
   g->fillScreen(BG);
   drawCaps(g, "Pair with Mac", LCD_WIDTH / 2, 40, g_palette[ACC_ACCENT], middle_center);

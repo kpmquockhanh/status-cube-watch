@@ -72,11 +72,89 @@ void testBondTransition() {
   CHECK(!portalBondedTransition(true, false));
 }
 
-void testIdleReboot() {
-  CHECK(portalIdleRebootDue(true, false, 60001, 60000));
-  CHECK(!portalIdleRebootDue(true, false, 60000, 60000));
-  CHECK(!portalIdleRebootDue(true, true, 600000, 60000));  // pairing or connected
-  CHECK(!portalIdleRebootDue(false, false, 600000, 60000));
+// The station side of the AP+STA portal: bounded join attempts, only while
+// nobody is on the AP and no Mac is pairing.
+void testStaFirstAttempt() {
+  PortalSta now;
+  now.begin(1000, true);  // asked-for portal: try at once
+  CHECK(now.update(1000, true, true, false) == PortalStaAction::Begin);
+  PortalSta later;
+  later.begin(1000, false);  // WiFi just failed: wait a full period first
+  CHECK(later.update(1000, true, true, false) == PortalStaAction::None);
+  CHECK(later.update(1000 + PortalSta::EVERY_MS - 1, true, true, false) == PortalStaAction::None);
+  CHECK(later.update(1000 + PortalSta::EVERY_MS, true, true, false) == PortalStaAction::Begin);
+}
+
+void testStaAttemptIsBounded() {
+  PortalSta s;
+  s.begin(0, true);
+  CHECK(s.update(0, true, true, false) == PortalStaAction::Begin);
+  CHECK(s.update(PortalSta::ATTEMPT_MS - 1, true, true, false) == PortalStaAction::None);
+  CHECK(s.update(PortalSta::ATTEMPT_MS, true, true, false) == PortalStaAction::Stop);
+  // Parked until the next period, counted from the start of the last attempt.
+  CHECK(s.update(PortalSta::EVERY_MS - 1, true, true, false) == PortalStaAction::None);
+  CHECK(s.update(PortalSta::EVERY_MS, true, true, false) == PortalStaAction::Begin);
+}
+
+void testStaParksWhenBusy() {
+  PortalSta s;
+  s.begin(0, true);
+  CHECK(s.update(0, true, false, false) == PortalStaAction::None);  // a phone or a Mac: no attempt
+  CHECK(s.update(500, true, true, false) == PortalStaAction::Begin);
+  CHECK(s.update(600, true, false, false) == PortalStaAction::Stop);  // a phone joins mid-attempt
+  CHECK(s.update(700, true, false, false) == PortalStaAction::None);
+}
+
+void testStaNoSsid() {
+  PortalSta s;
+  s.begin(0, true);
+  CHECK(s.update(0, false, true, false) == PortalStaAction::None);
+  CHECK(s.update(10 * PortalSta::EVERY_MS, false, true, false) == PortalStaAction::None);
+}
+
+void testStaConnectedStays() {
+  PortalSta s;
+  s.begin(0, true);
+  CHECK(s.update(0, true, true, false) == PortalStaAction::Begin);
+  // Joined inside the window: never stopped, even past it or with a phone on.
+  CHECK(s.update(3000, true, true, true) == PortalStaAction::None);
+  CHECK(s.update(PortalSta::ATTEMPT_MS + 1, true, false, true) == PortalStaAction::None);
+  // The link drops with nobody around: the next attempt starts at once.
+  CHECK(s.update(PortalSta::ATTEMPT_MS + 2, true, true, false) == PortalStaAction::Begin);
+}
+
+// With AP+STA the form is reachable from the LAN, so a request must name the
+// cube by the address it reached it on (no DNS rebinding) and carry the token
+// that only the served form contains (no cross-site POST).
+void testHost() {
+  CHECK(portalHostIs("192.168.71.1", "192.168.71.1"));
+  CHECK(portalHostIs("192.168.71.1:80", "192.168.71.1"));
+  CHECK(!portalHostIs("evil.example", "192.168.71.1"));
+  CHECK(!portalHostIs("192.168.71.10", "192.168.71.1"));
+  CHECK(!portalHostIs("", "192.168.71.1"));
+  CHECK(!portalHostIs("192.168.71.1:8080", "192.168.71.1"));
+}
+
+void testToken() {
+  CHECK(portalTokenOk("a1b2c3d4", "a1b2c3d4"));
+  CHECK(!portalTokenOk("", "a1b2c3d4"));
+  CHECK(!portalTokenOk("a1b2c3d5", "a1b2c3d4"));
+  CHECK(!portalTokenOk("", ""));  // no token made yet: nothing is trusted
+}
+
+void testRecoveredReboot() {
+  CHECK(portalStaRecoveredReboot(true, true, false, false));
+  CHECK(!portalStaRecoveredReboot(false, true, false, false));  // asked-for portal stays up
+  CHECK(!portalStaRecoveredReboot(true, false, false, false));
+  CHECK(!portalStaRecoveredReboot(true, true, true, false));  // a phone is on the form
+  CHECK(!portalStaRecoveredReboot(true, true, false, true));  // a Mac is pairing
+}
+
+void testOtaPassword() {
+  CHECK(portalOtaPassword("old", "", false) == "old");  // blank keeps
+  CHECK(portalOtaPassword("old", "new", false) == "new");
+  CHECK(portalOtaPassword("old", "", true).empty());  // the clear box wins
+  CHECK(portalOtaPassword("old", "new", true).empty());
 }
 
 }  // namespace
@@ -94,7 +172,15 @@ void testParseInt() {
 }
 
 int main() {
-  testIdleReboot();
+  testStaFirstAttempt();
+  testStaAttemptIsBounded();
+  testStaParksWhenBusy();
+  testStaNoSsid();
+  testStaConnectedStays();
+  testHost();
+  testToken();
+  testRecoveredReboot();
+  testOtaPassword();
   testBondTransition();
   testSsid();
   testBridgeUrl();

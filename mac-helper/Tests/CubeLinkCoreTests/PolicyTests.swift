@@ -63,3 +63,10 @@ import Testing
     let tooSoon = p.shouldSend(body: a, now: t0.addingTimeInterval(2), force: false)
     #expect(!tooSoon)
 }
+
+@Test func askingDoesNotChangeThePolicy() {
+    let p = PushPolicy(heartbeat: 5)  // a `let`: shouldSend is not mutating
+    let t0 = Date(timeIntervalSince1970: 1000)
+    #expect(p.shouldSend(body: Data("a".utf8), now: t0, force: false))
+    #expect(p.shouldSend(body: Data("a".utf8), now: t0, force: false))  // still nothing sent
+}

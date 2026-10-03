@@ -10,6 +10,11 @@ struct PomoSettings {
   uint8_t sessions;                     // focus sessions before the long break, 1..9
 };
 
+inline bool operator==(const PomoSettings &a, const PomoSettings &b) {
+  return a.focusMin == b.focusMin && a.shortMin == b.shortMin && a.longMin == b.longMin && a.sessions == b.sessions;
+}
+inline bool operator!=(const PomoSettings &a, const PomoSettings &b) { return !(a == b); }
+
 constexpr int POMO_MIN_MINUTES = 1;
 constexpr int POMO_MAX_MINUTES = 99;
 constexpr int POMO_MIN_SESSIONS = 1;

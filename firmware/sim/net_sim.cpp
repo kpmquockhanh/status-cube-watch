@@ -18,6 +18,8 @@
 namespace {
 
 char g_error[64] = "";
+// As on the board, "online" means the WiFi side is up (joined), not that the
+// last fetch worked: a bridge that is down shows as an ageing counter.
 bool g_online = false;
 
 void fail(const char *msg) { strlcpy(g_error, msg, sizeof(g_error)); }
@@ -128,11 +130,19 @@ bool httpGet(const Url &u, std::string &body) {
 
 bool netBegin() {
   Serial.printf("[net] simulator -> %s\n", bridgeUrl().c_str());
+  g_online = true;
   return true;
 }
 
-void netStart() { Serial.println("[net] simulator wifi on"); }
-void netStop() { Serial.println("[net] simulator wifi off"); }
+void netStart() {
+  Serial.println("[net] simulator wifi on");
+  g_online = true;
+}
+
+void netStop() {
+  Serial.println("[net] simulator wifi off");
+  g_online = false;
+}
 
 bool netOnline() { return g_online; }
 
@@ -142,13 +152,11 @@ bool netFetch(Payload &out) {
   Url u;
   if (!parseUrl(bridgeUrl(), u)) {
     fail("bad BRIDGE_URL");
-    g_online = false;
     return false;
   }
 
   std::string body;
   if (!httpGet(u, body)) {
-    g_online = false;
     return false;
   }
 
@@ -156,18 +164,15 @@ bool netFetch(Payload &out) {
   const DeserializationError err = deserializeJson(doc, body);
   if (err) {
     snprintf(g_error, sizeof(g_error), "json: %s", err.c_str());
-    g_online = false;
     return false;
   }
 
   Payload p{};
   if (!payloadFromJson(doc, p, g_error, sizeof(g_error))) {
-    g_online = false;
     return false;
   }
 
   g_error[0] = '\0';
-  g_online = true;
   out = p;
   return true;
 }

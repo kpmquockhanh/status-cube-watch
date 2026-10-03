@@ -1,4 +1,4 @@
-{"v":1,"ts":0,"src":"oauth","est":false,"cards":[
+{"v":1,"ts":0,"src":"oauth","cards":[
  {"t":"CLAUDE","v":"4h 09m","s1":"to reset","s2":"","c":"green","g":14,"c2":"green","g2":53,
   "rows":[{"k":"5H","p":"14%","r":"4h 09m"},{"k":"7D","p":"53%","r":"1d 1h"}],"m":"12","mc":"amber"},
  {"t":"CLAUDE","v":"47m","s1":"to reset","s2":"","c":"red","g":91,"c2":"amber","g2":72,

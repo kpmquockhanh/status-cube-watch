@@ -30,6 +30,10 @@ void uiReplayPomodoro();
 // Starts the Pomodoro phase-end alert: the ring and the backlight pulse for
 // about two seconds. uiAnimating() stays true while it runs.
 void uiAlertStart();
+// Ends a running alert at once. Only uiRender drives the pulse, so a caller
+// about to draw another screen (an editor, a pairing code) calls this and, when
+// it returns true, puts the backlight back: it may be left mid-pulse.
+bool uiAlertCancel();
 // The Pomodoro settings editor: four rows of - / + and a RESET / DONE bar.
 // One static frame; hit-testing is in pomo_editor.h, which owns the layout.
 void uiPomodoroEditor(Display &lcd, const PomoSettings &s);
@@ -45,8 +49,10 @@ void uiDeviceSlide(bool open, const DeviceSettings &s);
 void uiDeviceEditor(Display &lcd, const DeviceSettings &s);
 void uiMessage(Display &lcd, const char *title, const char *body);
 // Setup screen shown while the config portal runs: the cube's own WiFi name
-// as text and as a join-QR, and the address of the form.
-void uiPortal(Display &lcd, const char *apName);
+// as text and as a join-QR, and the address of the form on that network.
+// `lanIp`: the cube's address on the saved network once the station side has
+// joined it (the form is reachable there too); null or empty = not joined.
+void uiPortal(Display &lcd, const char *apName, const char *apIp, const char *lanIp);
 
 // Pairing screen. With a passkey (non-zero) it shows the 6-digit code to type
 // on the Mac; with 0 it shows the "waiting for a Mac" variant.

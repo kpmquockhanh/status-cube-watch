@@ -76,6 +76,18 @@ void testDoubleTap() {
   CHECK(p.at(1000, false, 0, 0, true) == Gesture::None);  // once
 }
 
+// The gap runs from one lift to the next touch, not to the next lift: a second
+// press still down when the gap would have ended is part of the double tap.
+void testSlowSecondPressStillDoubles() {
+  Pad p;
+  p.at(0, true, 100, 100, true);
+  CHECK(p.at(50, false, 0, 0, true) == Gesture::None);
+  CHECK(p.at(250, true, 100, 100, true) == Gesture::None);   // touches 200 ms after the lift
+  CHECK(p.raw(410, true, 100, 100, true) == Gesture::None);  // still down, 360 ms after the lift
+  CHECK(p.at(420, false, 0, 0, true) == Gesture::None);      // a 170 ms press: still a tap
+  CHECK(p.at(420 + MULTI_TAP_GAP_MS + 1, false, 0, 0, true) == Gesture::DoubleTap);
+}
+
 // A third tap inside the gap fires TripleTap at once and not a DoubleTap too.
 void testTripleTap() {
   Pad p;
@@ -251,6 +263,7 @@ int main() {
   testSwipes();
   testNonGestures();
   testDoubleTap();
+  testSlowSecondPressStillDoubles();
   testTripleTap();
   testSingleTapOnMultiCard();
   testSlowTapsDoNotGroup();

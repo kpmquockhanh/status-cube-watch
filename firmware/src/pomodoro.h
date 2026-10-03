@@ -5,8 +5,8 @@
 // Pomodoro timer state machine. Pure logic: time comes in as an argument
 // (millis() on the board, a fake clock in sim/tests), so the whole cycle can
 // be checked on the host. It never starts a phase by itself -- every phase
-// begins with a long-press, so it cannot start a focus session while you are
-// away from the desk.
+// begins with a double tap (longPress() below, named for the gesture it once
+// was), so it cannot start a focus session while you are away from the desk.
 
 enum PomoState : uint8_t { POMO_IDLE, POMO_FOCUS, POMO_BREAK, POMO_PAUSED, POMO_DONE };
 enum PomoPhase : uint8_t { PHASE_FOCUS, PHASE_SHORT, PHASE_LONG };
@@ -22,7 +22,7 @@ struct PomoView {
   // IDLE: focus (what a start would begin). FOCUS/BREAK/PAUSED: the phase in
   // progress. DONE: the phase that just ended.
   PomoPhase phase;
-  PomoPhase next;       // what a long-press starts from DONE
+  PomoPhase next;       // what a double tap starts from DONE
   uint32_t leftMs;
   uint8_t fraction;     // time left in the phase, 0..100
   uint8_t completed;    // focus sessions finished in this set; resets after the long break
@@ -37,10 +37,13 @@ class Pomodoro {
   void tick(uint32_t now);       // every loop; advances a running phase
   void longPress(uint32_t now);  // start / pause / resume / begin the next phase
   void reset();                  // back to IDLE, count cleared, alert dropped
-  // Replaces the durations. Only honoured while IDLE (the editor only opens
-  // then); a running, paused or finished phase keeps the lengths it began
-  // with. Refreshes the idle countdown so the card shows the new focus length.
-  void setConfig(const PomoConfig &cfg);
+  // Replaces the durations. Honoured while IDLE (refreshing the countdown so
+  // the card shows the new focus length) and while DONE, where the next phase
+  // begins with them; a running or paused phase keeps the lengths it began
+  // with. The editor only opens while IDLE; a change from the Mac can come at
+  // any time, so main.cpp keeps it pending until one of those two. Returns
+  // whether it took.
+  bool setConfig(const PomoConfig &cfg);
   bool takeAlert();              // true exactly once after each phase end
   PomoView view() const;
 

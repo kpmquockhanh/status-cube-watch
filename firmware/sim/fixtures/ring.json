@@ -1,4 +1,4 @@
-{"v":1,"ts":0,"src":"oauth","est":false,"cards":[
+{"v":1,"ts":0,"src":"oauth","cards":[
  {"t":"5H LIMIT","v":"4h 10m","s1":"resets in","s2":"of 5h limit","c":"green","g":0},
  {"t":"5H LIMIT","v":"3h 05m","s1":"resets in","s2":"of 5h limit","c":"green","g":14},
  {"t":"5H LIMIT","v":"2h 20m","s1":"resets in","s2":"of 5h limit","c":"green","g":59},

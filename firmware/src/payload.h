@@ -44,9 +44,6 @@ struct Card {
 struct Payload {
   Card cards[MAX_CARDS];
   uint8_t nCards;
-  char source[12];
-  uint32_t ts;
-  bool estimated;
   bool valid;
 };
 

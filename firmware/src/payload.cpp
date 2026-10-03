@@ -13,10 +13,8 @@ Accent accentFromName(const char *name) {
 
 bool payloadFromJson(const JsonDocument &doc, Payload &out, char *err, size_t errLen) {
   Payload p{};
-  p.ts = doc["ts"] | 0UL;
-  p.estimated = doc["est"] | true;
-  strlcpy(p.source, doc["src"] | "?", sizeof(p.source));
-
+  // The top-level `ts` and `src` are for people reading /api/status; nothing
+  // on the cube needs them, so they are not stored.
   for (JsonObjectConst c : doc["cards"].as<JsonArrayConst>()) {
     if (p.nCards >= MAX_CARDS) break;
     Card &card = p.cards[p.nCards++];

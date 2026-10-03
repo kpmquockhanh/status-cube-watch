@@ -4,6 +4,7 @@
 #include <esp_random.h>
 
 #include "ble.h"
+#include "ble_auth.h"
 #include "ble_frame.h"
 #include "settings_json.h"
 
@@ -21,6 +22,11 @@ volatile uint32_t g_passkey = 0;
 volatile uint32_t g_lastGood = 0;
 volatile bool g_sendNow = false;
 int g_bondsAtConnect = 0;
+// The one link (advertising stops while it is up), for bleUnsecuredExpired().
+volatile bool g_linkUp = false;
+volatile bool g_secured = false;
+volatile uint32_t g_connectAt = 0;
+volatile uint16_t g_connHandle = 0;
 
 portMUX_TYPE g_mux = portMUX_INITIALIZER_UNLOCKED;
 char g_pending[BLE_MAX_PAYLOAD + 1];
@@ -30,6 +36,9 @@ volatile bool g_pendingReady = false;
 NimBLECharacteristic *g_settingsChar = nullptr;
 char g_setPending[SETTINGS_JSON_MAX + 1];
 volatile bool g_setReady = false;
+// NimBLE stores whatever was written as the characteristic's value, so until it
+// is republished a read returns that write, passwords and all.
+volatile bool g_republish = false;
 
 void notifyControl(const uint8_t *data, size_t len) {
   if (!g_control) return;
@@ -48,9 +57,13 @@ void publishSettings() {
 }
 
 struct ServerCb : NimBLEServerCallbacks {
-  void onConnect(NimBLEServer *, NimBLEConnInfo &) override {
+  void onConnect(NimBLEServer *, NimBLEConnInfo &info) override {
     g_bondsAtConnect = NimBLEDevice::getNumBonds();
     g_asm.clear();
+    g_connHandle = info.getConnHandle();
+    g_connectAt = millis();
+    g_secured = false;
+    g_linkUp = true;
     g_state = BleState::Connected;
     Serial.printf("[ble] connect (bonds %d)\n", g_bondsAtConnect);
   }
@@ -59,7 +72,11 @@ struct ServerCb : NimBLEServerCallbacks {
     Serial.printf("[ble] disconnect %d\n", reason);
     g_passkey = 0;
     g_sendNow = false;
+    g_linkUp = false;
+    g_secured = false;
     g_state = BleState::Advertising;
+    // Needed: NimBLE 2.x does not re-advertise by itself (advertiseOnDisconnect
+    // defaults to off).
     NimBLEDevice::startAdvertising();
   }
 
@@ -75,23 +92,18 @@ struct ServerCb : NimBLEServerCallbacks {
 
   void onAuthenticationComplete(NimBLEConnInfo &info) override {
     g_passkey = 0;
-    NimBLEServer *srv = NimBLEDevice::getServer();
-    if (!info.isEncrypted()) {  // wrong passkey or refused
-      Serial.println("[ble] pairing failed");
-      g_state = BleState::Connected;
-      srv->disconnect(info.getConnHandle());
-      return;
-    }
-    // One bonded Mac at a time: if a bond already existed and a second device
-    // just got through, drop the new one.
-    if (g_bondsAtConnect > 0 && NimBLEDevice::getNumBonds() > g_bondsAtConnect) {
-      Serial.println("[ble] second Mac refused");
-      NimBLEDevice::deleteBond(info.getIdAddress());
-      srv->disconnect(info.getConnHandle());
-      return;
-    }
     g_state = BleState::Connected;
-    Serial.println("[ble] encrypted");
+    const BleAuthVerdict v = bleAuthVerdict(info.isEncrypted(), info.isAuthenticated(), info.isBonded(),
+                                            g_bondsAtConnect, NimBLEDevice::getNumBonds());
+    if (v == BleAuthVerdict::Accept) {
+      g_secured = true;
+      Serial.println("[ble] encrypted");
+      return;
+    }
+    Serial.printf("[ble] link refused (encrypted %d, passkey %d, bonded %d)\n", info.isEncrypted(),
+                  info.isAuthenticated(), info.isBonded());
+    if (v == BleAuthVerdict::RefuseDropBond) NimBLEDevice::deleteBond(info.getIdAddress());
+    NimBLEDevice::getServer()->disconnect(info.getConnHandle());
   }
 };
 
@@ -119,6 +131,7 @@ struct SettingsCb : NimBLECharacteristicCallbacks {
   void onWrite(NimBLECharacteristic *chr, NimBLEConnInfo &) override {
     const NimBLEAttValue v = chr->getValue();
     if (v.size() == 0 || v.size() > SETTINGS_JSON_MAX) {
+      g_republish = true;  // on the main loop, as publishSettings() must be
       const uint8_t r[2] = {BLE_CTRL_SETTINGS, (uint8_t)SettingsResult::Invalid};
       notifyControl(r, sizeof(r));
       return;
@@ -171,7 +184,7 @@ void bleBegin() {
   g_settingsChar->setCallbacks(&g_settingsCb);
   publishSettings();
 
-  svc->start();
+  // No svc->start(): NimBLE 2.x starts the GATT server when advertising begins.
   NimBLEAdvertising *adv = NimBLEDevice::getAdvertising();
   adv->addServiceUUID(BLE_SERVICE_UUID);  // in the advertisement: the Mac scans by it
   adv->enableScanResponse(true);  // must precede setName(): only then does the name go to the scan response
@@ -197,6 +210,15 @@ void bleForgetBonds() {
 }
 
 bool bleTake(Payload &out) {
+  if (g_republish) {
+    g_republish = false;
+    publishSettings();
+  }
+  if (bleUnsecuredExpired(g_linkUp, g_secured, g_connectAt, millis())) {
+    g_linkUp = false;  // once; onDisconnect follows
+    Serial.println("[ble] link never secured: dropping it");
+    NimBLEDevice::getServer()->disconnect(g_connHandle);
+  }
   if (g_sendNow) {
     g_sendNow = false;
     const uint8_t m = BLE_CTRL_SEND_NOW;

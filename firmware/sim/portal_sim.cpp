@@ -8,6 +8,6 @@
 #include "../src/ui.h"
 
 [[noreturn]] void portalRun(Display &lcd, bool) {
-  uiPortal(lcd, "claude-cube-SIM0");
+  uiPortal(lcd, "claude-cube-SIM0", "192.168.71.1", nullptr);
   for (;;) delay(100);
 }

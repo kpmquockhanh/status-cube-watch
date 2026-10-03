@@ -6,6 +6,7 @@ final class StatusMenu: NSObject, NSMenuDelegate {
     var onSendNow: () -> Void = {}
     var onRestartBridge: () -> Void = {}
     var onShowSettings: () -> Void = {}
+    var onForgetCube: () -> Void = {}
     var logURL: URL?
     var prefs = PomodoroNoticePrefs()
     var onMenuWillOpen: () -> Void = {}
@@ -17,6 +18,7 @@ final class StatusMenu: NSObject, NSMenuDelegate {
         }
     }
     private var noticesItem: NSMenuItem?
+    private var applied: MenuModel?
 
     private let item = NSStatusBar.system.statusItem(withLength: NSStatusItem.variableLength)
     private let menu = NSMenu()
@@ -31,6 +33,8 @@ final class StatusMenu: NSObject, NSMenuDelegate {
     }
 
     func apply(_ m: MenuModel) {
+        guard m != applied else { return }  // called every 5 s; rebuild only when something changed
+        applied = m
         if let b = item.button {
             let color: NSColor? = switch m.tint {
             case .normal: nil
@@ -58,6 +62,7 @@ final class StatusMenu: NSObject, NSMenuDelegate {
         menu.addItem(action("Send now", #selector(sendNow), key: "s"))
         menu.addItem(action("Restart bridge", #selector(restartBridge), key: "r"))
         menu.addItem(action("Cube settings…", #selector(showSettings), key: ","))
+        menu.addItem(action("Forget cube", #selector(forgetCube), key: ""))
         let notices = action("Pomodoro notifications", #selector(toggleNotices), key: "")
         noticesItem = notices
         styleNoticesItem()
@@ -103,6 +108,7 @@ final class StatusMenu: NSObject, NSMenuDelegate {
     @objc private func sendNow() { onSendNow() }
     @objc private func restartBridge() { onRestartBridge() }
     @objc private func showSettings() { onShowSettings() }
+    @objc private func forgetCube() { onForgetCube() }
     @objc private func showLog() {
         guard let url = logURL else { return }
         if !FileManager.default.fileExists(atPath: url.path) {
@@ -118,5 +124,6 @@ final class StatusMenu: NSObject, NSMenuDelegate {
         Trace.log("main", "tracing on (from menu)")
     }
 
+    // applicationWillTerminate (main.swift) stops the bridge child on the way out.
     @objc private func quit() { NSApp.terminate(nil) }
 }
