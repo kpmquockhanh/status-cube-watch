@@ -55,7 +55,10 @@ groove_y0 = 0.3;            // grooves start this far behind the face plane
 pilot_in = 1.25;            // wall between a top-screw pilot and the glass pocket
 
 // Frame fin
-fin_t = 5;  fin_gap = 0.2;  fin_zb = 32;  fin_sink = 0.6;  fin_end = 65;  fin_web = 3;
+// The fin stands on the lid fin_gap behind the carrier, up to board-local z fin_zb, and back to world y
+// fin_end; it stops a press on the screen from flexing the carrier backwards. Lightened by a window that
+// leaves fin_wall all round, with fin_win_r corners.
+fin_t = 5;  fin_gap = 0.2;  fin_zb = 32;  fin_sink = 0.6;  fin_end = 65;  fin_wall = 6;  fin_win_r = 3;
 
 // Lead slots in the lid, one beside each leg
 lead_x = [6.5, 35.0];  slot_w = 4.5;  slot_l = 5.5;  slot_y0 = 4.0;
@@ -109,6 +112,61 @@ module board_at(sag = 0) board_frame() translate([0, 0, -sag]) difference() {
   for (h = holes) translate([h[0], pcb_y0 - 0.1, h[1]]) rotate([-90, 0, 0]) cylinder(d = hole_d, h = pcb_t + 0.2);
 }
 
+// ---- tray ---------------------------------------------------------------------------
+// Prints as modelled, open side up. Holds the cell flat; the front space takes the lead's bend.
+front_pil = [for (x = leg_screw_x) [x, leg_screw_y]];
+foot_xy = [for (x = [foot_in, W - foot_in], y = [foot_in, D - foot_in]) [x, y]];
+module tray_body() hull() {
+  translate([0, 0, base_cham]) linear_extrude(tray_h - base_cham) plan_rr(W, D, base_r);
+  linear_extrude(0.01) offset(delta = -base_cham) plan_rr(W, D, base_r);
+}
+module tray_void() translate([wall, wall, wall]) linear_extrude(tray_h) plan_rr(W - 2*wall, D - 2*wall, base_r - wall);
+module pilasters() {
+  for (p = front_pil) {
+    vhole(p, pil_d, 0, tray_h);
+    translate([p[0] - 1, wall - 0.5, 0]) cube([2, p[1] - wall + 0.5, tray_h]);   // web to the front wall
+  }
+  vhole(rear_screw, pil_d, 0, tray_h);
+  translate([rear_screw[0] - 1, rear_screw[1], 0]) cube([2, D - wall + 0.5 - rear_screw[1], tray_h]);
+}
+module tray() difference() {
+  union() { difference() { tray_body(); tray_void(); } intersection() { pilasters(); tray_body(); } }
+  for (p = concat(front_pil, [rear_screw])) vhole(p, pilot_d, pilot_floor, tray_h + 0.01);
+  for (f = foot_xy) vhole(f, foot_d, -0.01, foot_depth);
+}
+
+// ---- frame: lid and fin ------------------------------------------------------------------
+// Prints lid down. The lid closes the tray; the carrier stands on it and the fin stiffens it.
+// world (y, z) of a board-local point given by its board-local y and its world z
+function on_plane(yb, z) = let (zb = (z - O[2] + yb*sin(lean))/cos(lean)) [O[1] + yb*cos(lean) + zb*sin(lean), z];
+fin_yb = back_y + fin_gap;
+fin_pts = [on_plane(fin_yb, deck - fin_sink),
+           [b2g([0, fin_yb, fin_zb])[1], b2g([0, fin_yb, fin_zb])[2]],
+           [fin_end, deck - fin_sink]];
+module fin() translate([(W - fin_t)/2, 0, 0]) difference() {
+  across(fin_t) polygon(fin_pts);
+  translate([-1, 0, 0]) across(fin_t + 2) offset(r = fin_win_r) offset(delta = -(fin_wall + fin_win_r)) polygon(fin_pts);
+}
+module lid() translate([0, 0, tray_h]) linear_extrude(lid_t) plan_rr(W, D, base_r);
+module lead_slot(x, inset = 0) translate([x + inset, slot_y0 + inset]) square([slot_w - 2*inset, slot_l - 2*inset]);
+module frame() difference() {
+  union() { lid(); fin(); }
+  for (p = front_pil) vhole(p, screw_d, tray_h - 0.01, deck + 0.01);
+  vhole(rear_screw, screw_d, tray_h - 0.01, deck + 0.01);
+  vhole(rear_screw, cb_d, deck - cb_depth, deck + 0.01);
+  for (x = lead_x) translate([0, 0, tray_h - 0.01]) linear_extrude(lid_t + 0.02) lead_slot(x);
+}
+module tray_print() tray();
+module frame_print() translate([0, 0, -tray_h]) frame();
+
+// filled in by the carrier and bezel tasks
+module carrier() {}
+module bezel() {}
+
+// Everything the battery lead passes: from 3 mm below the tray top to 1 mm above the deck, through each
+// slot (inset 0.05). Above that the chin wall leans over the slot, so the lead bends back into the chin.
+module lead_path() for (x = lead_x) translate([0, 0, tray_h - 3]) linear_extrude(deck + 1 - (tray_h - 3)) lead_slot(x, 0.05);
+
 // ---- reference points for tools/stability.py ------------------------------------------
 module meta() echo(str("EASEL{\"lean\":", lean, ",\"press\":", b2g(press_pt), ",\"top\":", b2g(top_pt),
                        ",\"pivot_y\":", pivot_y, ",\"front_y\":", front_y, "}"));
@@ -118,4 +176,15 @@ if (part == "none") {}
 else if (part == "meta") meta();
 else if (part == "at_cell") cell_ghost();
 else if (part == "at_board") board_at();
+else if (part == "at_tray") tray();
+else if (part == "at_frame") frame();
+else if (part == "check_cell_tray") intersection() { translate([0, 0, nudge]) cell_ghost(); tray(); }
+else if (part == "check_cell_frame") intersection() { cell_ghost(); frame(); }
+else if (part == "check_lead_path") intersection() { lead_path(); union() { tray(); frame(); carrier(); bezel(); } }
+// the rear counterbore grown by 0.9 must stay inside the lid's outline
+else if (part == "check_rear_wall") difference() {
+    vhole(rear_screw, cb_d + 2*0.9, deck - cb_depth, deck - 0.01);
+    translate([0, 0, -1]) linear_extrude(deck + 2) plan_rr(W, D, base_r); }
+else if (part == "tray") tray_print();
+else if (part == "frame") frame_print();
 else assert(false, str("unknown part: ", part));

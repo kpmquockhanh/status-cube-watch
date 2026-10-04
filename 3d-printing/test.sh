@@ -38,10 +38,14 @@ expect_solid() {  # label part [-D ...]   passes when the part HAS geometry
   elif is_empty "$part" || [ ! -s "$(out "$part").stl" ]; then echo "FAIL $label: expected geometry, got empty"; fail=1
   else echo "PASS $label"; fi
 }
-expect_manifold() {  # label part [--max X Y Z]   watertight and within a bounding box
+expect_manifold() {  # label part [--max X Y Z] [-D ...]   watertight and within a bounding box
   local label="$1" part="$2"; shift 2
-  expect_solid "$label renders" "$part" || true
-  python3 tools/stlcheck.py "$(out "$part").stl" "$@" && echo "PASS $label watertight" || { echo "FAIL $label watertight"; fail=1; }
+  local r=() c=()
+  while [ $# -gt 0 ]; do
+    if [ "$1" = "--max" ]; then c+=("$1" "$2" "$3" "$4"); shift 4; else r+=("$1"); shift; fi
+  done
+  expect_solid "$label renders" "$part" "${r[@]}" || true
+  python3 tools/stlcheck.py "$(out "$part").stl" "${c[@]}" && echo "PASS $label watertight" || { echo "FAIL $label watertight"; fail=1; }
 }
 expect_error() {  # label part   passes when openscad rejects the part
   render "$2"
@@ -191,6 +195,24 @@ expect_error "easel: unknown part is rejected" bogus
 expect_solid "cell ghost in place"  at_cell
 expect_solid "board ghost in place" at_board
 meta; expect_pass "meta echoes the reference points" grep -q 'EASEL{' build/easel-meta.echo
+
+# tray and frame
+expect_empty "cell clear of the tray"              check_cell_tray
+expect_empty "cell clear of the frame lid"         check_cell_frame
+expect_empty "15 mm cell clear of the tray"        check_cell_tray  -D 'bat=[65,40,15]'
+expect_empty "15 mm cell clear of the frame lid"   check_cell_frame -D 'bat=[65,40,15]'
+expect_solid "control: front_space=6 puts the cell on the pilasters" check_cell_tray  -D front_space=6
+expect_solid "control: bcl=-0.1 puts the cell into the lid"          check_cell_frame -D bcl=-0.1
+expect_empty "lead slots open from the tray to the chin (tilt 65)"   check_lead_path
+expect_solid "control: lead slots under the legs"                    check_lead_path -D 'lead_x=[12,30]'
+expect_empty "rear counterbore keeps a 0.9 wall"                     check_rear_wall
+expect_solid "control: D=80 thins the rear wall"                     check_rear_wall -D D=80
+expect_manifold "tray"                 tray  --max 46.5 81.5 15.7
+expect_manifold "tray (15 mm cell)"    tray  --max 46.5 81.5 18.7 -D 'bat=[65,40,15]'
+expect_manifold "frame"                frame --max 46.5 81.5 36.8
+expect_manifold "frame (tilt 55)"      frame --max 46.5 81.5 36.8 -D tilt=55
+expect_manifold "frame (tilt 75)"      frame --max 46.5 81.5 40.4 -D tilt=75
+expect_manifold "frame (15 mm cell)"   frame --max 46.5 81.5 36.8 -D 'bat=[65,40,15]'
 fi
 
 exit $fail
