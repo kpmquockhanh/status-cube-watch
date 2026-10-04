@@ -21,6 +21,17 @@ void testTargetsAreBigEnough() {
   CHECK(editorDoneBtn().y + editorDoneBtn().h <= 280);  // fits the panel
 }
 
+// The lead (label, value, a switch) and the two steppers share a row without
+// overlapping, left to right, inside the panel.
+void testRowLayout() {
+  for (int r = 0; r < EDIT_ROWS; r++) {
+    const EditRect l = editorLead(r), m = editorMinus(r), p = editorPlus(r);
+    CHECK(l.x == 0 && l.y == editorRow(r).y && l.h == editorRow(r).h);
+    CHECK(l.x + l.w <= m.x && m.x + m.w <= p.x && p.x + p.w <= 240);
+    CHECK(l.w >= 120);  // room for "SHORT BREAK", or a label, its value and a switch
+  }
+}
+
 void testHitEveryButton() {
   int x, y;
   for (int r = 0; r < EDIT_ROWS; r++) {
@@ -37,12 +48,15 @@ void testHitEveryButton() {
   CHECK(pomoEditorHit((int16_t)x, (int16_t)y).action == EditAction::Done);
 }
 
-// Review Focus 3: margins, the value area, the title and off-panel taps do nothing.
+// Review Focus 3: margins, the label and value, the title and off-panel taps do
+// nothing (the Pomodoro rows have no switch).
 void testMissesDoNothing() {
   const EditRect m = editorMinus(1);
   const EditRect p = editorPlus(1);
-  CHECK(pomoEditorHit(170, m.y + 20).action == EditAction::None);                    // value area
-  CHECK(pomoEditorHit((int16_t)(m.x - 1), m.y + 20).action == EditAction::None);     // left margin
+  int x, y;
+  centre(editorLead(1), x, y);
+  CHECK(pomoEditorHit((int16_t)x, (int16_t)y).action == EditAction::None);          // label and value
+  CHECK(pomoEditorHit((int16_t)(m.x - 1), m.y + 20).action == EditAction::None);     // just left of minus
   CHECK(pomoEditorHit((int16_t)(p.x + p.w), p.y + 20).action == EditAction::None);   // right margin
   CHECK(pomoEditorHit(30, 10).action == EditAction::None);                           // title
   CHECK(pomoEditorHit(30, 279).action == EditAction::None);                          // below the buttons
@@ -106,6 +120,7 @@ void testResetAndNoOps() {
   PomoSettings t{40, 10, 30, 2};
   pomoEditorApply(t, EditHit{EditAction::None, 0}, DEF);
   pomoEditorApply(t, EditHit{EditAction::Done, 0}, DEF);  // Done is acted on by the caller
+  pomoEditorApply(t, EditHit{EditAction::Toggle, 0}, DEF);  // no Pomodoro row has a switch
   CHECK(t.focusMin == 40 && t.shortMin == 10 && t.longMin == 30 && t.sessions == 2);
   pomoEditorApply(t, EditHit{EditAction::Inc, 9}, DEF);  // a bad row index is ignored
   CHECK(t.focusMin == 40 && t.sessions == 2);
@@ -131,6 +146,7 @@ void testLabels() {
 
 int main() {
   testTargetsAreBigEnough();
+  testRowLayout();
   testHitEveryButton();
   testMissesDoNothing();
   testRowBoundaries();
