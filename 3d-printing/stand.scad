@@ -5,19 +5,17 @@
 part = "assembly";
 
 $fn = 48;
+include <board.scad>   // board facts, fit tunables (clr, lip_t, board_flip, ...) and board helpers
 
 // ---- tunables ---------------------------------------------------------------
 tilt = 65;                  // screen angle from the desk
-board_flip = false;         // rotate the board 180 deg in its pocket (also needs lcd.setRotation(2))
 insert_mode = false;        // true: heat-set insert holes instead of self-tapping pilots
 pilot_d = 1.8;              // M2 self-tapping pilot
 insert_d = 3.2;             // M2 heat-set insert hole
 
 wall = 2.4;  plate_t = 2.4;
-lip_t = 1.0;                // material in front of the glass
 rim = 3.0;                  // face margin below the glass
 rim_top = 5.0;              // face margin above the glass (keeps the apex skin thick at any tilt)
-clr = 0.3;                  // glass pocket clearance, per side
 bcl = 0.4;                  // battery clearance, per side
 side_gap = 1.0;             // extra room beside the battery pocket
 end_zone = 7.5;             // room at each end of the battery for bosses / pushers
@@ -26,24 +24,10 @@ boss_r = 2.6;  boss_h = 8;
 // Edge rounding (cosmetic): set any of these to 0 for the original hard edges.
 edge_r = 3.0;        // the four vertical corners, in plan; shell and base plate share it
 prof_r = 2.5;        // apex ridge, back top edge, and the kink at the foot of the face
-win_cham = 0.6;      // 45 deg break around the window, where a finger meets the screen edge
 plate_cham = 0.8;    // 45 deg chamfer under the base plate, against the desk
 
 // Battery: [length, width, thickness]
 bat = [65, 40, 12];
-
-// Board, from the Waveshare drawing. Drawing coords: a = from its left edge, b = from its top edge.
-// In the firmware's portrait view: portrait x = b, portrait z = a.
-glass_a = 41.13;  glass_b = 33.13;  glass_r = 4;               // VERIFY glass_r
-act_a0 = 2.9;  act_b0 = 2.4;  act_a = 32.634;  act_b = 27.972;  // VERIFY the two offsets
-pcb_a = 37.12;  pcb_b = 29.83;  pcb_a0 = 0.7;  pcb_b0 = 1.65;   // VERIFY the two offsets
-pcb_y0 = 2.0;  pcb_t = 1.2;                                     // VERIFY: PCB front face depth, PCB thickness
-board_t = 7;                                                    // VERIFY: glass front to tallest rear part
-hole_d = 2.2;  hole_ia = 4.16;  hole_ib = 1.75;                 // hole_d is reference only (no screw passes through the board); offsets are from the PCB corner
-btn_a = [10.7, 19.8, 29.1];                                     // VERIFY: RST, BOOT, PWR along portrait z
-usb_a = 20.3;  usb_w = 9.0;  usb_h = 3.3;                       // VERIFY
-usb_plug_w = 13;  usb_plug_h = 7.5;  usb_plug_x0 = 3;           // VERIFY: Type-C plug overmold relief; x0 = start beyond the PCB edge
-win_margin = 1.0;                                               // window = active area + this per side
 
 // ---- derived ----------------------------------------------------------------
 lean = 90 - tilt;                              // screen lean from vertical
@@ -55,7 +39,6 @@ face_len = glass_a + 2*clr + rim + rim_top;
 F1 = [face_len*sin(lean), z0 + face_len*cos(lean)];   // top edge of the face, in (y, z)
 z_back = bay_t + wall + 1.5;                   // outer roof height at the back
 bx0 = (W - bay_w)/2;                           // battery pocket origin (z = 0 is the plate top)
-pcb_rear = pcb_y0 + pcb_t;
 // Board-local origin (glass front face, portrait bottom-left corner) in global coordinates.
 O = [(W - glass_b)/2,
      (rim + clr)*sin(lean) + lip_t*cos(lean),
@@ -67,10 +50,6 @@ push_d = 3.0;  preload = 0.2;                            // pusher post diameter
 // Front-end room: the pusher posts must stay >= push_gap in front of the battery bay. With board_flip or
 // a low tilt the posts sit further back, so the front end zone grows to keep that gap (deeper stand).
 push_gap = 1.0;
-function b2g(p) = [O[0] + p[0],
-                   O[1] + p[1]*cos(lean) + p[2]*sin(lean),
-                   O[2] - p[1]*sin(lean) + p[2]*cos(lean)];
-function flipp(p) = board_flip ? [glass_b - p[0], p[1], glass_a - p[2]] : p;
 push_pts = [for (p = push_local) b2g(flipp(p))];
 push_ymax = max([for (p = push_pts) p[1]]) + push_d/2;
 end_front = max(end_zone, push_ymax + push_gap - wall);
@@ -80,25 +59,8 @@ by0 = wall + end_front;
 assert(by0 >= push_ymax + push_gap - 1e-6, "pusher posts too close to the battery bay: raise tilt or end_zone");
 boss_xy = [for (x = [wall + boss_r, W - wall - boss_r], y = [wall + boss_r, D - wall - boss_r]) [x, y]];
 
-// ---- helpers ----------------------------------------------------------------
-// 2D shape given in (x, z) extruded along +y.
-module xz_extrude(h) { rotate([-90, 0, 0]) linear_extrude(height = h) mirror([0, 1, 0]) children(); }
-module rrect(x0, z0, w, h, r) { translate([x0 + r, z0 + r]) offset(r = r) square([w - 2*r, h - 2*r]); }
-// Rounds the convex corners of a 2D shape by r (shrink then grow back); r <= 0 leaves it alone.
-module round2d(r) { if (r > 0.01) offset(r = r) offset(r = -r) children(); else children(); }
-
-// Board-local frame: x = portrait right, y = INTO the stand from the glass front, z = portrait up.
-module board_frame() { translate(O) rotate([-lean, 0, 0]) children(); }
-module flip() {
-  if (board_flip) translate([glass_b/2, 0, glass_a/2]) rotate([0, 180, 0]) translate([-glass_b/2, 0, -glass_a/2]) children();
-  else children();
-}
-module bf() { board_frame() flip() children(); }
-
 // ---- shell body -------------------------------------------------------------
 function profile_pts(zb) = [[0, zb], [0, z0], F1, [D, z_back], [D, zb]];
-// 2D (y, z) profile extruded along +x
-module across(w) { rotate([90, 0, 90]) linear_extrude(w) children(); }
 // Footprint in plan, inset by t, with the four vertical corners rounded.
 module foot2d(t = 0) round2d(edge_r - t) offset(delta = -t) square([W, D]);
 // The outer body, inset by t on every face and cut flat at z = zb (zb < 0 leaves the bottom open).
@@ -136,26 +98,6 @@ module front_shell() difference() {
   button_cuts();
   boss_pilots();
 }
-
-// ---- board pocket and window ----------------------------------------------------
-module pocket(c = clr) xz_extrude(board_t + c) rrect(-c, -c, glass_b + 2*c, glass_a + 2*c, glass_r + c);
-// through the lip, framing the active area, with the outer rim broken by win_cham
-module win_rect(g = 0) rrect(act_b0 - win_margin - g, act_a0 - win_margin - g,
-                             act_b + 2*(win_margin + g), act_a + 2*(win_margin + g), 2 + g);
-module window() {
-  translate([0, -lip_t - 0.5, 0]) xz_extrude(lip_t + 1.0) win_rect();
-  if (win_cham > 0.01) hull() {   // widens to win_cham oversize at the face, nominal win_cham deeper in
-    translate([0, -lip_t - 0.5, 0]) xz_extrude(0.01) win_rect(win_cham + 0.5);
-    translate([0, -lip_t + win_cham, 0]) xz_extrude(0.01) win_rect();
-  }
-}
-module pcb_slab() translate([pcb_b0, pcb_y0, pcb_a0]) cube([pcb_b, pcb_t, pcb_a]);
-module board_ghost() {   // stand-in for the real board, for assembly renders and tests
-  xz_extrude(1.6) rrect(0, 0, glass_b, glass_a, glass_r);
-  pcb_slab();
-}
-// exactly the touch/display area, in front of the glass
-module active_prism() translate([act_b0, -lip_t - 0.5, act_a0]) cube([act_b, lip_t + 0.7, act_a]);
 
 // ---- battery bay -------------------------------------------------------------------
 // The bay is the open interior above the plate; the plate's ribs locate the cell.
@@ -208,20 +150,9 @@ module base_plate() difference() {
 }
 
 // ---- openings --------------------------------------------------------------------------
-usb_y = pcb_rear + usb_h/2;     // Type-C centre depth (VERIFY)
-btn_y = pcb_rear + 0.8;         // side-button centre depth (VERIFY)
-pin_d = 2.4;                    // pinhole for RST / BOOT / PWR
-
-module usb_cut() bf()
-  translate([pcb_b0 + pcb_b - 3, usb_y - usb_h/2 - 0.4, usb_a - usb_w/2 - 0.4])
-    cube([W, usb_h + 0.8, usb_w + 0.8]);
-// Relief for the plug overmold (wider/taller than the slot), cut through the wall so the plug can
-// reach within a few mm of the PCB edge. Centred on the slot.
-module usb_plug_cut() bf()
-  translate([pcb_b0 + pcb_b + usb_plug_x0, usb_y - usb_plug_h/2, usb_a - usb_plug_w/2])
-    cube([W, usb_plug_h, usb_plug_w]);
-module button_cuts() bf() for (a = btn_a)
-  translate([pcb_b0 + 1.0 - W, btn_y, a]) rotate([0, 90, 0]) cylinder(d = pin_d, h = W);
+module usb_cut() bf() usb_slot(W);
+module usb_plug_cut() bf() usb_plug_relief(W);
+module button_cuts() bf() button_holes(W);
 
 // ---- Type-C blanking cap ---------------------------------------------------------------
 // A press-fit blank for the Type-C opening (the plug relief, usb_plug_w x usb_plug_h, is what shows on

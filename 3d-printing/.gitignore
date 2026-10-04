@@ -1,3 +1,4 @@
 build/
 *.log
 .superpowers/
+__pycache__/

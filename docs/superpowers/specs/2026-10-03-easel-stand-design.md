@@ -52,12 +52,12 @@ defaults. The easel adds three VERIFY items:
 
 ### Form
 Four printed parts and an optional cap:
-- **Tray** (46 × 80 × 15.2): holds the cell flat.
+- **Tray** (46 × 81 × 15.2): holds the cell flat.
 - **Frame:** a 2.4 mm lid with a central fin; it closes the tray.
 - **Carrier:** stands on the lid at 65° and holds the board from behind.
 - **Bezel:** frames the glass from the front and hooks onto the carrier at the bottom.
 
-The envelope is about 46 × 80 × 68 mm (W × D × H). The 55 g cell sits low and mostly behind the screen. That keeps the
+The envelope is about 46 × 81 × 68 mm (W × D × H). The 55 g cell sits low and mostly behind the screen. That keeps the
 centre of gravity far in front of the rear feet, which stops a press on the screen from tipping the stand backwards.
 
 ### Parts
@@ -83,7 +83,7 @@ Prints lid down.
   - Ø2.4 with a Ø4.2 × 1.6 counterbore for the rear screw;
   - two lead slots, 4.5 × 5.5, one beside each carrier leg, over the tray's front space.
 - **Fin:** 5 mm thick, on the centre line, lightened with a window.
-  - It sits 0.2 mm behind the carrier's rear face, up to board z 32, and runs back to y 64 on the lid.
+  - It sits 0.2 mm behind the carrier's rear face, up to board z 32, and runs back to y 65 on the lid.
   - Its job is to stop a press on the screen from flexing the carrier backwards.
 
 #### 3. Carrier
@@ -112,7 +112,7 @@ Prints face down.
   - an arc band from radius 3.0 to 4.6 about P;
   - from y 0.3 to the rear face;
   - across each leg's width plus 0.3 per side.
-- **Top-screw pilots:** two, Ø1.8, from y 7.3 to −0.2, at board (−0.525, 41.655) and (33.655, 41.655).
+- **Top-screw pilots:** two, Ø1.8, from y 7.3 to −0.2, at board (−0.561, 41.691) and (33.691, 41.691).
   These are the corners between the glass and the outline, and both keep walls of at least 1.2.
 - **Openings:** the Type-C slot, plug relief and RST/BOOT/PWR pinholes, as in the wedge. They follow `board_flip`.
 
@@ -207,7 +207,7 @@ catches a check that could never fail.
 - **PCB hole positions are assumed.** If the pegs are wrong, the board will not seat. Shorten the pegs
   (`peg_l`) or turn them off; the shoulders still press the PCB.
 - **Tip force is an estimate.** It assumes 0.9 solidity at 1.24 g/cm³, a 55 g cell and a 12 g board, and
-  it takes the inner edge of the rear feet as the pivot.
+  it takes a pivot 1 mm inside the rear edge of the rear feet.
 - **The hinge has 0.2 mm clearances in printed plastic.** If it binds, sand the ridges or reduce `ridge_t`.
 - **Lead routing.** The lead must pass beside a leg and behind the PCB to the MX1.25. Check this on the first build.
 - **Battery polarity and LiPo safety:** as in the wedge README.
