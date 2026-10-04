@@ -200,11 +200,11 @@ void deviceEditorGesture(Gesture g) {
   if (g == Gesture::SwipeUp) {
     closeDeviceEditor();
   } else if (g == Gesture::Tap) {
-    const EditHit hit = pomoEditorHit(gestures.startX(), gestures.startY());
+    const EditHit hit = devEditorHit(gestures.startX(), gestures.startY());
     if (hit.action == EditAction::Done) {
       closeDeviceEditor();
     } else if (hit.action != EditAction::None) {
-      devEditorApply(editDevice, hit, deviceDefaults());
+      devEditorApply(editDevice, hit, deviceDefaults(), deviceSettings());
       lcd.setBrightness(editDevice.backlight);
       dirty = true;
     }

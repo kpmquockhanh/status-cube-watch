@@ -9,8 +9,9 @@
 // cannot drift apart. Pure: no Arduino, no LovyanGFX.
 //
 //   y= 0..46    handle + icon/title
-//   y=46..222   four rows of 44 px:  LABEL ......  ( - )  value  ( + )
-//   y=232..276  RESET (text)  [ DONE ] (pill)
+//   y=46..222   four rows of 44 px:  LABEL            ( - ) ( + )
+//                                    value
+//   y=232..276  [ RESET ]  [ DONE ]
 constexpr int EDIT_ROWS = 4;  // FOCUS, SHORT, LONG, SESSIONS
 
 struct EditRect {
@@ -18,23 +19,26 @@ struct EditRect {
   bool contains(int px, int py) const { return px >= x && px < x + w && py >= y && py < y + h; }
 };
 
-EditRect editorRow(int row);  // the whole row, for placing the label and value
-EditRect editorMinus(int row);
+EditRect editorRow(int row);   // the whole row
+EditRect editorLead(int row);  // the row left of the steppers: label, value, and a switch if it has one
+EditRect editorMinus(int row);  // touch zones; ui.cpp centres the round buttons in them
 EditRect editorPlus(int row);
 EditRect editorResetBtn();
 EditRect editorDoneBtn();
 const char *editorLabel(int row);  // "" for a row that does not exist
 
-enum class EditAction : uint8_t { None, Dec, Inc, Reset, Done };
+// Toggle is a tap on a row's lead. Only the display panel's SLEEP and ADVANCE
+// rows have a switch there (dev_editor.h); pomoEditorHit never returns it.
+enum class EditAction : uint8_t { None, Dec, Inc, Reset, Done, Toggle };
 struct EditHit {
   EditAction action;
-  uint8_t row;  // meaningful for Dec / Inc
+  uint8_t row;  // meaningful for Dec / Inc / Toggle
 };
 
 EditHit pomoEditorHit(int16_t x, int16_t y);
 
-// Applies Dec / Inc (step, snap, clamp) or Reset (to `defaults`). None and
-// Done leave `s` alone: the caller acts on Done.
+// Applies Dec / Inc (step, snap, clamp) or Reset (to `defaults`). None,
+// Toggle and Done leave `s` alone: the caller acts on Done.
 void pomoEditorApply(PomoSettings &s, EditHit hit, const PomoSettings &defaults);
 
 // True when a swipe up should open the editor: only the Pomodoro card, and

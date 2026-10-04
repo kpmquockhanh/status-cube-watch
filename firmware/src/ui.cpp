@@ -27,7 +27,7 @@ constexpr uint32_t RGB888[7] = {
 };
 
 uint16_t g_palette[7];
-uint16_t DIM, FAINT, INK, PANEL, ACC_POMO, ACC_DEV;
+uint16_t DIM, FAINT, MUTED, INK, PANEL, ACC_POMO, ACC_DEV;
 constexpr uint16_t BG = 0x0000;
 
 LGFX_Sprite g_canvas;
@@ -637,54 +637,97 @@ void drawPomodoroCard(LovyanGFX *g, const PomoView &v, float flash, bool online,
 // Both the Pomodoro editor (rises from the bottom) and the display panel (drops
 // from the top) are sheets: a lifted background with rounded corners on the edge
 // facing the card, a grab handle on that edge, an icon + title, hairline-divided
-// rows of  LABEL ... ( - ) value ( + ),  and a RESET / DONE bar. Each has its own
-// accent. Geometry comes from pomo_editor.cpp so drawing and hit-testing agree.
-constexpr int STEP_R = 12;      // stepper circle radius
-constexpr int STEP_MINUS_CX = 124;
-constexpr int STEP_PLUS_CX = 216;
-constexpr int VALUE_CX = 170;
+// rows of  LABEL over value ... ( - ) ( + ),  and a RESET / DONE bar. Each has its
+// own accent. Geometry comes from pomo_editor.cpp so drawing and hit-testing agree.
+constexpr int STEP_R = 17;      // stepper circle radius, centred in its touch zone
 constexpr int ROW_PAD = 14;     // side inset of the labels and dividers
+constexpr int SW_W = 36;        // a row's on/off switch, right-aligned in the row's lead
+constexpr int SW_H = 20;
+constexpr int SW_GAP = 10;      // between the switch and the minus button
 constexpr int SHEET_R = LCD_CORNER_R;  // matches the glass, so the sheet sits flush at rest
 
-void drawStepper(LovyanGFX *g, int cx, int cy, bool plus, uint16_t accent) {
-  (void)accent;
-  g->fillCircle(cx, cy, STEP_R, FAINT);
-  g->fillRect(cx - 5, cy - 1, 11, 2, INK);
-  if (plus) g->fillRect(cx - 1, cy - 5, 2, 11, INK);
+// What one row shows. `meterPct` -1 = no meter; `sw` -1 = no switch, else off/on.
+// A stepper that would not change anything (at a limit, or the row is off) is
+// drawn disabled.
+struct SheetRow {
+  const char *label;
+  const char *value;
+  int meterPct;
+  int sw;
+  bool canDec, canInc;
+};
+
+void drawStepper(LovyanGFX *g, const EditRect &zone, int yOff, bool plus, bool enabled) {
+  const int cx = zone.x + zone.w / 2;
+  const int cy = zone.y + zone.h / 2 + yOff;
+  g->fillSmoothCircle(cx, cy, STEP_R, FAINT);
+  const uint16_t ink = enabled ? INK : MUTED;
+  g->fillRect(cx - 6, cy - 1, 13, 3, ink);
+  if (plus) g->fillRect(cx - 1, cy - 6, 3, 13, ink);
 }
 
-// One row: [LABEL ...... ( - ) value ( + )], with an optional meter (0..100)
-// under the label and a hairline above (not on the first row).
-void drawSheetRow(LovyanGFX *g, int r, const char *label, const char *value, int meterPct,
-                  uint16_t accent, int yOff) {
-  const EditRect row = editorRow(r);
-  const int top = row.y + yOff;
-  const int cy = top + row.h / 2;
-  if (r > 0) g->drawFastHLine(ROW_PAD, top, LCD_WIDTH - 2 * ROW_PAD, FAINT);
-  const int labelY = meterPct >= 0 ? cy - 5 : cy;
-  drawCaps(g, label, ROW_PAD, labelY, DIM, middle_left);
-  if (meterPct >= 0) {
-    constexpr int MW = 70;
-    g->fillRoundRect(ROW_PAD, cy + 7, MW, 3, 1, FAINT);
-    const int fill = MW * meterPct / 100;
-    if (fill > 0) g->fillRoundRect(ROW_PAD, cy + 7, fill < 3 ? 3 : fill, 3, 1, accent);
-  }
-  drawStepper(g, STEP_MINUS_CX, cy, false, accent);
-  drawStepper(g, STEP_PLUS_CX, cy, true, accent);
+void drawSwitch(LovyanGFX *g, int x, int cy, bool on, uint16_t accent) {
+  constexpr int KNOB_R = SW_H / 2 - 3;
+  g->fillSmoothRoundRect(x, cy - SW_H / 2, SW_W, SW_H, SW_H / 2, on ? accent : FAINT);
+  const int kx = on ? x + SW_W - SW_H / 2 : x + SW_H / 2;
+  g->fillSmoothCircle(kx, cy, KNOB_R, on ? INK : DIM);
+}
+
+// "15 min" as a bold number and a small unit on one baseline; a value with no
+// space ("63%", "OFF") is all bold.
+void drawSheetValue(LovyanGFX *g, const char *value, int x, int baseline, uint16_t color) {
+  char num[16];
+  size_t n = 0;
+  for (; value[n] && value[n] != ' ' && n < sizeof(num) - 1; n++) num[n] = value[n];
+  num[n] = '\0';
   g->setFont(&V_B18.font);
-  g->setTextDatum(middle_center);
-  g->setTextColor(INK, PANEL);
-  g->drawString(value, VALUE_CX, cy);
+  g->setTextDatum(baseline_left);
+  g->setTextColor(color, PANEL);
+  g->drawString(num, x, baseline);
+  if (value[n] == ' ') {
+    const int w = g->textWidth(num);
+    g->setFont(&V_S12.font);
+    g->setTextColor(DIM, PANEL);
+    g->drawString(value + n + 1, x + w + 3, baseline);
+  }
+}
+
+// One row: the label over its value (and a meter or switch beside them) on the
+// left, the round - and + buttons on the right, and a hairline above (not on
+// the first row).
+void drawSheetRow(LovyanGFX *g, int r, const SheetRow &row, uint16_t accent, int yOff) {
+  const EditRect box = editorRow(r);
+  const int top = box.y + yOff;
+  const int cy = top + box.h / 2;
+  if (r > 0) g->drawFastHLine(ROW_PAD, top, LCD_WIDTH - 2 * ROW_PAD, FAINT);
+  drawCaps(g, row.label, ROW_PAD, cy - 5, DIM, baseline_left);
+  const bool on = row.sw != 0;
+  drawSheetValue(g, row.value, ROW_PAD, cy + 14, on ? INK : DIM);
+  if (row.meterPct >= 0) {
+    constexpr int MX = ROW_PAD + 54, MW = 56;  // clear of "100%"
+    g->fillSmoothRoundRect(MX, cy + 7, MW, 4, 2, FAINT);
+    const int fill = MW * row.meterPct / 100;
+    if (fill > 0) g->fillSmoothRoundRect(MX, cy + 7, fill < 4 ? 4 : fill, 4, 2, accent);
+  }
+  if (row.sw >= 0) {
+    const EditRect lead = editorLead(r);
+    drawSwitch(g, lead.x + lead.w - SW_GAP - SW_W, cy, on, accent);
+  }
+  drawStepper(g, editorMinus(r), yOff, false, row.canDec);
+  drawStepper(g, editorPlus(r), yOff, true, row.canInc);
 }
 
 void drawSheetBar(LovyanGFX *g, uint16_t accent, int yOff) {
+  constexpr int INSET = 4;  // the pills sit inside their 44 px touch zones
   const EditRect reset = editorResetBtn();
   const EditRect done = editorDoneBtn();
+  const int h = reset.h - 2 * INSET;
+  g->fillSmoothRoundRect(reset.x, reset.y + INSET + yOff, reset.w, h, h / 2, FAINT);
+  g->fillSmoothRoundRect(done.x, done.y + INSET + yOff, done.w, h, h / 2, accent);
   g->setFont(&V_B18.font);
   g->setTextDatum(middle_center);
-  g->setTextColor(DIM, PANEL);
+  g->setTextColor(INK, FAINT);
   g->drawString("RESET", reset.x + reset.w / 2, reset.y + reset.h / 2 + yOff);
-  g->fillRoundRect(done.x, done.y + 5 + yOff, done.w, done.h - 10, (done.h - 10) / 2, accent);
   g->setTextColor(BG, accent);
   g->drawString("DONE", done.x + done.w / 2, done.y + done.h / 2 + yOff);
 }
@@ -740,7 +783,11 @@ void drawEditorPanel(LovyanGFX *g, const PomoSettings &s, int yOff) {
     char buf[12];
     if (r == EDIT_ROWS - 1) snprintf(buf, sizeof(buf), "%u", (unsigned)vals[r]);
     else snprintf(buf, sizeof(buf), "%u min", (unsigned)vals[r]);
-    drawSheetRow(g, r, editorLabel(r), buf, -1, ACC_POMO, yOff);
+    // A stepper is live when pressing it would change something.
+    PomoSettings dec = s, inc = s;
+    pomoEditorApply(dec, EditHit{EditAction::Dec, (uint8_t)r}, s);
+    pomoEditorApply(inc, EditHit{EditAction::Inc, (uint8_t)r}, s);
+    drawSheetRow(g, r, SheetRow{editorLabel(r), buf, -1, -1, dec != s, inc != s}, ACC_POMO, yOff);
   }
   drawSheetBar(g, ACC_POMO, yOff);
 }
@@ -751,7 +798,12 @@ void drawDevicePanel(LovyanGFX *g, const DeviceSettings &s, int yOff) {
   for (int r = 0; r < DEV_EDIT_ROWS; r++) {
     char buf[12];
     devEditorValue(r, s, buf, sizeof(buf));
-    drawSheetRow(g, r, devEditorLabel(r), buf, r == 0 ? (int)s.backlight * 100 / 255 : -1,
+    DeviceSettings dec = s, inc = s;
+    devEditorApply(dec, EditHit{EditAction::Dec, (uint8_t)r}, s, s);
+    devEditorApply(inc, EditHit{EditAction::Inc, (uint8_t)r}, s, s);
+    const int sw = devEditorHasSwitch(r) ? (int)devEditorRowOn(r, s) : -1;
+    drawSheetRow(g, r,
+                 SheetRow{devEditorLabel(r), buf, r == 0 ? (int)s.backlight * 100 / 255 : -1, sw, dec != s, inc != s},
                  ACC_DEV, yOff);
   }
   drawSheetBar(g, ACC_DEV, yOff);
@@ -811,6 +863,7 @@ void uiBegin(Display &) {
   INK = g_palette[ACC_INK];
   DIM = to565(0x7C8598);
   FAINT = to565(0x2A3242);
+  MUTED = to565(0x4A5366);  // a disabled glyph on FAINT
   PANEL = BG;  // drawCaps paints text on BG, so the sheet shares it
   ACC_POMO = to565(0xFF6A4D);  // tomato
   ACC_DEV = to565(0x4DA3FF);   // sky

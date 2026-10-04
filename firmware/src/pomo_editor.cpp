@@ -4,10 +4,10 @@ namespace {
 
 constexpr int ROW_Y0 = 46;
 constexpr int ROW_H = 44;
-constexpr int BTN_W = 46;  // touch zone around each round stepper
+constexpr int BTN_W = 46;  // touch zone of each round stepper, side by side at the right
 constexpr int MARGIN = 10;
-constexpr int MINUS_X = 101;  // centred on the stepper circles drawn by ui.cpp
-constexpr int PLUS_X = 193;
+constexpr int MINUS_X = 140;
+constexpr int PLUS_X = MINUS_X + BTN_W;
 constexpr int PANEL_W = 240;
 constexpr int BAR_Y = 232;
 constexpr int BAR_H = 44;
@@ -52,6 +52,9 @@ uint8_t stepped(uint8_t v, bool up, const RowSpec &spec) {
 
 EditRect editorRow(int row) {
   return EditRect{0, (int16_t)(ROW_Y0 + row * ROW_H), PANEL_W, ROW_H};
+}
+EditRect editorLead(int row) {
+  return EditRect{0, (int16_t)(ROW_Y0 + row * ROW_H), MINUS_X, ROW_H};
 }
 EditRect editorMinus(int row) {
   return EditRect{MINUS_X, (int16_t)(ROW_Y0 + row * ROW_H), BTN_W, ROW_H};
