@@ -39,12 +39,23 @@ O_y = 6.2;                  // world y of O
 glass_up = 9.1;             // O's height above the deck
 
 // Carrier
-carrier_t = 2.4;            // back plate
+carrier_t = 3.2;            // back plate (thick enough to keep 1.6 under the lead groove)
 bez_side = 3.2;  bez_top = 4.0;  bez_r = 4;   // panel outline around the glass (carrier and bezel)
 post_d = 3;  preload = 0.2; // shoulders press this far into the PCB rear
 peg_d = 1.8;  peg_l = 1.0;  // pegs into the PCB holes; peg_l = 0 turns them off
 leg_w = 6;  leg_y0 = 1.5;  leg_top = -1.3;    // legs under the board (board-local y front, z top)
 ridge_r = [3.2, 4.4];  ridge_y0 = 0.5;        // hinge ridges on the leg fronts: arc band about P
+
+// Battery lead. The MX1.25 BAT header sits on the PCB rear beside the Type-C, opening towards the board
+// centre (Waveshare rear view), so the plug goes in from inside and the lead leaves flat across the PCB
+// rear. A groove in the carrier's front face takes it from the plug, down at cord_x, past the lower post to
+// below the PCB; from there it drops through the chin cavity beside the leg into the lid slot on that side.
+bat_x = 25.2;  bat_z = 28.1;                  // VERIFY: header opening face (board x), header centre (board z)
+bat_h = 3.6;  bat_w = 6.0;  bat_plug = 3.5;   // VERIFY: mated height off the PCB, width along z, plug out of the header
+cord_d = 1.6;                                 // the lead (two 28 AWG wires), as a round envelope
+cord_w = 3.0;  cord_depth = 1.6;              // groove width, and depth into the back plate
+cord_x = 20;                                  // board x of the groove's upright run
+bat_exit = 3.5;                               // VERIFY: free run past the plug where the lead climbs over the rear parts
 
 // Bezel
 face_cham = 0.6;            // 45 deg break on the face's top and side edges
@@ -205,12 +216,40 @@ module leg_screw_holes() for (p = front_pil) {
 }
 module top_holes(d, y0, y1) board_frame() for (t = top_pts) ycyl(t, d, y0, y1);
 module board_openings() bf() { usb_slot(12); usb_plug_relief(12); button_holes(12); }
+// Lead groove (board x, z) and the lead's path. All board-local and unflipped: bf() and flipp() flip them.
+cord_x1 = pcb_b0 + pcb_b + 0.1;               // just past the PCB edge, outside the leg
+// The route always runs down to the chin, so it is given unflipped and only mirrored in x with the board;
+// the header end follows the full flip.
+function cmx(x) = board_flip ? glass_b - x : x;
+cord_hz = flipp([0, 0, bat_z])[2];             // header centre, board z after the flip
+cord_groove_pts = [[cmx(cord_x), cord_hz], [cmx(cord_x), 10], [cmx(cord_x1), -1.5], [cmx(cord_x1), -6]];
+cord_y = plate_y0 + cord_depth - cord_d/2 - 0.1;
+module cord_groove() board_frame() for (i = [0 : len(cord_groove_pts) - 2]) hull()
+  for (q = [cord_groove_pts[i], cord_groove_pts[i + 1]]) ycyl(q, cord_w, plate_y0 - 0.01, plate_y0 + cord_depth);
+cord_slot_x = (board_flip ? lead_x[0] : lead_x[1]) + slot_w/2;
+cord_pts = concat(
+  [b2g(flipp([bat_x - bat_plug - 0.5, pcb_rear + bat_h/2, bat_z]))],
+  [for (p = [[cord_x, cord_y, cord_hz - 2], [cord_x, cord_y, 10], [cord_x1, cord_y, -1.5], [cord_x1, cord_y, -4.5],
+             [cord_x1, 4.5, -5.5]]) b2g([cmx(p[0]), p[1], p[2]])],
+  [[cord_slot_x, slot_y0 + slot_l/2, deck + 1], [cord_slot_x, slot_y0 + slot_l/2, tray_h - 2]]);
+// Parts on the PCB rear, up to board_t, except around the header and the run where the lead climbs out.
+module rear_parts() bf() difference() {
+  translate([pcb_b0, pcb_rear + nudge, pcb_a0]) cube([pcb_b, board_t - pcb_rear - nudge, pcb_a]);
+  translate([bat_x - bat_plug - bat_exit, 0, bat_z - bat_w/2 - nudge])
+    cube([pcb_b0 + pcb_b + 1 - (bat_x - bat_plug - bat_exit), board_t + 1, bat_w + 2*nudge]);
+}
+// stand-in for the mated plug on the header, and the lead from it to the tray
+module cord_ghost() {
+  bf() translate([bat_x - bat_plug, pcb_rear + nudge, bat_z - bat_w/2]) cube([bat_plug + 4.3, bat_h, bat_w]);
+  for (i = [0 : len(cord_pts) - 2]) hull() for (q = [cord_pts[i], cord_pts[i + 1]]) translate(q) sphere(d = cord_d, $fn = 16);
+}
 module carrier() difference() {
   intersection() { carrier_raw(); above(deck); }
   leg_screw_holes();
   top_holes(screw_d, plate_y0 - 0.01, back_y + 0.01);
   top_holes(cb_d, back_y - cb_depth, back_y + 0.01);
   board_openings();
+  cord_groove();
 }
 module carrier_print() translate([0, 0, back_y]) rotate([lean - 90, 0, 0]) translate(-O) carrier();
 module heads() for (p = front_pil) vhole(p, head_d, deck + leg_cb_up, deck + leg_cb_up + head_h);
@@ -284,6 +323,7 @@ module assembly() {
   color("whitesmoke") bezel();
   color("royalblue", 0.6) cell_ghost();
   color("black") board_at();
+  color("red") cord_ghost();
 }
 // cut at the left leg screw, keeping the right side
 module section_view() difference() { assembly(); translate([-1, -1, -1]) cube([leg_screw_x[0] + 1, D + 2, 100]); }
@@ -337,6 +377,9 @@ else if (part == "check_cap_seat") difference() { ecap_seat(); bezel(); fwd(nudg
 else if (part == "check_cap_ribs") intersection() { ecap_place() ecap_ribs(); bezel(); }
 else if (part == "check_cap_rib_carrier") intersection() { ecap_place() ecap_ribs(); carrier(); }
 else if (part == "check_cap_board") intersection() { ecap_place() ecap(); board_at(); }
+// the lead, plug to tray, clears every part and the board
+else if (part == "check_cord") intersection() { cord_ghost(); union() { tray(); frame(); carrier(); bezel(); board_at(); rear_parts(); } }
+else if (part == "at_cord") cord_ghost();
 else if (part == "check_fit") for (i = [0:4], j = [i + 1:5]) intersection() { fit_parts(i); fit_parts(j); }
 else if (part == "assembly") assembly();
 else if (part == "section") section_view();

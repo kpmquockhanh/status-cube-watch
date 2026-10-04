@@ -231,12 +231,22 @@ expect_solid "control: 1.6 mm holes are too small for the pegs"   check_pegs -D 
 expect_empty "leg screw heads inside the legs"                    check_leg_head
 expect_empty "leg screw heads inside the legs (tilt 55)"          check_leg_head -D tilt=55
 expect_solid "control: at tilt 75 the heads break the leg front"  check_leg_head -D tilt=75
-expect_manifold "carrier"                carrier --max 40 55 9.7
-expect_manifold "carrier (tilt 55)"      carrier --max 40 55.7 9.7 -D tilt=55
-expect_manifold "carrier (tilt 75)"      carrier --max 40 55 9.7 -D tilt=75
-expect_manifold "carrier (board_flip)"   carrier --max 40 55 9.7 -D board_flip=true
-expect_manifold "carrier (clr 0.5)"      carrier --max 40 55 9.9 -D clr=0.5
-expect_manifold "carrier (board 9 mm)"   carrier --max 40 55 11.7 -D board_t=9
+# battery lead: plug on the header, lead in the carrier groove, down the chin into the lid slot
+expect_empty "battery lead clear, plug to tray"              check_cord
+expect_empty "battery lead clear (board_flip)"               check_cord -D board_flip=true
+expect_empty "battery lead clear (tilt 55)"                  check_cord -D tilt=55
+expect_empty "battery lead clear (tilt 75)"                  check_cord -D tilt=75
+expect_empty "battery lead clear (clr 0.5)"                  check_cord -D clr=0.5
+expect_empty "battery lead clear (board 9 mm)"               check_cord -D board_t=9
+expect_solid "control: cord_depth=0.4 drags the lead over the rear parts" check_cord -D cord_depth=0.4
+expect_solid "control: bat_h=4.5 puts the plug into the plate"           check_cord -D bat_h=4.5
+expect_solid "control: bat_exit=1 leaves no room to climb out"           check_cord -D bat_exit=1
+expect_manifold "carrier"                carrier --max 40 55 10.5
+expect_manifold "carrier (tilt 55)"      carrier --max 40 55.7 10.5 -D tilt=55
+expect_manifold "carrier (tilt 75)"      carrier --max 40 55 10.5 -D tilt=75
+expect_manifold "carrier (board_flip)"   carrier --max 40 55 10.5 -D board_flip=true
+expect_manifold "carrier (clr 0.5)"      carrier --max 40 55 10.7 -D clr=0.5
+expect_manifold "carrier (board 9 mm)"   carrier --max 40 55 12.5 -D board_t=9
 
 # bezel and hinge
 expect_empty "active area is clear"                  check_window

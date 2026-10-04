@@ -191,5 +191,6 @@ Failure modes the spec implies that a user is most likely to hit; each has a tes
 - **No fit coupon.** `easel-fit-check.stl` is dropped: `check_fit` (all part pairs, seven variants) covers the clearances, and the carrier itself is the fit print (pegs against the real board).
 - Added `check_cap_rib_carrier`: the ribs stay in the bezel, so the bezel still swings off.
 - `expect_manifold` passes `-D` arguments to OpenSCAD and `--max` to `stlcheck`; `stlcheck` got its `__main__` guard early, while debugging.
-- Stability at nominal: 109.5 g; 3.21 N centre, 1.45 N top. No change to `foot_in` or `D` was needed.
-- Tests: 225 PASS (102 wedge, 123 easel).
+- **Battery lead route (added after review).** The plan had no path for the lead from the board's MX1.25 BAT header to the lid slot. The header sits on the PCB rear beside the Type-C and opens towards the board centre (Waveshare rear view), so the lead leaves flat across the PCB rear, between parts up to `board_t`. The carrier plate went 2.4 → 3.2 mm. Its front face now has a 3 mm wide, 1.6 mm deep groove: across, down at `cord_x`, past the lower post, out under the PCB edge to the chin. With `board_flip` the route mirrors in x and still runs down. `check_cord` runs a plug ghost and a Ø1.6 lead to the slot. It checks against every part, the board, and a rear-parts envelope (the PCB rear up to `board_t`, minus the header and `bat_exit`). Controls: `cord_depth=0.4`, `bat_h=4.5`, `bat_exit=1`.
+- Stability at nominal: 111.0 g; 3.27 N centre, 1.48 N top (109.5 g; 3.21 / 1.45 before the thicker plate). No change to `foot_in` or `D` was needed.
+- Tests: 234 PASS (102 wedge, 132 easel).

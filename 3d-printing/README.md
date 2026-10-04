@@ -127,7 +127,7 @@ Previews were rendered headless with `--render` and `xvfb-run` (installed with a
 |---|---|---|
 | `easel-tray.stl` | tray, 46 x 81 x 15.2, battery bay, screw pilasters, Ø8 foot recesses | open side up |
 | `easel-frame.stl` | 2.4 mm lid with a lightened centre fin that backs the carrier | lid down |
-| `easel-carrier.stl` | back plate, four posts (shoulders press the PCB, pegs locate it in its holes), two legs with hinge ridges | rear face down |
+| `easel-carrier.stl` | 3.2 mm back plate with a groove for the battery lead, four posts (shoulders press the PCB, pegs locate it in its holes), two legs with hinge ridges | rear face down |
 | `easel-bezel.stl` | glass pocket and window, open chin with hinge grooves, Type-C relief, pinholes | front face down |
 | `easel-usb-cap.stl` | optional Type-C blanking cap (crush ribs) | flange down |
 
@@ -142,7 +142,7 @@ Self-tapping M2 into Ø1.8 pilots, no glue: 2 x M2 x 10 (legs), 1 x M2 x 8 (rear
 1. Cell into the tray, tab end forwards; thread the lead up through the lid slot on the board's connector side.
 2. Frame on; fit the rear M2 x 8.
 3. Carrier on the lid; two M2 x 10 down through the legs clamp carrier, lid and tray in one go. These go in **before the board**: once the board and bezel are on, the leg screws are covered.
-4. Plug the lead into the board, then press the board onto the pegs, glass outwards.
+4. Plug the lead into the board's BAT header (it sits by the Type-C and opens towards the board centre, so the lead leaves across the PCB rear). Lay the lead in the groove in the carrier's front face: across, down past the lower post, out under the board edge and down beside the leg to the slot. Then press the board onto the pegs, glass outwards, without pinching the lead.
 5. Hold the bezel tilted forward with its front-bottom edge on the lid and swing it back over the glass: the grooves in its chin pick up the ridges on the legs.
 6. Two M2 x 6 from the carrier's rear into the bezel.
 
@@ -154,12 +154,12 @@ Ridges and grooves are arc bands concentric with the bezel's front-bottom edge (
 
 ### Stability
 
-`tools/stability.py` estimates mass, centre of gravity and the push into the screen that tips the stand backwards, from the parts in place (PLA at 1.24 g/cm³ x 0.9 solidity, 55 g cell, 12 g board, pivot 1 mm inside the rear feet). Nominal: 109.5 g; 3.2 N at the centre of the active area, 1.45 N at its top edge (`test.sh` requires 3.0 and 1.3). Estimates, not measurements.
+`tools/stability.py` estimates mass, centre of gravity and the push into the screen that tips the stand backwards, from the parts in place (PLA at 1.24 g/cm³ x 0.9 solidity, 55 g cell, 12 g board, pivot 1 mm inside the rear feet). Nominal: 111.0 g; 3.27 N at the centre of the active area, 1.48 N at its top edge (`test.sh` requires 3.0 and 1.3). Estimates, not measurements.
 
 ### VERIFY (easel-specific, on top of the board items in `board.scad`)
 
 - PCB mounting-hole positions (the pegs); assumed symmetric.
-- Where the MX1.25 battery connector sits on the board's rear, and the lead's route beside a leg to it.
+- The MX1.25 BAT header and the lead route (`bat_x`, `bat_z`, `bat_h`, `bat_w`, `bat_plug`, `bat_exit`). They are read off Waveshare's rear-view drawing: the header beside the Type-C, opening towards the board centre. `check_cord` runs the plug and a Ø1.6 lead from the header through the groove (`cord_x`, `cord_w`, `cord_depth`) to the lid slot, clear of every part. It treats everything on the PCB rear as reaching `board_t`, except the header and `bat_exit` mm past the plug, where the lead climbs into the groove. If a tall part sits in that run, move `cord_x`.
 - Which end of the cell the tabs leave from (assumed: the front).
 
 `board_flip` works here too and needs no firmware change. Export:
