@@ -289,6 +289,12 @@ expect_empty "cap ribs stay off the carrier"         check_cap_rib_carrier
 expect_empty "cap clears the board"                  check_cap_board
 expect_empty "cap clears the board (flip)"           check_cap_board -D board_flip=true
 expect_manifold "cap"                   cap --max 17.7 10 3.1
+
+# Stability: mass and tip force from the parts in place (estimates; see tools/stability.py)
+for p in at_tray at_frame at_carrier at_bezel at_cell at_board; do expect_solid "$p renders" $p; done
+meta
+expect_pass "tip force: >= 3.0 N centre, >= 1.3 N top" python3 tools/stability.py build/easel --min-center 3.0 --min-top 1.3
+expect_fail "control: no cell, it tips"                python3 tools/stability.py build/easel --cell-g 0 --min-center 3.0 --min-top 1.3
 expect_solid "assembly renders" assembly
 expect_solid "section renders"  section
 fi
