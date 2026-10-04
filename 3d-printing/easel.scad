@@ -159,13 +159,53 @@ module frame() difference() {
 module tray_print() tray();
 module frame_print() translate([0, 0, -tray_h]) frame();
 
-// filled in by the carrier and bezel tasks
-module carrier() {}
+// filled in by the bezel task
 module bezel() {}
 
 // Everything the battery lead passes: from 3 mm below the tray top to 1 mm above the deck, through each
 // slot (inset 0.05). Above that the chin wall leans over the slot, so the lead bends back into the chin.
 module lead_path() for (x = lead_x) translate([0, 0, tray_h - 3]) linear_extrude(deck + 1 - (tray_h - 3)) lead_slot(x, 0.05);
+
+// ---- carrier --------------------------------------------------------------------------
+// Prints rear face down. Stands on the lid and holds the board from behind: four posts press the PCB
+// rear (pegs locate it in its holes), two legs under the board take the vertical leg screws and carry
+// the hinge ridges, and the back plate takes the two top screws into the bezel.
+leg_x0 = [for (x = leg_screw_x) x - O[0] - leg_w/2];    // board-local x of each leg's left side
+shoulder_y = pcb_rear - preload;
+// a cylinder along board-local +y at (x, z), from y0 to y1
+module ycyl(p, d, y0, y1) translate([p[0], y0, p[1]]) rotate([-90, 0, 0]) cylinder(d = d, h = y1 - y0);
+// 2D (y, z) arc band about P, radii r0..r1, between y0 and y1, upper half only
+module arc_band(r0, r1, y0, y1) intersection() {
+  translate(P) difference() { circle(r = r1, $fn = 96); circle(r = r0, $fn = 96); }
+  translate([y0, P[1]]) square([y1 - y0, r1 + 1]);
+}
+module posts() for (h = holes) ycyl(h, post_d, shoulder_y, plate_y0 + 0.01);
+module pegs() if (peg_l > 0) for (h = holes) ycyl(h, peg_d, shoulder_y - peg_l, shoulder_y + 0.01);
+module legs_raw() for (x = leg_x0) translate([x, leg_y0, -60]) cube([leg_w, plate_y0 + 0.01 - leg_y0, 60 + leg_top]);
+module ridges() for (x = leg_x0) translate([x, 0, 0]) across(leg_w) arc_band(ridge_r[0], ridge_r[1], ridge_y0, leg_y0 + 0.01);
+module legs_body() intersection() { board_frame() legs_raw(); above(deck); }
+module carrier_raw() board_frame() {
+  yslab(plate_y0, back_y) outline2d();
+  posts();
+  pegs();
+  legs_raw();
+  ridges();
+}
+module leg_screw_holes() for (p = front_pil) {
+  vhole(p, screw_d, deck - 1, deck + leg_cb_up + 0.01);
+  vhole(p, cb_d, deck + leg_cb_up, deck + 12);
+}
+module top_holes(d, y0, y1) board_frame() for (t = top_pts) ycyl(t, d, y0, y1);
+module board_openings() bf() { usb_slot(12); usb_plug_relief(12); button_holes(12); }
+module carrier() difference() {
+  intersection() { carrier_raw(); above(deck); }
+  leg_screw_holes();
+  top_holes(screw_d, plate_y0 - 0.01, back_y + 0.01);
+  top_holes(cb_d, back_y - cb_depth, back_y + 0.01);
+  board_openings();
+}
+module carrier_print() translate([0, 0, back_y]) rotate([lean - 90, 0, 0]) translate(-O) carrier();
+module heads() for (p = front_pil) vhole(p, head_d, deck + leg_cb_up, deck + leg_cb_up + head_h);
 
 // ---- reference points for tools/stability.py ------------------------------------------
 module meta() echo(str("EASEL{\"lean\":", lean, ",\"press\":", b2g(press_pt), ",\"top\":", b2g(top_pt),
@@ -185,6 +225,13 @@ else if (part == "check_lead_path") intersection() { lead_path(); union() { tray
 else if (part == "check_rear_wall") difference() {
     vhole(rear_screw, cb_d + 2*0.9, deck - cb_depth, deck - 0.01);
     translate([0, 0, -1]) linear_extrude(deck + 2) plan_rr(W, D, base_r); }
+else if (part == "at_carrier") carrier();
+else if (part == "check_carrier_frame") intersection() { translate([0, 0, nudge]) carrier(); frame(); }
+else if (part == "check_carrier_board") intersection() { carrier(); board_at(); }
+else if (part == "check_shoulders") intersection() { board_frame() posts(); board_at(); }
+else if (part == "check_pegs") intersection() { board_frame() pegs(); board_at(); }
+else if (part == "check_leg_head") difference() { heads(); legs_body(); }
 else if (part == "tray") tray_print();
 else if (part == "frame") frame_print();
+else if (part == "carrier") carrier_print();
 else assert(false, str("unknown part: ", part));

@@ -213,6 +213,30 @@ expect_manifold "frame"                frame --max 46.5 81.5 36.8
 expect_manifold "frame (tilt 55)"      frame --max 46.5 81.5 36.8 -D tilt=55
 expect_manifold "frame (tilt 75)"      frame --max 46.5 81.5 40.4 -D tilt=75
 expect_manifold "frame (15 mm cell)"   frame --max 46.5 81.5 36.8 -D 'bat=[65,40,15]'
+
+# carrier
+expect_empty "carrier clear of the frame and fin"     check_carrier_frame
+expect_empty "carrier clear of the frame (tilt 55)"   check_carrier_frame -D tilt=55
+expect_empty "carrier clear of the frame (tilt 75)"   check_carrier_frame -D tilt=75
+expect_solid "control: fin_gap=-0.1 puts the fin into the carrier" check_carrier_frame -D fin_gap=-0.1
+expect_empty "carrier clear of the board (pegs in the holes)"     check_carrier_board -D preload=-0.05
+expect_empty "flip: carrier clear of the board"                   check_carrier_board -D preload=-0.05 -D board_flip=true
+expect_solid "control: 2.6 mm pegs miss the holes"                check_carrier_board -D preload=-0.05 -D peg_d=2.6
+expect_solid "shoulders press on the PCB"                         check_shoulders
+expect_solid "flip: shoulders press on the PCB"                   check_shoulders -D board_flip=true
+expect_empty "control: preload=-0.05 leaves the PCB loose"        check_shoulders -D preload=-0.05
+expect_empty "pegs sit inside the PCB holes"                      check_pegs
+expect_empty "flip: pegs sit inside the PCB holes"                check_pegs -D board_flip=true
+expect_solid "control: 1.6 mm holes are too small for the pegs"   check_pegs -D hole_d=1.6
+expect_empty "leg screw heads inside the legs"                    check_leg_head
+expect_empty "leg screw heads inside the legs (tilt 55)"          check_leg_head -D tilt=55
+expect_solid "control: at tilt 75 the heads break the leg front"  check_leg_head -D tilt=75
+expect_manifold "carrier"                carrier --max 40 55 9.7
+expect_manifold "carrier (tilt 55)"      carrier --max 40 55.7 9.7 -D tilt=55
+expect_manifold "carrier (tilt 75)"      carrier --max 40 55 9.7 -D tilt=75
+expect_manifold "carrier (board_flip)"   carrier --max 40 55 9.7 -D board_flip=true
+expect_manifold "carrier (clr 0.5)"      carrier --max 40 55 9.9 -D clr=0.5
+expect_manifold "carrier (board 9 mm)"   carrier --max 40 55 11.7 -D board_t=9
 fi
 
 exit $fail
