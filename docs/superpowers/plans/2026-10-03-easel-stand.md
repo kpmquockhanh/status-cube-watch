@@ -180,3 +180,16 @@ Failure modes the spec implies that a user is most likely to hit; each has a tes
   - `nudge`, `fin_gap`, `groove_clr`, `chin_top`, `pilot_in` and `cap_*` are introduced in the task that first uses them.
   - The easel's cap modules are `ecap*`, so they never clash with `stand.scad`'s, which is not included.
 - **Risk.** OpenSCAD has no namespaces. A name assigned in both `board.scad` and `easel.scad` silently takes the last value. Every new tunable is grepped against `board.scad` before it is added.
+
+## Found during implementation
+
+- **Zero-volume slivers.** Manifold reports coplanar touching faces as geometry, so every contact-by-design check separates the parts by `nudge` (0.02) or grows a cutter by it: the carrier/bezel seam in `check_cap_seat` (`fwd(nudge) carrier()`), the cap flange in `check_cap_relief`, the pilot bore in `check_pilot_wall` (subtracted at `pilot_d + 2*nudge`, probe starting 0.05 behind the pilot floor), the cap seat ring (built in cap coordinates, minus the opening grown by `nudge`).
+- **Pocket corners squared.** In the swing check, the round lower pocket corners swept into the glass corners (board sagged 0.2) and the PCB corners (5 deg). The bezel now squares them from the glass face back, `glass_r + 1` high (taller cut the flipped BOOT pinhole and left non-manifold edges).
+- **Controls that differ from the plan:** `check_carrier_board` uses `peg_d=2.6`; `check_pegs` uses `hole_d=1.6` (`hole_ib` would move the posts too); `check_shoulders` uses `preload=-0.05`, which must come out empty; `check_ridge_groove` is ridges ∩ bezel with `groove_clr=-0.1`; `check_window` uses `win_margin=-2`; `check_cap_ribs` uses `cap_rib=0.1` (0 would be a degenerate solid).
+- `check_rear_wall` uses a 0.9 margin; the rear screw is tied to the bay (`bay_y1 + 2.2`) so the `D=80` control works.
+- `check_slot_cavity` folded into `check_lead_path`, which intersects the lead path with tray, frame, carrier and bezel together.
+- **No fit coupon.** `easel-fit-check.stl` is dropped: `check_fit` (all part pairs, seven variants) covers the clearances, and the carrier itself is the fit print (pegs against the real board).
+- Added `check_cap_rib_carrier`: the ribs stay in the bezel, so the bezel still swings off.
+- `expect_manifold` passes `-D` arguments to OpenSCAD and `--max` to `stlcheck`; `stlcheck` got its `__main__` guard early, while debugging.
+- Stability at nominal: 109.5 g; 3.21 N centre, 1.45 N top. No change to `foot_in` or `D` was needed.
+- Tests: 225 PASS (102 wedge, 123 easel).
