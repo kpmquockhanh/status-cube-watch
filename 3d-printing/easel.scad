@@ -63,6 +63,16 @@ fin_t = 5;  fin_gap = 0.2;  fin_zb = 32;  fin_sink = 0.6;  fin_end = 65;  fin_wa
 // Lead slots in the lid, one beside each leg
 lead_x = [6.5, 35.0];  slot_w = 4.5;  slot_l = 5.5;  slot_y0 = 4.0;
 
+// Type-C cap (optional): a friction plug for the blind plug relief in the bezel's side, flange on the side
+// face, crush ribs only on the stretch that sits in the bezel (so the bezel still swings off the carrier).
+cap_clr = 0.15;             // per side, into the relief
+cap_rib = 0.35;             // crush rib height: cap_rib - cap_clr of it bites
+cap_rib_w = 0.8;  cap_rib_y = [-2.2, 0.8];   // rib width; rib centres along board y, from the plug centre
+cap_flange = 1.0;           // how far the flange stands past the relief, per side
+cap_lip = 0.9;              // flange thickness
+cap_ear = 2.2;              // radius of the pull ear, centred on the flange edge
+cap_gap = 0.2;              // plug tip to relief floor
+
 nudge = 0.02;               // separates faces that touch by design, in collision checks only
 swing = 0;  sag = 0;        // check_swing: bezel opened this many degrees about P; board sagged on its pegs
 
@@ -238,6 +248,34 @@ module fwd(d) translate([0, -d*cos(lean), d*sin(lean)]) children();
 module swung(a) board_frame() translate([0, P[0], P[1]]) rotate([a, 0, 0]) translate([0, -P[0], -P[1]])
   rotate([lean, 0, 0]) translate(-O) children();
 
+// ---- Type-C cap -----------------------------------------------------------------------
+// Cap-local frame (print orientation): x = board z, y = board y, z = up out of the flange; origin at the
+// relief centre on the side face. ecap_place() maps it onto the bezel's side and follows board_flip.
+cap_depth = (out_x1 - (pcb_b0 + pcb_b + usb_plug_x0)) - cap_gap;
+cap_w = usb_plug_w - 2*cap_clr;   // along board z
+cap_h = usb_plug_h - 2*cap_clr;   // along board y
+module ecap_flange2d() hull() {
+  rrect(-cap_w/2 - cap_flange, -cap_h/2 - cap_flange, cap_w + 2*cap_flange, cap_h + 2*cap_flange, 1.5);
+  translate([-cap_w/2 - cap_flange, 0]) circle(r = cap_ear);
+}
+module ecap_plug() hull() {   // 0.3 lead-in at the tip
+  translate([-cap_w/2, -cap_h/2, cap_lip - 0.01]) cube([cap_w, cap_h, cap_depth - 0.3 + 0.01]);
+  translate([-cap_w/2 + 0.3, -cap_h/2 + 0.3, cap_lip]) cube([cap_w - 0.6, cap_h - 0.6, cap_depth]);
+}
+module ecap_body() { linear_extrude(cap_lip) ecap_flange2d(); ecap_plug(); }
+// on the ±board-z faces, stopping 0.3 short of the tip; only at board y < plate_y0 (in the bezel)
+module ecap_ribs() for (sx = [-1, 1], y = cap_rib_y)
+  translate([sx > 0 ? cap_w/2 - 0.01 : -cap_w/2 - cap_rib, y - cap_rib_w/2, cap_lip - 0.01])
+    cube([cap_rib + 0.01, cap_rib_w, cap_depth - 0.3 + 0.01]);
+module ecap() { ecap_body(); ecap_ribs(); }
+module ecap_place() bf() translate([out_x1 + cap_lip, usb_y, usb_a]) rotate([0, -90, 0]) children();
+module ecap_print() ecap();
+// the ring of side face the flange must land on (the relief opening is cap + cap_clr per side)
+module ecap_seat() ecap_place() translate([0, 0, cap_lip + nudge]) linear_extrude(0.2) difference() {
+  ecap_flange2d();
+  square([usb_plug_w + 2*nudge, usb_plug_h + 2*nudge], center = true);
+}
+
 // ---- assembly and the all-parts check ----------------------------------------------
 module assembly() {
   color("gainsboro") tray();
@@ -293,6 +331,12 @@ else if (part == "check_bezel_carrier") intersection() { carrier(); fwd(nudge) b
 else if (part == "check_bezel_frame") intersection() { translate([0, 0, nudge]) bezel(); frame(); }
 else if (part == "check_head_bezel") intersection() { heads(); bezel(); }
 else if (part == "check_swing") intersection() { swung(swing) bezel(); union() { carrier(); board_at(sag); } }
+// Type-C cap. The ribs are meant to interfere (that is the crush), so the relief check uses the body.
+else if (part == "check_cap_relief") intersection() { ecap_place() translate([0, 0, -nudge]) ecap_body(); union() { bezel(); carrier(); } }   // flange touches by design
+else if (part == "check_cap_seat") difference() { ecap_seat(); bezel(); fwd(nudge) carrier(); }   // fwd: closes the seam
+else if (part == "check_cap_ribs") intersection() { ecap_place() ecap_ribs(); bezel(); }
+else if (part == "check_cap_rib_carrier") intersection() { ecap_place() ecap_ribs(); carrier(); }
+else if (part == "check_cap_board") intersection() { ecap_place() ecap(); board_at(); }
 else if (part == "check_fit") for (i = [0:4], j = [i + 1:5]) intersection() { fit_parts(i); fit_parts(j); }
 else if (part == "assembly") assembly();
 else if (part == "section") section_view();
@@ -300,4 +344,5 @@ else if (part == "tray") tray_print();
 else if (part == "frame") frame_print();
 else if (part == "carrier") carrier_print();
 else if (part == "bezel") bezel_print() bezel();
+else if (part == "cap") ecap_print();
 else assert(false, str("unknown part: ", part));

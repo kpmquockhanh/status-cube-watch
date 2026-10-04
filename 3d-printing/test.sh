@@ -274,6 +274,21 @@ expect_manifold "bezel (tilt 75)"       bezel --max 40 55.7 8.3 -D tilt=75
 expect_manifold "bezel (board_flip)"    bezel --max 40 55.7 8.3 -D board_flip=true
 expect_manifold "bezel (clr 0.5)"       bezel --max 40 55.7 8.5 -D clr=0.5
 expect_manifold "bezel (board 9 mm)"    bezel --max 40 55.7 10.3 -D board_t=9
+
+# Type-C cap
+expect_empty "cap body clears the relief"            check_cap_relief
+expect_empty "cap body clears the relief (flip)"     check_cap_relief -D board_flip=true
+expect_solid "control: cap_clr=-0.1 binds"           check_cap_relief -D cap_clr=-0.1
+expect_empty "cap flange lands on the side face"     check_cap_seat
+expect_empty "cap flange lands (flip)"               check_cap_seat -D board_flip=true
+expect_empty "cap flange lands (tilt 55)"            check_cap_seat -D tilt=55
+expect_solid "control: cap_flange=3 overhangs"       check_cap_seat -D cap_flange=3
+expect_solid "cap ribs bite the bezel"               check_cap_ribs
+expect_empty "control: cap_rib=0.1 does not bite"    check_cap_ribs -D cap_rib=0.1
+expect_empty "cap ribs stay off the carrier"         check_cap_rib_carrier
+expect_empty "cap clears the board"                  check_cap_board
+expect_empty "cap clears the board (flip)"           check_cap_board -D board_flip=true
+expect_manifold "cap"                   cap --max 17.7 10 3.1
 expect_solid "assembly renders" assembly
 expect_solid "section renders"  section
 fi
