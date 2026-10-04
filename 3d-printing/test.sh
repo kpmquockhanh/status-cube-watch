@@ -1,45 +1,65 @@
 #!/usr/bin/env bash
-# Geometry tests for stand.scad. Usage: docs/enclosure/test.sh   (set OPENSCAD=... to override)
+# Geometry tests for stand.scad (wedge) and easel.scad. Usage: 3d-printing/test.sh [stand|easel]
+# (set OPENSCAD=... to override). Renders land in build/<scad>-<part>.{stl,log}.
 set -u
+set -f   # -D values such as bat=[65,40,15] must not glob
 cd "$(dirname "$0")"
+only="${1:-}"
+case "$only" in ""|stand|easel) ;; *) echo "usage: $0 [stand|easel]"; exit 2;; esac
 OPENSCAD="${OPENSCAD:-$PWD/tools/openscad}"
 BACKEND=""
 "$OPENSCAD" --help 2>&1 | grep -q -- "--backend" && BACKEND="--backend=manifold"
 mkdir -p build
 fail=0
+SCAD=stand.scad
+VARIANT=""   # extra -D arguments applied to every render (word-split on purpose)
 
-render() {  # render <part> [extra openscad args...] -> build/<part>.stl and build/<part>.log
+out() { echo "build/${SCAD%.scad}-$1"; }
+render() {  # render <part> [extra openscad args...] -> $(out part).stl and .log
   local part="$1"; shift
-  rm -f "build/$part.stl"
-  "$OPENSCAD" $BACKEND -D "part=\"$part\"" "$@" -o "build/$part.stl" stand.scad >"build/$part.log" 2>&1
+  local o; o="$(out "$part")"
+  rm -f "$o.stl"
+  "$OPENSCAD" $BACKEND -D "part=\"$part\"" $VARIANT "$@" -o "$o.stl" "$SCAD" >"$o.log" 2>&1
 }
-is_empty()  { grep -q "object is empty" "build/$1.log"; }
-has_error() { grep -q -E "ERROR|Assertion|assertion" "build/$1.log"; }
+is_empty()  { grep -q "object is empty" "$(out "$1").log"; }
+has_error() { grep -q -E "ERROR|Assertion|assertion" "$(out "$1").log"; }
 
 expect_empty() {  # label part [-D ...]   passes when the part has NO geometry (no collision)
   local label="$1" part="$2"; shift 2
   render "$part" "$@"
-  if has_error "$part"; then echo "FAIL $label: openscad error"; sed -n 1,4p "build/$part.log"; fail=1
+  if has_error "$part"; then echo "FAIL $label: openscad error"; sed -n 1,4p "$(out "$part").log"; fail=1
   elif is_empty "$part"; then echo "PASS $label"
   else echo "FAIL $label: expected empty, got geometry (overlap)"; fail=1; fi
 }
 expect_solid() {  # label part [-D ...]   passes when the part HAS geometry
   local label="$1" part="$2"; shift 2
   render "$part" "$@"
-  if has_error "$part"; then echo "FAIL $label: openscad error"; sed -n 1,4p "build/$part.log"; fail=1
-  elif is_empty "$part" || [ ! -s "build/$part.stl" ]; then echo "FAIL $label: expected geometry, got empty"; fail=1
+  if has_error "$part"; then echo "FAIL $label: openscad error"; sed -n 1,4p "$(out "$part").log"; fail=1
+  elif is_empty "$part" || [ ! -s "$(out "$part").stl" ]; then echo "FAIL $label: expected geometry, got empty"; fail=1
   else echo "PASS $label"; fi
 }
 expect_manifold() {  # label part [--max X Y Z]   watertight and within a bounding box
   local label="$1" part="$2"; shift 2
   expect_solid "$label renders" "$part" || true
-  python3 tools/stlcheck.py "build/$part.stl" "$@" && echo "PASS $label watertight" || { echo "FAIL $label watertight"; fail=1; }
+  python3 tools/stlcheck.py "$(out "$part").stl" "$@" && echo "PASS $label watertight" || { echo "FAIL $label watertight"; fail=1; }
 }
 expect_error() {  # label part   passes when openscad rejects the part
   render "$2"
   if has_error "$2"; then echo "PASS $1"; else echo "FAIL $1: expected an error"; fail=1; fi
 }
+expect_pass() {  # label cmd...   passes when the command exits 0
+  local label="$1"; shift
+  if "$@"; then echo "PASS $label"; else echo "FAIL $label"; fail=1; fi
+}
+expect_fail() {  # label cmd...   passes when the command exits non-zero (positive controls)
+  local label="$1"; shift
+  if "$@" >/dev/null 2>&1; then echo "FAIL $label: expected a failure"; fail=1; else echo "PASS $label"; fi
+}
+run() { [ -z "$only" ] || [ "$only" = "$1" ]; }
 
+# ==== wedge: stand.scad =========================================================================
+if run stand; then
+SCAD=stand.scad
 expect_empty "part=none renders nothing" none
 expect_error "unknown part is rejected" bogus
 
@@ -155,5 +175,22 @@ expect_manifold "fit-check coupon"      fit   --max 48 60 70
 expect_solid    "assembly renders"      assembly
 expect_solid    "section renders"       section
 expect_solid    "cap fitted renders"    cap_fitted
+
+fi
+
+# ==== easel: easel.scad =========================================================================
+if run easel; then
+SCAD=easel.scad
+meta() {  # writes build/easel-meta.echo: the press points and pivots stability.py needs
+  rm -f build/easel-meta.echo
+  "$OPENSCAD" -D 'part="meta"' $VARIANT "$@" -o build/easel-meta.echo easel.scad >build/easel-meta.log 2>&1
+}
+
+expect_empty "easel: part=none renders nothing" none
+expect_error "easel: unknown part is rejected" bogus
+expect_solid "cell ghost in place"  at_cell
+expect_solid "board ghost in place" at_board
+meta; expect_pass "meta echoes the reference points" grep -q 'EASEL{' build/easel-meta.echo
+fi
 
 exit $fail
