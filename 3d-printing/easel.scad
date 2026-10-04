@@ -64,6 +64,7 @@ fin_t = 5;  fin_gap = 0.2;  fin_zb = 32;  fin_sink = 0.6;  fin_end = 65;  fin_wa
 lead_x = [6.5, 35.0];  slot_w = 4.5;  slot_l = 5.5;  slot_y0 = 4.0;
 
 nudge = 0.02;               // separates faces that touch by design, in collision checks only
+swing = 0;  sag = 0;        // check_swing: bezel opened this many degrees about P; board sagged on its pegs
 
 // ---- derived ----------------------------------------------------------------
 lean = 90 - tilt;
@@ -159,9 +160,6 @@ module frame() difference() {
 module tray_print() tray();
 module frame_print() translate([0, 0, -tray_h]) frame();
 
-// filled in by the bezel task
-module bezel() {}
-
 // Everything the battery lead passes: from 3 mm below the tray top to 1 mm above the deck, through each
 // slot (inset 0.05). Above that the chin wall leans over the slot, so the lead bends back into the chin.
 module lead_path() for (x = lead_x) translate([0, 0, tray_h - 3]) linear_extrude(deck + 1 - (tray_h - 3)) lead_slot(x, 0.05);
@@ -207,6 +205,61 @@ module carrier() difference() {
 module carrier_print() translate([0, 0, back_y]) rotate([lean - 90, 0, 0]) translate(-O) carrier();
 module heads() for (p = front_pil) vhole(p, head_d, deck + leg_cb_up, deck + leg_cb_up + head_h);
 
+// ---- bezel --------------------------------------------------------------------------------
+// Prints face down. Frames the glass from the front; its chin wall hooks over the ridges on the legs
+// (grooves concentric with P, so it swings on and off about P), and two top screws from the carrier's
+// rear hold it closed. Everything behind the chin wall and below the glass is open: legs, screw heads
+// and the battery lead live there.
+module bezel_raw() board_frame() hull() {
+  yslab(-lip_t, -lip_t + 0.01) offset(delta = -face_cham) outline2d();
+  yslab(-lip_t + face_cham, plate_y0) outline2d();
+}
+module chin_cuts() board_frame() {
+  translate([-clr, chin_y1, -60]) cube([glass_b + 2*clr, plate_y0 + 1 - chin_y1, 60 - clr]);   // chin cavity
+  // lower pocket corners squared: round ones sweep into the glass and PCB corners on the swing
+  translate([-clr - 0.01, 0, -clr - 0.01]) cube([glass_b + 2*clr + 0.02, plate_y0 + 1, glass_r + 1]);
+  translate([-clr, 0, chin_top]) cube([glass_b + 2*clr, chin_y1 + 0.01, -clr - chin_top + 0.01]); // over the chin wall
+  for (x = leg_x0) translate([x - groove_clr, 0, 0])
+    across(leg_w + 2*groove_clr) arc_band(ridge_r[0] - groove_clr, ridge_r[1] + groove_clr, groove_y0, chin_y1 + 0.01);
+}
+// blind: they stop 0.8 behind the face
+module top_pilots(d = pilot_d, y1 = plate_y0 + 0.01, y0 = -lip_t + 0.8) board_frame() for (t = top_pts) ycyl(t, d, y0, y1);
+module bezel() difference() {
+  intersection() { bezel_raw(); above(deck); }
+  bf() { pocket(extra = 0.01); window(); }
+  chin_cuts();
+  top_pilots();
+  board_openings();
+}
+module bezel_print() translate([0, 0, lip_t]) rotate([90 + lean, 0, 0]) translate(-O) children();
+// moves a world-placed part along the board's outward normal (forward and up), by d
+module fwd(d) translate([0, -d*cos(lean), d*sin(lean)]) children();
+// the bezel opened by `a` degrees about P
+module swung(a) board_frame() translate([0, P[0], P[1]]) rotate([a, 0, 0]) translate([0, -P[0], -P[1]])
+  rotate([lean, 0, 0]) translate(-O) children();
+
+// ---- assembly and the all-parts check ----------------------------------------------
+module assembly() {
+  color("gainsboro") tray();
+  color("dimgray") frame();
+  color("lightgray") carrier();
+  color("whitesmoke") bezel();
+  color("royalblue", 0.6) cell_ghost();
+  color("black") board_at();
+}
+// cut at the left leg screw, keeping the right side
+module section_view() difference() { assembly(); translate([-1, -1, -1]) cube([leg_screw_x[0] + 1, D + 2, 100]); }
+// Each part lifted by nudge per layer it stands on, and the bezel also moved off the carrier plate:
+// any overlap left is a real collision.
+module fit_parts(i) {
+  if (i == 0) tray();
+  if (i == 1) translate([0, 0, nudge]) cell_ghost();
+  if (i == 2) translate([0, 0, nudge]) frame();
+  if (i == 3) translate([0, 0, 2*nudge]) carrier();
+  if (i == 4) translate([0, 0, 2*nudge]) fwd(nudge) bezel();
+  if (i == 5) board_at();
+}
+
 // ---- reference points for tools/stability.py ------------------------------------------
 module meta() echo(str("EASEL{\"lean\":", lean, ",\"press\":", b2g(press_pt), ",\"top\":", b2g(top_pt),
                        ",\"pivot_y\":", pivot_y, ",\"front_y\":", front_y, "}"));
@@ -231,7 +284,20 @@ else if (part == "check_carrier_board") intersection() { carrier(); board_at(); 
 else if (part == "check_shoulders") intersection() { board_frame() posts(); board_at(); }
 else if (part == "check_pegs") intersection() { board_frame() pegs(); board_at(); }
 else if (part == "check_leg_head") difference() { heads(); legs_body(); }
+else if (part == "at_bezel") bezel();
+else if (part == "check_window") intersection() { bezel(); bf() active_prism(); }
+// a 1.2 wall all round each top pilot: the pilot grown by 1.2 must stay inside the bezel
+else if (part == "check_pilot_wall") difference() { top_pilots(pilot_d + 2*1.2, plate_y0 - 0.05, -lip_t + 0.85); bezel(); top_pilots(pilot_d + 2*nudge, plate_y0 + 0.1, -lip_t + 0.7); }
+else if (part == "check_ridge_groove") intersection() { board_frame() ridges(); bezel(); }
+else if (part == "check_bezel_carrier") intersection() { carrier(); fwd(nudge) bezel(); }
+else if (part == "check_bezel_frame") intersection() { translate([0, 0, nudge]) bezel(); frame(); }
+else if (part == "check_head_bezel") intersection() { heads(); bezel(); }
+else if (part == "check_swing") intersection() { swung(swing) bezel(); union() { carrier(); board_at(sag); } }
+else if (part == "check_fit") for (i = [0:4], j = [i + 1:5]) intersection() { fit_parts(i); fit_parts(j); }
+else if (part == "assembly") assembly();
+else if (part == "section") section_view();
 else if (part == "tray") tray_print();
 else if (part == "frame") frame_print();
 else if (part == "carrier") carrier_print();
+else if (part == "bezel") bezel_print() bezel();
 else assert(false, str("unknown part: ", part));

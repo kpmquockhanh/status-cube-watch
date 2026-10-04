@@ -237,6 +237,45 @@ expect_manifold "carrier (tilt 75)"      carrier --max 40 55 9.7 -D tilt=75
 expect_manifold "carrier (board_flip)"   carrier --max 40 55 9.7 -D board_flip=true
 expect_manifold "carrier (clr 0.5)"      carrier --max 40 55 9.9 -D clr=0.5
 expect_manifold "carrier (board 9 mm)"   carrier --max 40 55 11.7 -D board_t=9
+
+# bezel and hinge
+expect_empty "active area is clear"                  check_window
+expect_empty "active area is clear (tilt 55)"        check_window -D tilt=55
+expect_empty "active area is clear (tilt 75)"        check_window -D tilt=75
+expect_empty "flip: active area is clear"            check_window -D board_flip=true
+expect_solid "control: win_margin=-2 covers the active area" check_window -D win_margin=-2
+expect_empty "top pilots keep 1.2 walls"             check_pilot_wall
+expect_empty "top pilots keep 1.2 walls (clr 0.5)"   check_pilot_wall -D clr=0.5
+expect_solid "control: pilot_in=0.5 thins the wall"  check_pilot_wall -D pilot_in=0.5
+expect_empty "ridges run in the grooves"             check_ridge_groove
+expect_solid "control: groove_clr=-0.1 jams the ridges" check_ridge_groove -D groove_clr=-0.1
+expect_empty "bezel clear of the carrier"            check_bezel_carrier
+expect_solid "control: nudge=-0.02 pushes the bezel into the carrier" check_bezel_carrier -D nudge=-0.02
+expect_empty "bezel clear of the frame"              check_bezel_frame
+expect_solid "control: nudge=-0.02 sinks the bezel into the lid"     check_bezel_frame -D nudge=-0.02
+expect_empty "leg screw heads clear of the bezel"    check_head_bezel
+for a in 5 10 20 30; do
+  expect_empty "bezel swings on clear (${a} deg)"            check_swing -D swing=$a
+  expect_empty "bezel swings on clear (${a} deg, sag 0.2)"   check_swing -D swing=$a -D sag=0.2
+done
+expect_solid "control: chin_top=-0.3 catches a sagged board" check_swing -D swing=5 -D sag=0.2 -D chin_top=-0.3
+# every part against every other part and the ghosts (touching faces pulled apart by nudge)
+expect_empty "parts and ghosts clear"                check_fit -D preload=-0.05
+expect_empty "parts and ghosts clear (15 mm cell)"   check_fit -D preload=-0.05 -D 'bat=[65,40,15]'
+expect_empty "parts and ghosts clear (clr 0.5)"      check_fit -D preload=-0.05 -D clr=0.5
+expect_empty "parts and ghosts clear (board 9 mm)"   check_fit -D preload=-0.05 -D board_t=9
+expect_empty "parts and ghosts clear (board_flip)"   check_fit -D preload=-0.05 -D board_flip=true
+expect_empty "parts and ghosts clear (tilt 55)"      check_fit -D preload=-0.05 -D tilt=55
+expect_empty "parts and ghosts clear (tilt 75)"      check_fit -D preload=-0.05 -D tilt=75
+expect_solid "control: nudge=0 lets touching faces overlap" check_fit -D preload=-0.05 -D nudge=0
+expect_manifold "bezel"                 bezel --max 40 55.7 8.3
+expect_manifold "bezel (tilt 55)"       bezel --max 40 57.5 8.3 -D tilt=55
+expect_manifold "bezel (tilt 75)"       bezel --max 40 55.7 8.3 -D tilt=75
+expect_manifold "bezel (board_flip)"    bezel --max 40 55.7 8.3 -D board_flip=true
+expect_manifold "bezel (clr 0.5)"       bezel --max 40 55.7 8.5 -D clr=0.5
+expect_manifold "bezel (board 9 mm)"    bezel --max 40 55.7 10.3 -D board_t=9
+expect_solid "assembly renders" assembly
+expect_solid "section renders"  section
 fi
 
 exit $fail
