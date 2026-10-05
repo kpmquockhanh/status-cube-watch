@@ -61,7 +61,8 @@ void settingsLoad() {
   g_dev = deviceClamp(DeviceSettings{loadU8(p, "bl", DEVICE_DEFAULTS.backlight),
                                      loadU8(p, "sl", DEVICE_DEFAULTS.sleepMin),
                                      loadU8(p, "rt", DEVICE_DEFAULTS.rotateSec),
-                                     loadU8(p, "pi", DEVICE_DEFAULTS.pollSec)});
+                                     loadU8(p, "pi", DEVICE_DEFAULTS.pollSec),
+                                     loadU8(p, "sd", DEVICE_DEFAULTS.sound)});
   p.end();
 }
 
@@ -113,6 +114,7 @@ bool deviceSettingsSave(const DeviceSettings &s) {
   p.putUChar("sl", g_dev.sleepMin);
   p.putUChar("rt", g_dev.rotateSec);
   p.putUChar("pi", g_dev.pollSec);
+  p.putUChar("sd", g_dev.sound);
   p.end();
   return true;
 }

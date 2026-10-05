@@ -3,7 +3,7 @@
 SettingsFake g_fake;
 
 namespace {
-constexpr DeviceSettings DEV0 = {200, 15, 0, 5};
+constexpr DeviceSettings DEV0 = {200, 15, 0, 5, 2};
 constexpr PomoSettings POMO0 = {25, 5, 15, 4};
 Settings g_net;
 DeviceSettings g_dev = DEV0;

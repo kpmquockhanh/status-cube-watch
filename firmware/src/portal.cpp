@@ -72,6 +72,7 @@ std::string formPage(const Settings &cur, const std::string &error) {
   h += numField("Auto-advance cards (seconds)", "rt", d.rotateSec, 0, DEV_MAX_ROTATE_SEC, "0 = off");
   h += numField("WiFi refresh (seconds)", "pi", d.pollSec, DEV_MIN_POLL_SEC, DEV_MAX_POLL_SEC,
                 "How often the cube polls the bridge over WiFi.");
+  h += numField("Sound", "sd", d.sound, 0, DEV_MAX_SOUND, "0 = off, 1 = low, 2 = medium, 3 = high");
   h += "<h2>Pomodoro</h2>";
   const PomoSettings &ps = pomoSettings();
   h += numField("Focus (minutes)", "pf", ps.focusMin, POMO_MIN_MINUTES, POMO_MAX_MINUTES, "");
@@ -142,7 +143,7 @@ void handleSave() {
 
   const DeviceSettings &dc = deviceSettings();
   const PomoSettings &pc = pomoSettings();
-  int bl, sl, rt, pi, pf, pshort, pl, pn;
+  int bl, sl, rt, pi, sd, pf, pshort, pl, pn;
   if (!portalParseInt(server.arg("bl").c_str(), DEV_MIN_BACKLIGHT, DEV_MAX_BACKLIGHT, dc.backlight, bl))
     return sendForm(400, "Brightness must be a number from 10 to 255.");
   if (!portalParseInt(server.arg("sl").c_str(), 0, DEV_MAX_SLEEP_MIN, dc.sleepMin, sl))
@@ -151,6 +152,8 @@ void handleSave() {
     return sendForm(400, "Auto-advance must be 0 to 255 seconds.");
   if (!portalParseInt(server.arg("pi").c_str(), DEV_MIN_POLL_SEC, DEV_MAX_POLL_SEC, dc.pollSec, pi))
     return sendForm(400, "WiFi refresh must be 2 to 60 seconds.");
+  if (!portalParseInt(server.arg("sd").c_str(), 0, DEV_MAX_SOUND, dc.sound, sd))
+    return sendForm(400, "Sound must be 0 (off) to 3 (high).");
   if (!portalParseInt(server.arg("pf").c_str(), POMO_MIN_MINUTES, POMO_MAX_MINUTES, pc.focusMin, pf) ||
       !portalParseInt(server.arg("ps").c_str(), POMO_MIN_MINUTES, POMO_MAX_MINUTES, pc.shortMin, pshort) ||
       !portalParseInt(server.arg("pl").c_str(), POMO_MIN_MINUTES, POMO_MAX_MINUTES, pc.longMin, pl))
@@ -164,7 +167,7 @@ void handleSave() {
   strlcpy(next.bridge, bridge.c_str(), sizeof(next.bridge));
   strlcpy(next.otaPass, ota.c_str(), sizeof(next.otaPass));
   if (!settingsSave(next) ||
-      !deviceSettingsSave(DeviceSettings{(uint8_t)bl, (uint8_t)sl, (uint8_t)rt, (uint8_t)pi}) ||
+      !deviceSettingsSave(DeviceSettings{(uint8_t)bl, (uint8_t)sl, (uint8_t)rt, (uint8_t)pi, (uint8_t)sd}) ||
       !pomoSettingsSave(PomoSettings{(uint8_t)pf, (uint8_t)pshort, (uint8_t)pl, (uint8_t)pn}))
     return sendForm(500, "Could not write the settings to flash.");
 
