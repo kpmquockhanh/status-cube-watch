@@ -250,7 +250,16 @@ After the first USB flash the cube is reachable as `claude-cube.local`. In `firm
 
 ### Pomodoro card
 
-The last card in the deck is a Pomodoro timer that runs on the cube itself (so it works with the bridge down). **Double-tap** the screen to start, pause or resume (it acts a third of a second after the second tap, once it is clear no third is coming); **triple-tap** to reset. It runs 25 min focus, 5 min break, and a 15 min break after four focus sessions, each phase started by you. When a phase ends the cube jumps to this card and pulses the ring and backlight for about two seconds; the next phase waits for your double tap. To change the lengths without reflashing, **swipe up** on the Pomodoro card while the timer is idle. A settings screen opens with a `-` and `+` for FOCUS (steps of 5 min), SHORT BREAK (1 min), LONG BREAK (5 min) and SESSIONS (1). RESET returns to the defaults; DONE (or a swipe down) saves them, and they survive power cycles. A running or paused phase is never resized: new lengths apply from the next one you start. Lengths changed from the Mac (**Cube settings…**) work the same way, and arrive even mid-set. The defaults are `POMO_FOCUS_MIN`, `POMO_BREAK_MIN`, `POMO_LONG_MIN` and `POMO_SESSIONS` in `config.h`.
+The last card in the deck is a Pomodoro timer that runs on the cube itself (so it works with the bridge down). **Double-tap** the screen to start, pause or resume (it acts a third of a second after the second tap, once it is clear no third is coming); **triple-tap** to reset. It runs 25 min focus, 5 min break, and a 15 min break after four focus sessions, each phase started by you. When a phase ends the cube jumps to this card and pulses the ring and backlight for about two seconds and plays a short tune (rising for a break, ending high for back to work); the next phase waits for your double tap. To change the lengths without reflashing, **swipe up** on the Pomodoro card while the timer is idle. A settings screen opens with a `-` and `+` for FOCUS (steps of 5 min), SHORT BREAK (1 min), LONG BREAK (5 min) and SESSIONS (1). RESET returns to the defaults; DONE (or a swipe down) saves them, and they survive power cycles. A running or paused phase is never resized: new lengths apply from the next one you start. Lengths changed from the Mac (**Cube settings…**) work the same way, and arrive even mid-set. The defaults are `POMO_FOCUS_MIN`, `POMO_BREAK_MIN`, `POMO_LONG_MIN` and `POMO_SESSIONS` in `config.h`.
+
+### Sound
+
+The cube's buzzer plays a short tune when a Pomodoro phase ends. Its level is OFF, LOW, MED (the default) or HIGH, and you can set it in three places:
+- **On the cube:** swipe down on any card and use the SOUND row. A tap on its label switches it off or back on, and each change plays a beep at the new level.
+- **From the Mac:** **Cube settings…** > Sound.
+- **In the setup portal:** Sound, from 0 to 3.
+
+The default is `BUZZER_LEVEL` in `config.h`. SOUND took the place of WiFi refresh in the on-device panel. WiFi refresh is still in the portal and on the Mac.
 
 ## Layout
 

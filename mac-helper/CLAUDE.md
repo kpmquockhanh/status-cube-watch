@@ -56,7 +56,7 @@ Everything runs on the main queue. `CBCentralManager` is created with `queue: .m
 ## Keeping the two sides in step
 
 - `Protocol.swift` mirrors `firmware/src/ble_frame.h` and `docs/ble-protocol.md`: UUIDs, header size, 16 chunks, 2048-byte payload limit, and Control opcodes `01` to `04`. `FrameTests` reads `firmware/sim/fixtures/ble-frames.txt` through a path built from `#filePath` (four levels up), so that fixture must stay where it is. A wire change updates the fixture, the firmware, the Swift code and the doc together, and both `make test` (in `firmware/sim/`) and `swift test` must pass.
-- `CubeSettings` mirrors the keys and ranges in `firmware/src/settings_json.cpp` (`bl sl rt pi pf ps pl pn ssid bridge pass otapass`). A read returns only booleans for the passwords (`wifiPass`, `otaPass`).
+- `CubeSettings` mirrors the keys and ranges in `firmware/src/settings_json.cpp` (`bl sl rt pi sd pf ps pl pn ssid bridge pass otapass`). A read returns only booleans for the passwords (`wifiPass`, `otaPass`). `sound` (`sd`) is `Int?`: nil means the cube's read had none (fw_rev < 4), so `SettingsWindow` hides its row and `patch` never sends it.
   - `patch` sends only the keys that changed, so a stale window can't overwrite edits made on the cube.
   - `rebase` keeps fields the user is editing when a fresh read arrives.
   - Network keys make the cube reply `okReboot`, and the app does not read back after that reply.
