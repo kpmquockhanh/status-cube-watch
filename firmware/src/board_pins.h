@@ -40,3 +40,4 @@
 
 // --- Misc on-board peripherals -----------------------------------------
 #define PIN_BAT_ADC   1   // battery voltage divider
+#define PIN_BUZZER   42   // passive buzzer, PWM (buzzer.cpp); an older board revision used 33

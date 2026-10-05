@@ -7,6 +7,7 @@
 #include <Arduino.h>
 #include "battery.h"
 #include "ble.h"
+#include "buzzer.h"
 #include "config.h"
 #include "cpu_policy.h"
 #include "deck_util.h"
@@ -168,6 +169,7 @@ void handleBleSettings() {
     editSettings = pomoSettings();
   }
   if (screenOn) lcd.setBrightness(deviceSettings().backlight);
+  buzzerSetLevel(deviceSettings().sound);
   lastRotate = millis();
   dirty = true;
   if (r == SettingsResult::OkReboot) {
@@ -191,11 +193,12 @@ void openDeviceEditor() {
   dirty = true;
 }
 
-// DONE and swipe-up both land here. Brightness was previewed live while
-// editing; the rest takes effect now.
+// DONE and swipe-up both land here. Brightness and sound were previewed live
+// while editing; the rest takes effect now.
 void closeDeviceEditor() {
   if (editDevice != deviceSettings()) deviceSettingsSave(editDevice);  // spare the flash
   lcd.setBrightness(deviceSettings().backlight);
+  buzzerSetLevel(deviceSettings().sound);
   editing = false;
   editingDevice = false;
   uiDeviceSlide(false, editDevice);
@@ -212,8 +215,13 @@ void deviceEditorGesture(Gesture g) {
     if (hit.action == EditAction::Done) {
       closeDeviceEditor();
     } else if (hit.action != EditAction::None) {
+      const uint8_t soundBefore = editDevice.sound;
       devEditorApply(editDevice, hit, deviceDefaults(), deviceSettings());
       lcd.setBrightness(editDevice.backlight);
+      if (editDevice.sound != soundBefore) {  // previewed live, like brightness
+        buzzerSetLevel(editDevice.sound);
+        buzzerPlay(Sound::Preview);  // silent when it was just switched off
+      }
       dirty = true;
     }
   }
@@ -329,10 +337,13 @@ uint32_t sleepMs() { return (uint32_t)deviceSettings().sleepMin * 60000u; }
 }  // namespace
 
 void setup() {
+  const bool buzzOk = buzzerBegin();  // first: until then the buzzer pin floats (buzzer.h)
   Serial.begin(115200);
   delay(200);
   Serial.println("\n[boot] claude-status-cube");
+  if (!buzzOk) Serial.println("[buzz] ledc setup failed");
   settingsLoad();
+  buzzerSetLevel(deviceSettings().sound);
   pomo.setConfig(pomoConfigFrom(pomoSettings(), POMO_TIME_DIV));
 
   lcd.init();
@@ -384,6 +395,7 @@ void loop() {
   if (pomo.takeAlert()) {
     const PomoView ended = pomo.view();  // DONE: phase = the one that just ended
     bleNotifyPomodoro(ended.phase, ended.next);
+    buzzerPlay(ended.phase == PHASE_FOCUS ? Sound::FocusDone : Sound::BreakDone);
     // Phase over: pull the deck to the Pomodoro card wherever you were. A swipe
     // leaves it again; the DONE state waits for a double tap.
     cardIndex = uiPomodoroIndex(payload);
@@ -392,6 +404,7 @@ void loop() {
     uiAlertStart();
     dirty = true;
   }
+  buzzerUpdate(now);  // every pass, before the screen-off return below
   if (pomoConfigPending && pomo.setConfig(pomoConfigFrom(pomoSettings(), POMO_TIME_DIV))) {
     pomoConfigPending = false;
     dirty = true;
