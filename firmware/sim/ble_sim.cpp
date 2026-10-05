@@ -12,7 +12,6 @@
 #include <cstring>
 
 #include "../src/ble.h"
-#include "../src/net.h"
 
 namespace {
 
@@ -35,6 +34,8 @@ uint32_t g_lastFetch = 0;
 
 }  // namespace
 
+bool simFetch(Payload &out, char *err, size_t errLen);  // net_sim.cpp
+
 void bleBegin() { Serial.printf("[ble] simulator mode %d (CUBE_BLE=live|stale|pair|none)\n", (int)mode()); }
 
 BleState bleState() {
@@ -54,7 +55,8 @@ bool bleTake(Payload &out) {
   const uint32_t now = millis();
   if (g_lastFetch && now - g_lastFetch < 5000) return false;
   g_lastFetch = now ? now : 1;
-  if (!netFetch(out)) return false;
+  char err[64];
+  if (!simFetch(out, err, sizeof(err))) return false;
   g_lastGood = g_lastFetch;
   return true;
 }

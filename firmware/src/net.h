@@ -11,9 +11,19 @@ void netStart();
 // WiFi.begin() with the stored network, whatever mode the radio is in (the
 // setup portal joins from AP+STA). netStart() is this in station mode.
 void netJoinSaved();
-// Turns the radio off (BLE is carrying the data).
+// Turns the radio off (BLE is carrying the data). A fetch still running is
+// given a few seconds to finish first; its result is dropped.
 void netStop();
-// Fetches and parses the bridge payload. Leaves `out` untouched on failure so
-// the display keeps showing the last good data instead of blanking.
-bool netFetch(Payload &out);
+
+enum class NetFetch : uint8_t { None, Ok, Failed };
+
+// Starts fetching the bridge payload and returns at once: the request runs on
+// a task of its own, so a slow or dead bridge (or a DNS lookup that hangs)
+// never holds up the loop. Ignored while a fetch is still running.
+void netRequest();
+// The result of the last netRequest(), once. None while it is still running
+// or when none was made. Ok: the parsed payload is copied to `out`. Failed:
+// `out` is untouched, so the display keeps the last good data instead of
+// blanking, and netLastError() says why. Call it every loop pass.
+NetFetch netTake(Payload &out);
 const char *netLastError();

@@ -40,6 +40,7 @@ Tick an item only when you observed it. Logs: `./install.sh logs` (Mac, from `ma
 - [ ] OTA with `WIFI_ALWAYS_ON 1` works. OTA runs under WiFi modem sleep (BLE forbids power-save NONE), so it may be slightly less reliable: retry espota if it times out. On the first hardware boot, watch serial for the coexistence abort message ("Should enable WiFi modem sleep when both WiFi and Bluetooth are enabled"); it must not appear. With 0 and BLE live, confirm whether OTA is unreachable (WiFi is off) and note it in the README.
 - [ ] Free heap with BLE and WiFi both up: log `ESP.getFreeHeap()` once from `loop()` temporarily, note the number, remove the line.
 - [ ] Idle draw, BLE-only versus WiFi-only (USB meter readings, if available).
+- [ ] Connection parameters: after `[ble] encrypted`, serial shows `[ble] conn params: interval 30 ms` or `45 ms`, `latency 6, timeout 4000 ms` (`BLE_IDLE_PARAMS` in `ble_conn.h`). If nothing follows, macOS kept the interval printed on the `[ble] connect` line. Note which one, and compare the idle draw against a build without the `updateConnParams` call. Settings writes and "Send now" from the menu still arrive within half a second, and a Mac reboot or walking out of range still drops the link within about 4 s.
 
 ## macOS app environment
 

@@ -6,9 +6,11 @@
 #include <sys/socket.h>
 #include <unistd.h>
 
+#include <atomic>
 #include <cctype>
 #include <cstdlib>
 #include <string>
+#include <thread>
 
 #include <ArduinoJson.h>
 
@@ -22,7 +24,22 @@ char g_error[64] = "";
 // last fetch worked: a bridge that is down shows as an ageing counter.
 bool g_online = false;
 
-void fail(const char *msg) { strlcpy(g_error, msg, sizeof(g_error)); }
+// netRequest() fetches on a thread, as the board does on a task, so the window
+// keeps drawing while a dead bridge times out. g_stage hands the result over:
+// the thread writes it only while BUSY, the loop reads it only once DONE.
+enum Stage { IDLE, BUSY, DONE };
+std::atomic<int> g_stage{IDLE};
+Payload g_fetched;
+bool g_fetchOk = false;
+char g_fetchError[64] = "";
+
+// Each caller brings its own error buffer: the fetch thread and ble_sim.cpp
+// (on the loop) may both be fetching.
+struct Err {
+  char *buf;
+  size_t len;
+  void set(const char *msg) const { strlcpy(buf, msg, len); }
+};
 
 struct Url {
   std::string host, port, path;
@@ -47,13 +64,13 @@ std::string bridgeUrl() {
   return env && *env ? env : BRIDGE_URL;
 }
 
-bool httpGet(const Url &u, std::string &body) {
+bool httpGet(const Url &u, std::string &body, const Err &err) {
   addrinfo hints{};
   hints.ai_family = AF_UNSPEC;
   hints.ai_socktype = SOCK_STREAM;
   addrinfo *res = nullptr;
   if (getaddrinfo(u.host.c_str(), u.port.c_str(), &hints, &res) != 0 || !res) {
-    fail("dns failed");
+    err.set("dns failed");
     return false;
   }
 
@@ -70,7 +87,7 @@ bool httpGet(const Url &u, std::string &body) {
   }
   freeaddrinfo(res);
   if (fd < 0) {
-    fail("connect refused");
+    err.set("connect refused");
     return false;
   }
 
@@ -78,7 +95,7 @@ bool httpGet(const Url &u, std::string &body) {
                           "\r\nConnection: close\r\n\r\n";
   if (send(fd, req.data(), req.size(), 0) < 0) {
     close(fd);
-    fail("send failed");
+    err.set("send failed");
     return false;
   }
 
@@ -90,12 +107,12 @@ bool httpGet(const Url &u, std::string &body) {
 
   const size_t sep = raw.find("\r\n\r\n");
   if (sep == std::string::npos) {
-    fail("truncated response");
+    err.set("truncated response");
     return false;
   }
   const int code = raw.size() > 12 ? atoi(raw.c_str() + 9) : 0;
   if (code != 200) {
-    snprintf(g_error, sizeof(g_error), "http %d", code);
+    snprintf(err.buf, err.len, "http %d", code);
     return false;
   }
 
@@ -115,7 +132,7 @@ bool httpGet(const Url &u, std::string &body) {
       const size_t len = strtoul(body.substr(pos, eol - pos).c_str(), nullptr, 16);
       if (len == 0) break;                      // terminating chunk
       if (eol + 2 + len > body.size()) {
-        fail("truncated chunk");
+        err.set("truncated chunk");
         return false;
       }
       decoded.append(body, eol + 2, len);
@@ -142,37 +159,64 @@ void netStart() {
 void netStop() {
   Serial.println("[net] simulator wifi off");
   g_online = false;
+  int done = DONE;
+  g_stage.compare_exchange_strong(done, IDLE);  // nobody wants that result now
 }
 
 bool netOnline() { return g_online; }
 
 const char *netLastError() { return g_error; }
 
-bool netFetch(Payload &out) {
+// The whole fetch, blocking: the netRequest() thread runs it, and ble_sim.cpp
+// calls it directly for the payloads it pretends arrived over BLE.
+bool simFetch(Payload &out, char *errBuf, size_t errLen) {
+  const Err err{errBuf, errLen};
   Url u;
   if (!parseUrl(bridgeUrl(), u)) {
-    fail("bad BRIDGE_URL");
+    err.set("bad BRIDGE_URL");
     return false;
   }
 
   std::string body;
-  if (!httpGet(u, body)) {
+  if (!httpGet(u, body, err)) {
     return false;
   }
 
   JsonDocument doc;
-  const DeserializationError err = deserializeJson(doc, body);
-  if (err) {
-    snprintf(g_error, sizeof(g_error), "json: %s", err.c_str());
+  const DeserializationError jerr = deserializeJson(doc, body);
+  if (jerr) {
+    snprintf(errBuf, errLen, "json: %s", jerr.c_str());
     return false;
   }
 
   Payload p{};
-  if (!payloadFromJson(doc, p, g_error, sizeof(g_error))) {
+  if (!payloadFromJson(doc, p, errBuf, errLen)) {
     return false;
   }
 
-  g_error[0] = '\0';
+  errBuf[0] = '\0';
   out = p;
   return true;
+}
+
+void netRequest() {
+  if (g_stage.load() != IDLE) return;
+  g_stage.store(BUSY);
+  std::thread([] {
+    g_fetchOk = simFetch(g_fetched, g_fetchError, sizeof(g_fetchError));
+    g_stage.store(DONE);  // publishes the writes above to the loop
+  }).detach();
+}
+
+NetFetch netTake(Payload &out) {
+  if (g_stage.load() != DONE) return NetFetch::None;
+  const bool ok = g_fetchOk;
+  if (ok) {
+    out = g_fetched;
+    g_error[0] = '\0';
+  } else {
+    strlcpy(g_error, g_fetchError, sizeof(g_error));
+  }
+  g_stage.store(IDLE);
+  return ok ? NetFetch::Ok : NetFetch::Failed;
 }

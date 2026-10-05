@@ -8,6 +8,7 @@
 #include "battery.h"
 #include "ble.h"
 #include "config.h"
+#include "cpu_policy.h"
 #include "deck_util.h"
 #include "display.h"
 #include "gesture.h"
@@ -22,6 +23,7 @@
 #include "pomo_settings.h"
 #include "pomodoro.h"
 #include "portal.h"
+#include "readings_key.h"
 #include "settings.h"
 #include "settings_json.h"
 #include "touch.h"
@@ -44,8 +46,11 @@
 
 namespace {
 
-constexpr uint32_t CPU_MHZ_AWAKE = 240;  // matches board_build.f_cpu
-constexpr uint32_t CPU_MHZ_ASLEEP = 80;  // lowest clock WiFi/BLE still run at
+// While a ring moves a frame is drawn on every pass, and the pass is held to
+// this so the loop does not spin: ~60 fps, which is what a whole-frame push
+// over SPI allowed before only changed rows were sent. The animations are
+// timed, so this sets how smooth they look, not how long they take.
+constexpr uint32_t FRAME_MS = 16;
 
 Display lcd;
 Touch touch;
@@ -60,6 +65,7 @@ uint8_t cardIndex = 0;
 uint32_t lastPoll = 0;
 uint32_t lastRotate = 0;
 uint32_t lastGood = 0;  // millis() of the last successful fetch
+uint32_t lastReadings = 0;  // readingsKey() of the last payload: only a change keeps the screen awake
 uint32_t lastDraw = 0;
 bool dirty = true;
 
@@ -68,6 +74,8 @@ bool wifiUp = false;           // netStart() called and not yet netStop()
 bool otaUp = false;            // otaBegin() called and not yet otaEnd()
 IdleSleep idle;
 bool screenOn = true;
+CpuPolicy cpuPolicy;  // fast clock for touch and animation, slow otherwise (cpu_policy.h)
+uint32_t cpuMhz = CPU_MHZ_FAST;  // the clock last set; the board boots at board_build.f_cpu
 bool swallowTouch = false;  // the touch that woke the screen is ignored until the finger lifts
 bool pairWaitDismissed = false;  // a touch dismisses the first-boot "waiting for a Mac" screen
 
@@ -308,6 +316,12 @@ void applyRotation() {
   Serial.printf("[imu] rotation -> %d\n", (int)appliedRot);
 }
 
+void setCpu(uint32_t mhz) {
+  if (mhz == cpuMhz) return;
+  setCpuFrequencyMhz(mhz);
+  cpuMhz = mhz;
+}
+
 uint32_t pollMs() { return (uint32_t)deviceSettings().pollSec * 1000u; }
 uint32_t rotateMs() { return (uint32_t)deviceSettings().rotateSec * 1000u; }
 uint32_t sleepMs() { return (uint32_t)deviceSettings().sleepMin * 60000u; }
@@ -355,6 +369,7 @@ void setup() {
 
   idle.begin(millis());
   policy.begin(millis());
+  cpuPolicy.begin(millis());
   // First poll on the first loop pass rather than a full interval from now.
   lastPoll = millis() - pollMs();
   lastRotate = millis();
@@ -411,16 +426,21 @@ void loop() {
   handleBleSettings();
   if (wifiUp && now - lastPoll >= pollMs()) {
     lastPoll = now;
-    if (netFetch(payload)) {
-      gotData = true;
-    } else {
-      Serial.printf("[net] fetch failed: %s\n", netLastError());
-    }
-    dirty = true;
+    netRequest();  // runs on its own task; netTake() hands over the result on a later pass
   }
+  const NetFetch fetched = netTake(payload);
+  if (fetched == NetFetch::Ok) gotData = true;
+  if (fetched == NetFetch::Failed) Serial.printf("[net] fetch failed: %s\n", netLastError());
+  if (fetched != NetFetch::None) dirty = true;
   if (gotData) {
     lastGood = now;
-    idle.data(now);
+    // The Mac resends the same payload every 5 s, so only new readings count
+    // as activity for screen sleep (readings_key.h).
+    const uint32_t readings = readingsKey(payload);
+    if (readings != lastReadings) {
+      lastReadings = readings;
+      idle.data(now);
+    }
     // The deck may have changed size: keep the Pomodoro card under the user.
     cardIndex = deckKeepIndex(wasOnPomodoro, cardIndex, uiDeckSize(payload));
     dirty = true;
@@ -454,14 +474,15 @@ void loop() {
   if (wantOn != screenOn) {
     screenOn = wantOn;
     if (screenOn) {
-      setCpuFrequencyMhz(CPU_MHZ_AWAKE);
+      setCpu(CPU_MHZ_FAST);
       lcd.wakeup();
       lcd.setBrightness(deviceSettings().backlight);
+      uiInvalidate();  // the first frame after sleep goes out whole
       dirty = true;
     } else {
       lcd.setBrightness(0);
       lcd.sleep();
-      setCpuFrequencyMhz(CPU_MHZ_ASLEEP);
+      setCpu(CPU_MHZ_SLOW);
     }
   }
   if (!screenOn) {
@@ -469,6 +490,7 @@ void loop() {
     return;
   }
   applyRotation();
+  setCpu(cpuPolicy.update(now, touchDown || uiAnimating()));
 
   // Redraw on change, every frame while a ring is still moving, and once a
   // second otherwise so the freshness counter ticks.
@@ -493,7 +515,12 @@ void loop() {
     dirty = false;
   }
 
-  // Touch sampling cadence; keeps the loop off a busy spin. Skipped while a
-  // ring is moving, where the frame time already paces the loop.
-  if (!uiAnimating()) delay(15);
+  // Touch sampling cadence; keeps the loop off a busy spin. While a ring is
+  // moving the pass is paced to FRAME_MS instead, counting the frame just drawn.
+  if (uiAnimating()) {
+    const uint32_t spent = millis() - now;
+    if (spent < FRAME_MS) delay(FRAME_MS - spent);
+  } else {
+    delay(15);
+  }
 }
