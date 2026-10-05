@@ -14,19 +14,19 @@ struct Presets {
 constexpr uint8_t BRIGHT[] = {10, 40, 80, 120, 160, 200, 255};
 constexpr uint8_t SLEEP_MIN[] = {1, 5, 10, 15, 30, 60, 120, 240};
 constexpr uint8_t ROTATE_SEC[] = {5, 10, 15, 30, 60, 120};
-constexpr uint8_t POLL_SEC[] = {2, 5, 10, 15, 30, 60};
+constexpr uint8_t SOUND_LEVEL[] = {1, 2, 3};  // LOW, MED, HIGH
 
 #define PRESETS(a, on) Presets{a, (uint8_t)(sizeof(a) / sizeof(a[0])), on}
 const Presets ROWS[DEV_EDIT_ROWS] = {PRESETS(BRIGHT, 0), PRESETS(SLEEP_MIN, 15), PRESETS(ROTATE_SEC, 10),
-                                     PRESETS(POLL_SEC, 0)};
-const char *const LABELS[DEV_EDIT_ROWS] = {"BRIGHTNESS", "SLEEP", "ADVANCE", "REFRESH"};
+                                     PRESETS(SOUND_LEVEL, 2)};
+const char *const LABELS[DEV_EDIT_ROWS] = {"BRIGHTNESS", "SLEEP", "ADVANCE", "SOUND"};
 
 uint8_t *field(DeviceSettings &s, int row) {
   switch (row) {
     case 0: return &s.backlight;
     case 1: return &s.sleepMin;
     case 2: return &s.rotateSec;
-    default: return &s.pollSec;
+    default: return &s.sound;
   }
 }
 
@@ -63,7 +63,7 @@ void devEditorValue(int row, const DeviceSettings &s, char *buf, size_t cap) {
     case 0: snprintf(buf, cap, "%u%%", (unsigned)((s.backlight * 100u + 127u) / 255u)); break;
     case 1: snprintf(buf, cap, "%u min", (unsigned)s.sleepMin); break;
     case 2: snprintf(buf, cap, "%u s", (unsigned)s.rotateSec); break;
-    case 3: snprintf(buf, cap, "%u s", (unsigned)s.pollSec); break;
+    case 3: snprintf(buf, cap, "%s", devSoundName(s.sound)); break;
     default: if (cap) buf[0] = '\0';
   }
 }
@@ -91,9 +91,14 @@ void devEditorApply(DeviceSettings &s, EditHit hit, const DeviceSettings &defaul
       else v = ROWS[hit.row].on;
       break;
     }
-    case EditAction::Reset:
+    case EditAction::Reset: {
+      // WiFi refresh has no row here (the portal and the Mac edit it), so
+      // RESET must not change it unseen.
+      const uint8_t poll = s.pollSec;
       s = defaults;
+      s.pollSec = poll;
       break;
+    }
     default:
       break;
   }
