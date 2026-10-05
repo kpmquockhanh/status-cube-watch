@@ -21,13 +21,21 @@
 #define SIM_SCALE 2
 #endif
 
+#ifdef SIM_BENCH
+// `make bench`: a windowless panel that counts what each frame sends (sim/).
+#include "bench_panel.h"
+using SimPanel = BenchPanel;
+#else
+using SimPanel = lgfx::Panel_sdl;
+#endif
+
 class Display;
 // The simulator's touch shim reads gestures back through this. Nothing
 // outside the LGFX_SDL branch sees it, so the firmware build is unaffected.
 extern Display *g_simDisplay;
 
 class Display : public lgfx::LGFX_Device {
-  lgfx::Panel_sdl _panel;
+  SimPanel _panel;
 
  public:
   Display() {
@@ -40,10 +48,17 @@ class Display : public lgfx::LGFX_Device {
     setPanel(&_panel);
     g_simDisplay = this;
   }
+#ifdef SIM_BENCH
+  // The bench charges the backlight and panel sleep too.
+  void setBrightness(uint8_t b) { benchBacklight(b); }
+  void sleep() { benchPanelSleep(true); }
+  void wakeup() { benchPanelSleep(false); }
+#else
   // No backlight on a desktop window; accept the call and ignore it.
   void setBrightness(uint8_t) {}
   void sleep() {}
   void wakeup() {}
+#endif
 };
 
 #else  // ---- real hardware ------------------------------------------------

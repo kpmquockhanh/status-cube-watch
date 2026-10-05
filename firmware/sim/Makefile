@@ -81,6 +81,32 @@ shot: $(SHOT)
 	  { echo "no payload from $(SHOT_URL)"; exit 1; }
 	./$(SHOT) $(SHOT_OUT) build/payload.json
 
+# Performance and energy bench (bench.cpp): the real setup()/loop() on a
+# virtual clock against scripted touch/BLE/WiFi, with a windowless panel that
+# counts every pixel sent. Built apart in build/bench/ because the flags change
+# Arduino.h and display.h.
+BENCH      := build/cube-bench
+BENCH_SRCS := ../src/main.cpp ../src/ui.cpp ../src/payload.cpp ../src/gesture.cpp ../src/pomodoro.cpp \
+              ../src/pomo_editor.cpp ../src/dev_editor.cpp ../src/settings_json.cpp \
+              settings_sim.cpp portal_sim.cpp ota_sim.cpp bench.cpp
+BENCH_OBJ  := $(addprefix build/bench/,$(notdir $(BENCH_SRCS:.cpp=.o)))
+BENCH_RUNS ?= desk linked pomodoro browse editor sleep
+
+build/bench/%.o: %.cpp
+	@mkdir -p $(dir $@)
+	$(CXX) $(CXXFLAGS) -DSIM_VIRTUAL_CLOCK -DSIM_BENCH -MMD -MP -c $< -o $@
+
+$(BENCH): $(BENCH_OBJ) $(filter build/lgfx/%,$(OBJS))
+	@mkdir -p $(dir $@)
+	$(CXX) $^ $(LDFLAGS) -o $@
+	@echo "built $@"
+
+bench: $(BENCH)
+	@./$(BENCH) header
+	@for s in $(BENCH_RUNS); do ./$(BENCH) $$s || exit 1; done
+	@echo
+	@./$(BENCH) render
+
 # Host-side unit tests for the logic that has no hardware in it. A plain
 # compiler: no SDL, LovyanGFX or Arduino. Each test links only the sources it
 # is given an extra rule for below.
@@ -88,7 +114,8 @@ TESTS := build/portal_util_test build/pomodoro_test build/gesture_test build/dec
          build/pomo_settings_test build/pomo_editor_test build/battery_util_test \
          build/ble_frame_test build/transport_policy_test build/idle_sleep_test build/device_settings_test \
          build/settings_json_test build/dev_editor_test build/orientation_test build/touch_map_test \
-         build/ble_auth_test build/age_label_test
+         build/ble_auth_test build/age_label_test build/cpu_policy_test build/readings_key_test \
+         build/ble_conn_test build/touch_gate_test
 
 build/pomodoro_test: ../src/pomodoro.cpp
 build/gesture_test: ../src/gesture.cpp
@@ -113,6 +140,6 @@ test: $(TESTS)
 clean:
 	rm -rf build
 
--include $(wildcard build/*.d)
+-include $(wildcard build/*.d build/bench/*.d)
 
-.PHONY: all run shot test clean
+.PHONY: all run shot test bench clean

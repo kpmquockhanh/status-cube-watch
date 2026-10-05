@@ -1,11 +1,13 @@
 #pragma once
 // When the screen goes to sleep. Pure (no Arduino) so it is host-tested.
-// The screen sleeps after `timeoutMs` with no touch and no fresh data; data
-// arriving while awake counts as activity (a live link keeps it on), but data
-// never wakes a sleeping screen. A touch wakes it and is reported as consumed
-// so it does not also change the card. `blocked` (Pomodoro running, alert,
-// editor, pairing code...) forces the screen on and restarts the timer.
-// timeoutMs == 0 disables sleeping.
+// The screen sleeps after `timeoutMs` with no touch and no new readings. The
+// caller reports data() only when what the cards read changed (readings_key.h),
+// not for every payload, or the Mac's 5 s resend would keep it on forever. New
+// readings while awake count as activity, but they never wake a sleeping
+// screen. A touch wakes it and is reported as consumed so it does not also
+// change the card. `blocked` (Pomodoro running, alert, editor, pairing
+// code...) forces the screen on and restarts the timer. timeoutMs == 0
+// disables sleeping.
 
 #include <stdint.h>
 

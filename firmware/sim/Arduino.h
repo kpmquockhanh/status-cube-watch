@@ -14,6 +14,20 @@
 #include <cstring>
 #include <thread>
 
+#ifdef SIM_VIRTUAL_CLOCK
+// `make bench`: time is a counter that sim/bench.cpp advances. A ten-minute
+// scenario runs in about a second, and every run gives the same result. A
+// delay is booked as time the CPU spends idle, at the clock it was set to.
+extern uint64_t g_simUs;
+void simDelayUs(uint64_t us);
+void simSetCpuMhz(uint32_t mhz);
+inline uint32_t millis() { return (uint32_t)(g_simUs / 1000); }
+inline void delay(uint32_t ms) { simDelayUs(ms * 1000ull); }
+inline bool setCpuFrequencyMhz(uint32_t mhz) {
+  simSetCpuMhz(mhz);
+  return true;
+}
+#else
 inline uint32_t millis() {
   using namespace std::chrono;
   static const auto t0 = steady_clock::now();
@@ -21,13 +35,14 @@ inline uint32_t millis() {
 }
 
 inline void delay(uint32_t ms) { std::this_thread::sleep_for(std::chrono::milliseconds(ms)); }
+inline bool setCpuFrequencyMhz(uint32_t) { return true; }  // no-op on the desktop
+#endif
 
 struct EspShim {
   [[noreturn]] void restart() { std::printf("[esp] restart requested (sim exits)\n"); std::exit(0); }
 };
 inline EspShim ESP;
 
-inline bool setCpuFrequencyMhz(uint32_t) { return true; }  // no-op on the desktop
 inline int max(int a, int b) { return a > b ? a : b; }
 inline int min(int a, int b) { return a < b ? a : b; }
 inline int constrain(int v, int lo, int hi) { return v < lo ? lo : (v > hi ? hi : v); }

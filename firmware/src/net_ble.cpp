@@ -5,6 +5,7 @@
 
 #include "ble.h"
 #include "ble_auth.h"
+#include "ble_conn.h"
 #include "ble_frame.h"
 #include "settings_json.h"
 
@@ -65,7 +66,8 @@ struct ServerCb : NimBLEServerCallbacks {
     g_secured = false;
     g_linkUp = true;
     g_state = BleState::Connected;
-    Serial.printf("[ble] connect (bonds %d)\n", g_bondsAtConnect);
+    Serial.printf("[ble] connect (bonds %d, interval %u ms)\n", g_bondsAtConnect,
+                  (unsigned)(info.getConnInterval() * 5 / 4));
   }
 
   void onDisconnect(NimBLEServer *, NimBLEConnInfo &, int reason) override {
@@ -98,12 +100,22 @@ struct ServerCb : NimBLEServerCallbacks {
     if (v == BleAuthVerdict::Accept) {
       g_secured = true;
       Serial.println("[ble] encrypted");
+      // Pairing is done, so from here the link mostly idles (ble_conn.h). The
+      // Mac answers in onConnParamsUpdate, or keeps its own if it declines.
+      const BleConnParams &p = BLE_IDLE_PARAMS;
+      NimBLEDevice::getServer()->updateConnParams(info.getConnHandle(), p.minItvl, p.maxItvl, p.latency, p.timeout);
       return;
     }
     Serial.printf("[ble] link refused (encrypted %d, passkey %d, bonded %d)\n", info.isEncrypted(),
                   info.isAuthenticated(), info.isBonded());
     if (v == BleAuthVerdict::RefuseDropBond) NimBLEDevice::deleteBond(info.getIdAddress());
     NimBLEDevice::getServer()->disconnect(info.getConnHandle());
+  }
+
+  void onConnParamsUpdate(NimBLEConnInfo &info) override {
+    Serial.printf("[ble] conn params: interval %u ms, latency %u, timeout %u ms\n",
+                  (unsigned)(info.getConnInterval() * 5 / 4), (unsigned)info.getConnLatency(),
+                  (unsigned)info.getConnTimeout() * 10);
   }
 };
 

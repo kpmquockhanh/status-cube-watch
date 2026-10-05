@@ -16,12 +16,16 @@ uint8_t uiPomodoroIndex(const Payload &p);  // the last index
 enum class UiLink : uint8_t { None, Ble, Wifi };
 
 // Draws one card plus the shared chrome. Everything is composed into an
-// off-screen sprite and pushed in one go, so the panel never tears.
+// off-screen sprite, then only the rows that differ from the last frame are
+// sent (every screen below works the same way), so the panel never tears.
 void uiRender(Display &lcd, const Payload &p, uint8_t index, bool online, uint32_t ageMs,
               const PomoView &pomo, const BatteryView &bat, UiLink link = UiLink::None);
 // True when the last uiRender left a ring or a colour part-way through its
 // transition, so the caller knows to keep drawing frames.
 bool uiAnimating();
+// Sends the next frame whole, for when the panel may no longer show the last
+// one (it woke from sleep). A rotation change is noticed without this.
+void uiInvalidate();
 // Makes the next uiRender of card `index` sweep its ring in from empty again.
 void uiReplay(uint8_t index);
 // Makes the Pomodoro card sweep its ring in from empty again (as uiReplay does

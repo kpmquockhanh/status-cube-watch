@@ -115,6 +115,64 @@ LovyanGFX *target(Display &lcd) {
   return g_sprite ? static_cast<LovyanGFX *>(&g_canvas) : static_cast<LovyanGFX *>(&lcd);
 }
 
+// --- sending a frame -----------------------------------------------------------
+// Every screen is composed whole in the sprite, but only the rows that differ
+// from what the panel already shows go over SPI. A full frame is 134 KB, which
+// keeps the CPU waiting on the bus for ~13.4 ms, and most frames change only a
+// line or two of text (the age counter, the Pomodoro clock). Each row is reduced
+// to a hash and compared with the hash of the row last sent. A row that changes
+// in a single word always changes its hash. As a backstop against a collision or
+// a glitch on the glass, the whole frame is sent again once a minute.
+constexpr uint32_t FULL_FRAME_MS = 60000;
+uint32_t g_rowHash[LCD_HEIGHT];
+bool g_rowsKnown = false;  // false: what the panel shows is unknown, so send it all
+uint8_t g_rowsRot = 0;     // the rotation those rows were sent under
+uint32_t g_lastFull = 0;
+
+// FNV-1a over 32-bit words: two pixels per step.
+uint32_t rowHash(const uint32_t *w, int n) {
+  uint32_t h = 2166136261u;
+  for (int i = 0; i < n; i++) h = (h ^ w[i]) * 16777619u;
+  return h;
+}
+
+void present(Display &lcd) {
+  if (!g_sprite) return;  // drawn straight to the panel already
+  const uint16_t *buf = (const uint16_t *)g_canvas.getBuffer();
+  const uint32_t now = millis();
+  const bool all = !g_rowsKnown || g_rowsRot != lcd.getRotation() || now - g_lastFull >= FULL_FRAME_MS;
+  if (all) {
+    g_rowsKnown = true;
+    g_rowsRot = lcd.getRotation();
+    g_lastFull = now;
+  }
+  lcd.startWrite();
+  int run = -1;  // first row of the run of changed rows being collected
+  for (int y = 0; y <= LCD_HEIGHT; y++) {
+    bool changed = false;
+    if (y < LCD_HEIGHT) {
+      const uint32_t h = rowHash((const uint32_t *)(buf + y * LCD_WIDTH), LCD_WIDTH / 2);
+      changed = all || h != g_rowHash[y];
+      g_rowHash[y] = h;
+    }
+    if (changed && run < 0) {
+      run = y;
+    } else if (!changed && run >= 0) {
+      // One window per run, sent by the same pushSprite as a whole frame (so
+      // the same DMA choice) clipped to the run. A row is 48 us on the bus and
+      // a window ~5 us, so a run is never stretched over an unchanged row.
+      lcd.setClipRect(0, run, LCD_WIDTH, y - run);
+      g_canvas.pushSprite(&lcd, 0, 0);
+      run = -1;
+    }
+  }
+  lcd.clearClipRect();
+  lcd.endWrite();
+#ifdef SIM_BENCH
+  benchFrameSent(buf);
+#endif
+}
+
 // --- text ----------------------------------------------------------------
 // Anti-aliased VLW fonts (Inter, rasterised by tools/gen_fonts.py). The built-in
 // Adafruit-GFX and Font0 faces are 1-bit and show stair-steps on this panel.
@@ -307,6 +365,10 @@ uint16_t pack565(uint32_t rgb, float scale) {
                                           (uint8_t)((rgb & 0xFF) * scale)));
 }
 
+// The bare track at each coverage, for rings drawn without notches: their
+// `base` cannot come from the table, which has the notches cut out of it.
+uint16_t g_trackNo[256];
+
 // Everything that does not depend on the current percentage or colour --
 // coverage from the radii, end caps and notches -- is worked out once here.
 void buildRingTable(RingTable &t) {
@@ -371,8 +433,7 @@ void drawRing(LovyanGFX *g, const RingTable &ring, float pct, uint32_t rgb, bool
   for (int i = 0; i < ring.n; i++) {
     const RingPx &p = ring.px[i];
     const uint8_t cov = notches ? p.cov : p.covNo;
-    // `base` was cached with the notches cut out; without them it is rebuilt.
-    uint16_t c = notches ? p.base : pack565(RING_TRACK, p.covNo * (1.0f / 255.0f));
+    uint16_t c = notches ? p.base : g_trackNo[p.covNo];
     if (p.d <= past) {
       const float d = p.d * (1.0f / 16.0f);
       const float t = clamp01((fillEnd - d) * pxPerDeg + 0.5f) * (p.fs * (1.0f / 255.0f));
@@ -883,10 +944,13 @@ void uiBegin(Display &) {
   g_sprite = g_canvas.createSprite(LCD_WIDTH, LCD_HEIGHT) != nullptr;
   buildRingTable(g_ringOuter);
   buildRingTable(g_ringInner);
+  for (int i = 0; i < 256; i++) g_trackNo[i] = pack565(RING_TRACK, i * (1.0f / 255.0f));
   Serial.printf("[ui] framebuffer: %s\n", g_sprite ? "sprite (double buffered)" : "direct");
 }
 
 bool uiAnimating() { return g_animating; }
+
+void uiInvalidate() { g_rowsKnown = false; }
 
 void uiReplay(uint8_t index) {
   if (index < MAX_CARDS) {
@@ -972,7 +1036,7 @@ void uiRender(Display &lcd, const Payload &p, uint8_t index, bool online, uint32
     g_animating = true;
   }
 
-  if (g_sprite) g_canvas.pushSprite(&lcd, 0, 0);
+  present(lcd);
 }
 
 void uiDeviceSlide(bool open, const DeviceSettings &s) {
@@ -988,7 +1052,7 @@ void uiDeviceEditor(Display &lcd, const DeviceSettings &s) {
   LovyanGFX *g = target(lcd);
   g->fillScreen(BG);
   drawDevicePanel(g, s, 0);
-  if (g_sprite) g_canvas.pushSprite(&lcd, 0, 0);
+  present(lcd);
 }
 
 void uiEditorSlide(bool open, const PomoSettings &s) {
@@ -1011,7 +1075,7 @@ void uiMessage(Display &lcd, const char *title, const char *body) {
   g->setFont(&V_S12.font);
   g->setTextColor(DIM, BG);
   g->drawString(body, LCD_WIDTH / 2, LCD_HEIGHT / 2 + 12);
-  if (g_sprite) g_canvas.pushSprite(&lcd, 0, 0);
+  present(lcd);
 }
 
 void uiPomodoroEditor(Display &lcd, const PomoSettings &s) {
@@ -1019,7 +1083,7 @@ void uiPomodoroEditor(Display &lcd, const PomoSettings &s) {
   LovyanGFX *g = target(lcd);
   g->fillScreen(BG);
   drawEditorPanel(g, s, 0);
-  if (g_sprite) g_canvas.pushSprite(&lcd, 0, 0);
+  present(lcd);
 }
 
 void uiPortal(Display &lcd, const char *apName, const char *apIp, const char *lanIp) {
@@ -1054,7 +1118,7 @@ void uiPortal(Display &lcd, const char *apName, const char *apIp, const char *la
     g->drawString(lan, LCD_WIDTH / 2, 252);
   }
 
-  if (g_sprite) g_canvas.pushSprite(&lcd, 0, 0);
+  present(lcd);
 }
 
 void uiBlePair(Display &lcd, uint32_t passkey) {
@@ -1083,7 +1147,7 @@ void uiBlePair(Display &lcd, uint32_t passkey) {
   g->drawString("Stuck? Forget Claude Cube", LCD_WIDTH / 2, 226);
   g->drawString("in Mac Bluetooth settings", LCD_WIDTH / 2, 244);
 
-  if (g_sprite) g_canvas.pushSprite(&lcd, 0, 0);
+  present(lcd);
 }
 
 void uiOta(Display &lcd, uint8_t percent) {
@@ -1107,5 +1171,5 @@ void uiOta(Display &lcd, uint8_t percent) {
   g->drawString(buf, LCD_WIDTH / 2, 190);
 
   drawCaps(g, "Do not unplug", LCD_WIDTH / 2, 230, DIM, middle_center);
-  if (g_sprite) g_canvas.pushSprite(&lcd, 0, 0);
+  present(lcd);
 }
