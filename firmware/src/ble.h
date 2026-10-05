@@ -34,6 +34,9 @@ bool bleTakeSettings(char *out, size_t cap);
 // Tells the Mac how the write went (a SettingsResult) and refreshes what a
 // read of the Settings characteristic returns.
 void bleSettingsReply(uint8_t result);
+// Settings were saved on the cube itself (an on-device editor): refreshes what
+// a read of the Settings characteristic returns. Main loop only.
+void bleSettingsChanged();
 
 // Tells the Mac a Pomodoro phase ended: Control `04 <ended> <next>` with the
 // PomoPhase values (0 focus, 1 short, 2 long). Fire and forget; dropped when no

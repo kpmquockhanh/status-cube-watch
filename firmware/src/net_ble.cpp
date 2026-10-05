@@ -277,6 +277,8 @@ void bleSettingsReply(uint8_t result) {
   notifyControl(m, sizeof(m));
 }
 
+void bleSettingsChanged() { publishSettings(); }
+
 void bleNotifyPomodoro(uint8_t ended, uint8_t next) {
   uint8_t m[BLE_POMO_ENDED_LEN];
   const size_t len = bleEncodePomoEnded(ended, next, m);

@@ -196,7 +196,10 @@ void openDeviceEditor() {
 // DONE and swipe-up both land here. Brightness and sound were previewed live
 // while editing; the rest takes effect now.
 void closeDeviceEditor() {
-  if (editDevice != deviceSettings()) deviceSettingsSave(editDevice);  // spare the flash
+  if (editDevice != deviceSettings()) {  // spare the flash
+    deviceSettingsSave(editDevice);
+    bleSettingsChanged();
+  }
   lcd.setBrightness(deviceSettings().backlight);
   buzzerSetLevel(deviceSettings().sound);
   editing = false;
@@ -229,7 +232,10 @@ void deviceEditorGesture(Gesture g) {
 
 // DONE and swipe-down both land here: what is on screen is what is saved.
 void closeEditor() {
-  if (editSettings != pomoSettings()) pomoSettingsSave(editSettings);  // spare the flash
+  if (editSettings != pomoSettings()) {  // spare the flash
+    pomoSettingsSave(editSettings);
+    bleSettingsChanged();
+  }
   pomo.setConfig(pomoConfigFrom(pomoSettings(), POMO_TIME_DIV));
   editing = false;
   uiEditorSlide(false, editSettings);

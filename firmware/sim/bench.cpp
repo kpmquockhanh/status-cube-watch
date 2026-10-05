@@ -167,7 +167,7 @@ Scenario makeScenario(const std::string &name) {
     s.seconds = 120;
     for (uint32_t t = 1000; t < 120000; t += 4000) s.strokes.push_back(swipe(t, 190, 150, 50, 150));
   } else if (name == "editor") {
-    s.what = "display panel: open, 8 steps, a toggle, close";
+    s.what = "display panel: open, 8 steps, a toggle, close; then the Pomodoro editor: a step, DONE";
     s.seconds = 15;
     s.strokes.push_back(swipe(1000, 120, 60, 120, 220));  // swipe down: open
     uint32_t t = 2000;
@@ -178,6 +178,12 @@ Scenario makeScenario(const std::string &name) {
     s.strokes.push_back(tapZone(t, editorLead(1)));
     t += 1000;
     s.strokes.push_back(swipe(t, 120, 220, 120, 60));  // swipe up: close
+    t += 1000;
+    s.strokes.push_back(swipe(t, 120, 220, 120, 60));  // still on the Pomodoro card: its editor
+    t += 1000;
+    s.strokes.push_back(tapZone(t, editorPlus(0)));
+    t += 600;
+    s.strokes.push_back(tapZone(t, editorDoneBtn()));
   } else if (name == "sleep") {
     s.what = "Mac gone: WiFi fetches fail, screen sleeps after the timeout (2 min)";
     s.seconds = 600;
@@ -226,6 +232,15 @@ bool parsePayload(const std::string &json, Payload &out) {
 }
 
 uint32_t g_bleLastPush = 0, g_bleLastGood = 0;
+// What a Settings read over BLE would return: net_ble.cpp publishes it at
+// bleBegin() and again whenever it is told the stored settings changed.
+DeviceSettings g_pubDevice{};
+PomoSettings g_pubPomo{};
+uint64_t g_unpublished = 0;  // loop passes that ended with a read returning stale settings
+void publishSettings() {
+  g_pubDevice = deviceSettings();
+  g_pubPomo = pomoSettings();
+}
 uint32_t g_lastImuCost = 0;
 
 double hostNs(Clock::time_point a, Clock::time_point b) {
@@ -294,7 +309,7 @@ bool Touch::read(int16_t &x, int16_t &y) {
 }
 
 // --- stand-ins: BLE -------------------------------------------------------------
-void bleBegin() {}
+void bleBegin() { publishSettings(); }
 BleState bleState() { return S.bleLive ? BleState::Connected : BleState::Advertising; }
 uint32_t blePasskey() { return 0; }
 bool bleBonded() { return S.bonded; }
@@ -313,7 +328,8 @@ bool bleTake(Payload &out) {
 uint32_t bleLastGood() { return g_bleLastGood; }
 void bleForgetBonds() {}
 bool bleTakeSettings(char *, size_t) { return false; }
-void bleSettingsReply(uint8_t) {}
+void bleSettingsReply(uint8_t) { publishSettings(); }
+void bleSettingsChanged() { publishSettings(); }
 void bleNotifyPomodoro(uint8_t, uint8_t) {}
 
 // --- stand-ins: WiFi -----------------------------------------------------------
@@ -378,6 +394,7 @@ void runScenario() {
   d.sleepMin = S.sleepMin;
   d.rotateSec = 0;
   deviceSettingsSave(d);
+  publishSettings();  // as if stored before boot
   resetCounters();
   g_start = millis();
   g_running = true;
@@ -387,6 +404,9 @@ void runScenario() {
     g_passPx = 0;
     const auto t0 = Clock::now();
     loop();
+    // Both editors save on the cube itself; by the end of that pass the Mac's
+    // next Settings read must see what they saved.
+    if (g_pubDevice != deviceSettings() || g_pubPomo != pomoSettings()) g_unpublished++;
     double ns = hostNs(t0, Clock::now()) - (double)g_panelNs;
     if (ns > HOST_PASS_CAP_NS) {
       ns = HOST_PASS_CAP_NS;
@@ -501,6 +521,11 @@ int main(int argc, char **argv) {
   if (g_stale || !g_checked) {
     fprintf(stderr, "%s: %llu of %llu frames left the panel different from the sprite\n", S.name,
             (unsigned long long)g_stale, (unsigned long long)g_checked);
+    return 1;
+  }
+  if (g_unpublished) {
+    fprintf(stderr, "%s: a Settings read over BLE returned stale settings after %llu passes\n", S.name,
+            (unsigned long long)g_unpublished);
     return 1;
   }
   if (S.mustSleep && g_backlight != 0) {

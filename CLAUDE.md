@@ -46,7 +46,7 @@ make shot                                  # headless: one PNG per card of the l
 CUBE_BLE=live|stale|pair|none make run     # what the sim cube believes about Bluetooth (default none); also @ble-pair, @ble-wait shots
 CUBE_ORIENT=2 make run                     # sim cube is upside down: flips ~1 s after start (default 0); the window is the only place the flip shows, `make shot` reads back the logical frame and is unaffected
 make test                                  # host-side unit tests (pomodoro, gesture, portal helpers); no SDL or board needed
-make bench                                 # performance/energy model: real setup()/loop() on a virtual clock, scripted scenarios; fails if a partial push leaves the panel stale, or if the screen is still on at the end of `linked` / `sleep`
+make bench                                 # performance/energy model: real setup()/loop() on a virtual clock, scripted scenarios; fails if a partial push leaves the panel stale, if the screen is still on at the end of `linked` / `sleep`, or if a Settings read over BLE would be stale after an on-device edit (`editor`)
 make run POMO_FAST=60                      # Pomodoro minutes become seconds: watch a full cycle and the phase-end alert (make clean after)
 ```
 

@@ -83,4 +83,6 @@ the reply) when a network key changed, since those are only read at boot. Only t
 actually changes are stored (display, Pomodoro, then network last). If a later group fails to
 store after an earlier one did, the result is `00` (Ok) rather than an error, so after a non-reboot
 result the Mac reads Settings again to see what was stored. A rejected write is never what a read
-returns: the cube republishes the stored values.
+returns: the cube republishes the stored values. Settings saved on the cube itself (the display
+panel or the Pomodoro editor) are republished as the editor closes, so the next read returns them;
+nothing is notified.
