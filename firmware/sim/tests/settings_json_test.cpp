@@ -57,12 +57,34 @@ void testPartialSaveIsOk() {
   CHECK(settingsApplyJson(NET) == SettingsResult::Invalid);  // nothing else to show for it
 }
 
+// The buzzer level (fw_rev 4): 0 = off .. 3 = high. A write without it, as an
+// older Mac sends, leaves it alone.
+void testSound() {
+  settingsLoad();
+  char buf[SETTINGS_JSON_MAX + 1];
+  CHECK(settingsToJson(buf, sizeof(buf)) > 0);
+  CHECK(strstr(buf, "\"sd\":2") != nullptr);
+  CHECK(settingsApplyJson("{\"sd\":0}") == SettingsResult::Ok);
+  CHECK(deviceSettings().sound == 0);
+  CHECK(settingsApplyJson("{\"sd\":3}") == SettingsResult::Ok);
+  CHECK(deviceSettings().sound == 3);
+  CHECK(settingsApplyJson("{\"sd\":4}") == SettingsResult::Invalid);
+  CHECK(settingsApplyJson("{\"sd\":-1}") == SettingsResult::Invalid);
+  CHECK(settingsApplyJson("{\"sd\":\"high\"}") == SettingsResult::Invalid);
+  CHECK(settingsApplyJson("{\"sd\":1.5}") == SettingsResult::Invalid);
+  CHECK(settingsApplyJson("{\"bl\":90,\"sd\":9}") == SettingsResult::Invalid);  // one bad key rejects all
+  CHECK(deviceSettings().sound == 3 && deviceSettings().backlight == 200);
+  CHECK(settingsApplyJson("{\"bl\":90}") == SettingsResult::Ok);  // an older Mac
+  CHECK(deviceSettings().sound == 3 && deviceSettings().backlight == 90);
+}
+
 }  // namespace
 
 int main() {
   testSavesOnlyWhatChanged();
   testNetworkSavedLast();
   testPartialSaveIsOk();
+  testSound();
   settingsLoad();
   char buf[SETTINGS_JSON_MAX + 1];
 

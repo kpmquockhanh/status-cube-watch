@@ -42,6 +42,7 @@ size_t settingsToJson(char *buf, size_t cap) {
   doc["sl"] = d.sleepMin;
   doc["rt"] = d.rotateSec;
   doc["pi"] = d.pollSec;
+  doc["sd"] = d.sound;
   doc["pf"] = p.focusMin;
   doc["ps"] = p.shortMin;
   doc["pl"] = p.longMin;
@@ -65,6 +66,7 @@ SettingsResult settingsApplyJson(const char *json) {
   if (!readInt(o, "bl", DEV_MIN_BACKLIGHT, DEV_MAX_BACKLIGHT, d.backlight) ||
       !readInt(o, "sl", 0, DEV_MAX_SLEEP_MIN, d.sleepMin) || !readInt(o, "rt", 0, DEV_MAX_ROTATE_SEC, d.rotateSec) ||
       !readInt(o, "pi", DEV_MIN_POLL_SEC, DEV_MAX_POLL_SEC, d.pollSec) ||
+      !readInt(o, "sd", 0, DEV_MAX_SOUND, d.sound) ||
       !readInt(o, "pf", POMO_MIN_MINUTES, POMO_MAX_MINUTES, p.focusMin) ||
       !readInt(o, "ps", POMO_MIN_MINUTES, POMO_MAX_MINUTES, p.shortMin) ||
       !readInt(o, "pl", POMO_MIN_MINUTES, POMO_MAX_MINUTES, p.longMin) ||

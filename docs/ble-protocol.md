@@ -69,6 +69,7 @@ the setup portal edits, as one JSON object of at most 512 bytes (a single ATT va
 | `sl` | screen sleep, minutes (0 = never) | 0..240 |
 | `rt` | auto-advance cards, seconds (0 = off) | 0..255 |
 | `pi` | WiFi poll interval, seconds | 2..60 |
+| `sd` | buzzer level: 0 off, 1 low, 2 medium, 3 high (added in fw_rev 4) | 0..3 |
 | `pf` `ps` `pl` | Pomodoro focus / short / long break, minutes | 1..99 |
 | `pn` | Pomodoro sessions before the long break | 1..9 |
 | `ssid` `bridge` | WiFi network, bridge URL | portal rules |

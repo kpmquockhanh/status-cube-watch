@@ -9,7 +9,7 @@
 #include <string.h>
 
 constexpr uint8_t BLE_PROTO_VER = 1;
-constexpr uint8_t BLE_FW_REV = 3;  // bumped when behaviour the Mac can see changes
+constexpr uint8_t BLE_FW_REV = 4;  // bumped when behaviour the Mac can see changes
 constexpr size_t BLE_HDR = 4;      // ver, seq, idx, total
 constexpr uint8_t BLE_MAX_CHUNKS = 16;
 constexpr size_t BLE_MAX_PAYLOAD = 2048;
