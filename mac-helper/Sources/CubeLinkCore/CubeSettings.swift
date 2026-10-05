@@ -8,6 +8,7 @@ public struct CubeSettings: Equatable {
     public var sleepMin = 15     // 0...240, 0 = never
     public var rotateSec = 0     // 0...255, 0 = off
     public var pollSec = 5       // 2...60
+    public var sound: Int? = nil  // 0...3 (off, low, medium, high); nil = the cube has no buzzer setting (fw_rev < 4)
     // Pomodoro
     public var focusMin = 25     // 1...99
     public var shortMin = 5
@@ -25,6 +26,7 @@ public struct CubeSettings: Equatable {
     public static let sleepRange = 0...240
     public static let rotateRange = 0...255
     public static let pollRange = 2...60
+    public static let soundRange = 0...3
     public static let minutesRange = 1...99
     public static let sessionsRange = 1...9
 
@@ -39,6 +41,7 @@ public struct CubeSettings: Equatable {
         int("sl", sleepRange, &s.sleepMin)
         int("rt", rotateRange, &s.rotateSec)
         int("pi", pollRange, &s.pollSec)
+        if let v = (o["sd"] as? NSNumber)?.intValue, soundRange.contains(v) { s.sound = v }
         int("pf", minutesRange, &s.focusMin)
         int("ps", minutesRange, &s.shortMin)
         int("pl", minutesRange, &s.longMin)
@@ -54,6 +57,7 @@ public struct CubeSettings: Equatable {
     public var isValid: Bool {
         CubeSettings.backlightRange.contains(backlight) && CubeSettings.sleepRange.contains(sleepMin)
             && CubeSettings.rotateRange.contains(rotateSec) && CubeSettings.pollRange.contains(pollSec)
+            && (sound.map { CubeSettings.soundRange.contains($0) } ?? true)
             && CubeSettings.minutesRange.contains(focusMin) && CubeSettings.minutesRange.contains(shortMin)
             && CubeSettings.minutesRange.contains(longMin) && CubeSettings.sessionsRange.contains(sessions)
     }
@@ -67,6 +71,7 @@ public struct CubeSettings: Equatable {
         if sleepMin != old.sleepMin { o["sl"] = sleepMin }
         if rotateSec != old.rotateSec { o["rt"] = rotateSec }
         if pollSec != old.pollSec { o["pi"] = pollSec }
+        if sound != old.sound, let sound { o["sd"] = sound }
         if focusMin != old.focusMin { o["pf"] = focusMin }
         if shortMin != old.shortMin { o["ps"] = shortMin }
         if longMin != old.longMin { o["pl"] = longMin }
@@ -104,6 +109,7 @@ public struct CubeSettings: Equatable {
         keepEdit(\.sleepMin)
         keepEdit(\.rotateSec)
         keepEdit(\.pollSec)
+        keepEdit(\.sound)
         keepEdit(\.focusMin)
         keepEdit(\.shortMin)
         keepEdit(\.longMin)

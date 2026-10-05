@@ -73,3 +73,39 @@ private let sample = Data(#"{"v":1,"bl":100,"sl":0,"rt":30,"pi":10,"pf":50,"ps":
     #expect(CubeSettings.rebase(form: form, shown: nil, onto: fresh) == fresh)  // nothing shown yet
     #expect(CubeSettings.rebase(form: shown, shown: shown, onto: fresh) == fresh)  // no edits
 }
+
+@Test func soundExistsOnlyWhenTheCubeReportsIt() throws {
+    let old = try #require(CubeSettings.parse(sample))  // no "sd": a cube before fw_rev 4
+    #expect(old.sound == nil)
+    var new = old
+    new.backlight = 120
+    let json = try #require(new.patch(from: old))
+    #expect(String(decoding: json, as: UTF8.self) == #"{"bl":120}"#)  // never an "sd" it would ignore
+
+    let cube = try #require(CubeSettings.parse(Data(#"{"v":1,"bl":100,"sd":2}"#.utf8)))
+    #expect(cube.sound == 2)
+    var edited = cube
+    #expect(edited.patch(from: cube) == nil)
+    edited.sound = 0
+    let mute = try #require(edited.patch(from: cube))
+    #expect(String(decoding: mute, as: UTF8.self) == #"{"sd":0}"#)
+    #expect(!CubeSettings.needsReboot(mute))
+    #expect(CubeSettings.parse(Data(#"{"sd":7}"#.utf8))?.sound == nil)  // out of range: as if absent
+}
+
+@Test func soundValidityAndRebase() throws {
+    var s = CubeSettings()
+    #expect(s.isValid)  // nil: nothing to check
+    s.sound = 3
+    #expect(s.isValid)
+    s.sound = 4
+    #expect(!s.isValid)
+
+    let shown = try #require(CubeSettings.parse(Data(#"{"sd":2}"#.utf8)))
+    var form = shown
+    form.sound = 3  // being edited
+    var fresh = shown
+    fresh.sound = 1  // changed on the cube's own panel meanwhile
+    #expect(CubeSettings.rebase(form: form, shown: shown, onto: fresh).sound == 3)
+    #expect(CubeSettings.rebase(form: shown, shown: shown, onto: fresh).sound == 1)
+}
