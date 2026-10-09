@@ -43,9 +43,25 @@ constexpr uint8_t volumeLevelAt(int y) {
                                               (VOL_TRAVEL_BOTTOM - VOL_TRAVEL_TOP));
 }
 
-// The fill's top edge for a level (fractional while it eases): the whole pill
-// at 100, nothing at 0.
-inline int volumeFillTop(float level) { return (int)(VOL_PILL_Y + VOL_PILL_H * (100.0f - level) / 100.0f + 0.5f); }
+// The fill's top edge for a level (fractional while it eases): the inverse of
+// volumeLevelAt, so the edge sits under the finger that set the level. The
+// travel maps 1..99 linearly; the two end segments stretch from the travel to
+// the pill's own top and bottom, so 100 fills the whole pill and 0 empties it.
+inline int volumeFillTop(float level) {
+  const float L = level < 0.0f ? 0.0f : level > 100.0f ? 100.0f : level;
+  const float top99 = (float)VOL_TRAVEL_BOTTOM - (float)(VOL_TRAVEL_BOTTOM - VOL_TRAVEL_TOP) * 99.0f / 100.0f;
+  const float bot1 = (float)VOL_TRAVEL_BOTTOM - (float)(VOL_TRAVEL_BOTTOM - VOL_TRAVEL_TOP) * 1.0f / 100.0f;
+  const float pillBottom = (float)(VOL_PILL_Y + VOL_PILL_H);
+  float y;
+  if (L > 99.0f) {
+    y = top99 + ((float)VOL_PILL_Y - top99) * (L - 99.0f);
+  } else if (L < 1.0f) {
+    y = pillBottom + (bot1 - pillBottom) * L;
+  } else {
+    y = (float)VOL_TRAVEL_BOTTOM - (float)(VOL_TRAVEL_BOTTOM - VOL_TRAVEL_TOP) * L / 100.0f;
+  }
+  return (int)(y + 0.5f);
+}
 
 enum class VolState : uint8_t {
   NoMac,     // link down, or no Volume write yet

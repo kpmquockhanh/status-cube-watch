@@ -26,6 +26,15 @@ void testGeometry() {
   CHECK(volumeFillTop(100) == VOL_PILL_Y);
   CHECK(volumeFillTop(0) == VOL_PILL_Y + VOL_PILL_H);
   CHECK(volumeFillTop(50) == 147);
+  // The fill edge sits on the finger: reading it back gives the level it was drawn from.
+  for (int L = 1; L <= 99; L++) CHECK(volumeLevelAt(volumeFillTop((float)L)) == L);
+  // Higher level, higher fill (smaller y), never the other way round.
+  int prev = volumeFillTop(0.0f);
+  for (int i = 1; i <= 400; i++) {
+    const int y = volumeFillTop(i * 0.25f);
+    CHECK(y <= prev);
+    prev = y;
+  }
   CHECK(VOL_PILL_RECT.contains(VOL_SPK_CX, VOL_SPK_CY));
   CHECK(VOL_SPEAKER_ZONE.contains(VOL_SPK_CX, VOL_SPK_CY));
   CHECK(!VOL_SPEAKER_ZONE.contains(VOL_SPK_CX, 147));
@@ -192,7 +201,8 @@ void testChangeUnmutes() {
   uint8_t l;
   bool m;
   CHECK(s.grab());
-  CHECK(s.drag(volumeFillTop(40)));  // even at the same height: unmuting is a change
+  CHECK(s.drag(volumeFillTop(40)));  // the same level as before: unmuting is still a change
+  CHECK(s.view().level == 40);
   CHECK(!s.view().muted);
   CHECK(s.takeSend(0, l, m) && !m);
   CHECK(s.release(10));
