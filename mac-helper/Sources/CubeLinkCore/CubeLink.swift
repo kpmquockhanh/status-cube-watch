@@ -13,6 +13,8 @@ public final class CubeLink: NSObject, CBCentralManagerDelegate, CBPeripheralDel
     public var onPomodoroEnded: ((PomodoroPhase, PomodoroPhase) -> Void)?
     /// The cube asks for the Mac's output to be set: (level 0...100, muted).
     public var onVolumeRequest: ((UInt8, Bool) -> Void)?
+    /// The link became ready (Control subscribed). The Volume state is written from here.
+    public var onReady: (() -> Void)?
     /// The cube's settings, read once the link is ready and again after every write. Nil while
     /// disconnected, or when the cube's firmware predates the Settings characteristic.
     public private(set) var cubeSettings: CubeSettings?
@@ -32,6 +34,8 @@ public final class CubeLink: NSObject, CBCentralManagerDelegate, CBPeripheralDel
     private var controlChar: CBCharacteristic?
     private var infoChar: CBCharacteristic?
     private var settingsChar: CBCharacteristic?
+    private var volumeChar: CBCharacteristic?
+    private var volumeMissingLogged = false
     private var backoff = Backoff()
     private var seq: UInt8 = 0
     private var awaitingAck: UInt8?
@@ -44,6 +48,7 @@ public final class CubeLink: NSObject, CBCentralManagerDelegate, CBPeripheralDel
     private let controlID = CBUUID(string: CubeProtocol.controlUUID)
     private let infoID = CBUUID(string: CubeProtocol.infoUUID)
     private let settingsID = CBUUID(string: CubeProtocol.settingsUUID)
+    private let volumeID = CBUUID(string: CubeProtocol.volumeUUID)
     private let idKey = "cubeIdentifier"
 
     public init(log: @escaping (String) -> Void) {
@@ -82,6 +87,23 @@ public final class CubeLink: NSObject, CBCentralManagerDelegate, CBPeripheralDel
     public func refreshSettings() {
         guard isReady, let p = peripheral, let ch = settingsChar else { return }
         p.readValue(for: ch)
+    }
+
+    /// Writes the Mac's output state to the cube's Volume characteristic. False when not ready,
+    /// or when the cube's firmware predates the characteristic (logged once per connection).
+    @discardableResult
+    public func writeVolume(_ d: Data) -> Bool {
+        guard isReady, let p = peripheral else { return false }
+        guard let ch = volumeChar else {
+            if !volumeMissingLogged {
+                volumeMissingLogged = true
+                log("cube has no Volume characteristic (firmware before rev 5): volume card off")
+            }
+            return false
+        }
+        Trace.log("ble", "volume write: \([UInt8](d))")
+        p.writeValue(d, for: ch, type: .withResponse)
+        return true
     }
 
     private func write(_ payload: Data, to p: CBPeripheral, char: CBCharacteristic) {
@@ -212,7 +234,7 @@ public final class CubeLink: NSObject, CBCentralManagerDelegate, CBPeripheralDel
             setupFailed(p)
             return
         }
-        p.discoverCharacteristics([payloadID, controlID, infoID, settingsID], for: svc)
+        p.discoverCharacteristics([payloadID, controlID, infoID, settingsID, volumeID], for: svc)
     }
 
     public func peripheral(_ p: CBPeripheral, didDiscoverCharacteristicsFor s: CBService, error: Error?) {
@@ -226,6 +248,7 @@ public final class CubeLink: NSObject, CBCentralManagerDelegate, CBPeripheralDel
             else if ch.uuid == controlID { controlChar = ch }
             else if ch.uuid == infoID { infoChar = ch }
             else if ch.uuid == settingsID { settingsChar = ch }  // optional: older firmware has none
+            else if ch.uuid == volumeID { volumeChar = ch }  // optional: firmware before rev 5 has none
         }
         guard let info = infoChar, controlChar != nil, payloadChar != nil else {
             log("cube is missing a characteristic")
@@ -300,6 +323,7 @@ public final class CubeLink: NSObject, CBCentralManagerDelegate, CBPeripheralDel
             backoff.reset()
             setReady(true)
             refreshSettings()
+            onReady?()
         }
     }
 
@@ -334,6 +358,8 @@ public final class CubeLink: NSObject, CBCentralManagerDelegate, CBPeripheralDel
             controlChar = nil
             infoChar = nil
             settingsChar = nil
+            volumeChar = nil
+            volumeMissingLogged = false
             if cubeSettings != nil {
                 cubeSettings = nil
                 onSettings?(nil)

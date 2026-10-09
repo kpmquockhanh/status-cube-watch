@@ -147,6 +147,17 @@ link.onPomodoroEnded = { ended, next in
     notifier.post(PomodoroNotice.make(ended: ended, next: next))
 }
 notifier.start()
+let systemVolume = SystemVolume()
+systemVolume.onChange = { v in
+    Trace.log("volume", "mac \(v.level.map(String.init) ?? "none")\(v.muted ? " muted" : "") \(v.name)")
+    _ = link.writeVolume(encodeVolume(v))
+}
+link.onReady = { _ = link.writeVolume(encodeVolume(systemVolume.current())) }
+link.onVolumeRequest = { level, muted in
+    Trace.log("volume", "cube asks \(level)\(muted ? " muted" : "")")
+    systemVolume.apply(level: level, muted: muted)
+}
+systemVolume.start()
 link.onStateChange = { Trace.log("link", "state -> \($0)"); refreshMenu() }
 statusMenu.onSendNow = { tick(force: true) }
 statusMenu.onRestartBridge = { supervisor.restart() }
