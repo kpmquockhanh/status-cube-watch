@@ -36,6 +36,8 @@ public final class CubeLink: NSObject, CBCentralManagerDelegate, CBPeripheralDel
     private var settingsChar: CBCharacteristic?
     private var volumeChar: CBCharacteristic?
     private var volumeMissingLogged = false
+    private var cubeFwRev: UInt8?
+    private var volumeGate = LatestWinsGate()
     private var backoff = Backoff()
     private var seq: UInt8 = 0
     private var awaitingAck: UInt8?
@@ -97,13 +99,23 @@ public final class CubeLink: NSObject, CBCentralManagerDelegate, CBPeripheralDel
         guard let ch = volumeChar else {
             if !volumeMissingLogged {
                 volumeMissingLogged = true
-                log("cube has no Volume characteristic (firmware before rev 5): volume card off")
+                if let rev = cubeFwRev, rev >= 5 {
+                    log("cube firmware has Volume (rev \(rev)) but macOS did not list the characteristic: "
+                        + "it is serving a cached copy of the old GATT table. "
+                        + "Remove \"Claude Cube\" in System Settings > Bluetooth, then pair again.")
+                } else {
+                    log("cube has no Volume characteristic (firmware before rev 5): volume card off")
+                }
             }
             return false
         }
-        Trace.log("ble", "volume write: \([UInt8](d))")
-        p.writeValue(d, for: ch, type: .withResponse)
+        if let next = volumeGate.offer(d) { sendVolume(next, to: p, char: ch) }
         return true
+    }
+
+    private func sendVolume(_ d: Data, to p: CBPeripheral, char: CBCharacteristic) {
+        Trace.log("ble", "volume write: \([UInt8](d))")
+        p.writeValue(d, for: char, type: .withResponse)
     }
 
     private func write(_ payload: Data, to p: CBPeripheral, char: CBCharacteristic) {
@@ -272,9 +284,16 @@ public final class CubeLink: NSObject, CBCentralManagerDelegate, CBPeripheralDel
             }
             let b = [UInt8](ch.value ?? Data())
             Trace.log("ble", "Info read: \(b)")
+            cubeFwRev = b.count >= 2 ? b[1] : nil
             if b.count >= 2, b[1] >= 2, settingsChar == nil {
                 log("cube firmware has Settings (rev \(b[1])) but macOS did not list the characteristic: "
                     + "it is serving a cached copy of the old GATT table")
+            }
+            if b.count >= 2, b[1] >= 5, volumeChar == nil {
+                log("cube firmware has Volume (rev \(b[1])) but macOS did not list the characteristic: "
+                    + "it is serving a cached copy of the old GATT table. "
+                    + "Remove \"Claude Cube\" in System Settings > Bluetooth, then pair again.")
+                volumeMissingLogged = true
             }
             guard b.first == CubeProtocol.version else {
                 log("cube speaks protocol \(b.first.map(String.init) ?? "?"), this app speaks \(CubeProtocol.version); update one of them")
@@ -330,6 +349,9 @@ public final class CubeLink: NSObject, CBCentralManagerDelegate, CBPeripheralDel
     public func peripheral(_ p: CBPeripheral, didWriteValueFor ch: CBCharacteristic, error: Error?) {
         Trace.log("ble", "didWrite \(ch.uuid) error: \(error?.localizedDescription ?? "none")")
         if let error { explain(error) }
+        if ch.uuid == volumeID, let next = volumeGate.completed(), let p = peripheral, let vc = volumeChar {
+            sendVolume(next, to: p, char: vc)
+        }
     }
 
     // MARK: helpers
@@ -360,6 +382,8 @@ public final class CubeLink: NSObject, CBCentralManagerDelegate, CBPeripheralDel
             settingsChar = nil
             volumeChar = nil
             volumeMissingLogged = false
+            cubeFwRev = nil
+            volumeGate.reset()
             if cubeSettings != nil {
                 cubeSettings = nil
                 onSettings?(nil)

@@ -53,7 +53,8 @@ final class SystemVolume {
     func apply(level: UInt8, muted: Bool) {
         guard device != Self.unknown else { return }
         var muteAddr = Self.address(kAudioDevicePropertyMute)
-        if settable(muteAddr) {
+        let currentMute: UInt32? = read(muteAddr)
+        if settable(muteAddr), currentMute != (muted ? 1 : 0) {
             var m: UInt32 = muted ? 1 : 0
             let s = AudioObjectSetPropertyData(device, &muteAddr, 0, nil, UInt32(MemoryLayout<UInt32>.size), &m)
             if s != noErr { Trace.log("volume", "set mute failed: \(s)") }

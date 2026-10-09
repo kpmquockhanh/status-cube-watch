@@ -239,8 +239,20 @@ bool parsePayload(const std::string &json, Payload &out) {
 
 uint32_t g_bleLastPush = 0, g_bleLastGood = 0;
 // The Mac's side of the Volume card: its state once the link is live, then an
-// echo of each request 300 ms later (about how slow the real link is).
-uint32_t g_volEchoAt = 0;
+// echo of each request. Writes are write-with-response and the Mac keeps one in
+// flight, the newest request waiting (LatestWinsGate): the first lands 300 ms
+// after the request (about how slow the real link is), each queued one 90 ms
+// after the one before.
+bool g_volInFlight = false;
+uint32_t g_volDoneAt = 0;
+MacVolume g_volWriting{};  // the state of the write in flight
+bool g_volHasPending = false;
+MacVolume g_volPending{};
+uint32_t g_volLastReqAt = 0;
+uint8_t g_volLastReqLevel = 0;
+uint8_t g_volLastEchoLevel = 0;
+bool g_volEchoed = false;
+uint32_t g_volStaleLate = 0;  // echoes that landed 600 ms+ after the last request with another level
 bool g_volSent = false;
 uint32_t g_volRequests = 0;
 uint32_t g_volPlain = 0;  // requests with muted == false
@@ -358,9 +370,18 @@ bool bleTakeVolume(MacVolume &out) {
     out = g_volEcho;
     return true;
   }
-  if (g_volEchoAt && millis() - g_volEchoAt >= 300) {
-    g_volEchoAt = 0;
-    out = g_volEcho;
+  if (g_volInFlight && millis() >= g_volDoneAt) {
+    out = g_volWriting;
+    g_volEchoed = true;
+    g_volLastEchoLevel = out.level;
+    if (g_volLastReqLevel != out.level && millis() - g_volLastReqAt >= 600) g_volStaleLate++;
+    if (g_volHasPending) {
+      g_volWriting = g_volPending;
+      g_volHasPending = false;
+      g_volDoneAt = millis() + 90;
+    } else {
+      g_volInFlight = false;
+    }
     return true;
   }
   return false;
@@ -372,7 +393,16 @@ void bleSendVolume(uint8_t level, bool muted) {
   g_volLastMuted = muted;
   g_volEcho.level = level;
   g_volEcho.muted = muted;
-  if (!g_volEchoAt) g_volEchoAt = millis() ? millis() : 1;
+  g_volLastReqAt = millis();
+  g_volLastReqLevel = level;
+  if (g_volInFlight) {
+    g_volPending = g_volEcho;
+    g_volHasPending = true;
+  } else {
+    g_volWriting = g_volEcho;
+    g_volInFlight = true;
+    g_volDoneAt = millis() + 300;
+  }
 }
 
 // --- stand-ins: WiFi -----------------------------------------------------------
@@ -587,6 +617,11 @@ int main(int argc, char **argv) {
   if (!strcmp(S.name, "volume") && (g_volRequests < 2 || g_volPlain < 1 || !g_volLastMuted)) {
     fprintf(stderr, "%s: %u volume requests reached the Mac, expected a drag level then a final mute (%u unmuted, last muted=%d)\n", S.name,
             (unsigned)g_volRequests, (unsigned)g_volPlain, (int)g_volLastMuted);
+    return 1;
+  }
+  if (!strcmp(S.name, "volume") && (g_volStaleLate || !g_volEchoed || g_volLastEchoLevel != g_volLastReqLevel)) {
+    fprintf(stderr, "%s: the Mac's echoes ended at level %u (%u stale ones landed late), the last request was %u\n", S.name,
+            (unsigned)g_volLastEchoLevel, (unsigned)g_volStaleLate, (unsigned)g_volLastReqLevel);
     return 1;
   }
   return 0;

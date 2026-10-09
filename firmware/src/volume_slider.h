@@ -94,6 +94,8 @@ class VolumeSlider {
   // The Mac's state arrived. known=false (the link dropped) forgets everything
   // at once, a drag in progress included. Otherwise, while a finger holds the
   // fill and for VOLUME_HOLD_MS after, the state is parked for tick().
+  // Invariant: a Mac state is applied only when !_held && !_quiet, and main.cpp sends takeSend()
+  // in the same pass as release / tap, so a pending request is never overwritten by an echo.
   void fromMac(const MacVolume &v, uint32_t now) {
     if (!v.known) {
       *this = VolumeSlider();

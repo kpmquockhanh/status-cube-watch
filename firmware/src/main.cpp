@@ -99,6 +99,7 @@ bool pairWaitDismissed = false;  // a touch dismisses the first-boot "waiting fo
 Orientation orient;
 uint8_t appliedRot = 0;
 bool imuUp = false;
+bool touchOnVolume = false;  // the finger now down landed on the Volume card (latched at landing)
 bool touchDown = false;  // a finger was on the glass at the last poll: do not flip under it
 uint32_t lastImu = 0;
 constexpr uint32_t IMU_POLL_MS = 200;
@@ -276,6 +277,7 @@ void editorGesture(Gesture g) {
 void pollTouch() {
   int16_t x = 0, y = 0;
   const bool down = touch.read(x, y);
+  const bool landing = down && !touchDown;
   touchDown = down;
   if (down) touchToScreen(appliedRot, x, y);
   if (down && !pairWaitDismissed && waitingToPair()) {
@@ -292,7 +294,11 @@ void pollTouch() {
   // is a plain Tap, delivered at once (the editors hit-test it).
   const bool onPomodoro = cardIndex == pomoIndex();
   // On the Volume card a vertical move is the volume, not a swipe (gesture.h).
-  const bool onVolume = onVolumeCard() && !editing;
+  // Whether it is the slider's touch is decided where the finger landed, so a touch that began on
+  // another card never reaches it; the latch clears on the lift pass, after the gesture is routed.
+  if (landing) touchOnVolume = onVolumeCard() && !editing;
+  const bool onVolume = touchOnVolume && onVolumeCard() && !editing;
+  if (!down) touchOnVolume = false;
   const Gesture gesture = gestures.update(down, x, y, now, onPomodoro && !editing, onVolume);
   // The deck left the card under a dragging finger (an alert pulled it to the
   // Pomodoro): let go, so the last level is still sent.
@@ -536,7 +542,7 @@ void loop() {
     dirty = true;
   }
 
-  if (rotateMs() > 0 && !editing && !volSlider.held() && now - lastRotate >= rotateMs()) {
+  if (rotateMs() > 0 && !editing && !touchDown && !volSlider.held() && now - lastRotate >= rotateMs()) {
     step(1);
   }
 

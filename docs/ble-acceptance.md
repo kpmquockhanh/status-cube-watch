@@ -69,3 +69,5 @@ Tick an item only when you observed it. Logs: `./install.sh logs` (Mac, from `ma
 - [ ] Horizontal swipes on the card still change card; a swipe down does not open the display panel there.
 - [ ] An older Mac app (before this change) with this firmware: the card stays `NO MAC`, nothing else changes.
 - [ ] This Mac app with older firmware (fw_rev 4): the log says "cube has no Volume characteristic" once per connection, and nothing else changes.
+- [ ] OTA a bonded fw_rev 4 cube to 5 without re-pairing: the Volume card fills (or the Mac log names the cached GATT table).
+- [ ] A slightly wobbly tap on the speaker (10-15 px vertical drift) becomes a drag and sets the level instead of muting; note whether this happens in practice.
