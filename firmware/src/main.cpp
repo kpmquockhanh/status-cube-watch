@@ -31,6 +31,7 @@
 #include "touch_map.h"
 #include "transport_policy.h"
 #include "ui.h"
+#include "volume_slider.h"
 
 // Divides every Pomodoro duration. Leave at 1. `make run POMO_FAST=60` in
 // sim/ turns minutes into seconds, so a whole cycle and the phase-end alert
@@ -69,6 +70,18 @@ uint32_t lastGood = 0;  // millis() of the last successful fetch
 uint32_t lastReadings = 0;  // readingsKey() of the last payload: only a change keeps the screen awake
 uint32_t lastDraw = 0;
 bool dirty = true;
+// The Volume card: in the deck while a Mac is bonded, between the payload cards
+// and the Pomodoro. `deckVolume` is what the deck was last built with, so a
+// bond coming or going can keep the viewer on their card.
+VolumeSlider volSlider;
+bool deckVolume = false;
+bool volumeShown() { return bleBonded(); }
+uint8_t deckSize() { return uiDeckSize(payload, deckVolume); }
+uint8_t pomoIndex() { return uiPomodoroIndex(payload, deckVolume); }
+bool onVolumeCard() { return deckVolume && cardIndex == uiVolumeIndex(payload); }
+DeckSpot deckSpot() {
+  return cardIndex == pomoIndex() ? DeckSpot::Pomodoro : onVolumeCard() ? DeckSpot::Volume : DeckSpot::Payload;
+}
 
 TransportPolicy policy;
 bool wifiUp = false;           // netStart() called and not yet netStop()
@@ -144,10 +157,11 @@ void step(int delta) {
   // Also when there is nowhere to go: otherwise the timer stays expired and the
   // first payload to arrive is swiped away from the Pomodoro card at once.
   lastRotate = millis();
-  const uint8_t n = uiDeckSize(payload);
+  const uint8_t n = deckSize();
   if (n <= 1) return;
   cardIndex = (cardIndex + n + delta) % n;
-  if (cardIndex == uiPomodoroIndex(payload)) uiReplayPomodoro();
+  if (cardIndex == pomoIndex()) uiReplayPomodoro();
+  else if (onVolumeCard()) uiReplayVolume();
   else uiReplay(cardIndex);
   dirty = true;
 }
@@ -276,8 +290,16 @@ void pollTouch() {
   }
   // Multi-taps only mean something on the Pomodoro card. Everywhere else a tap
   // is a plain Tap, delivered at once (the editors hit-test it).
-  const bool onPomodoro = cardIndex == uiPomodoroIndex(payload);
-  const Gesture gesture = gestures.update(down, x, y, now, onPomodoro && !editing);
+  const bool onPomodoro = cardIndex == pomoIndex();
+  // On the Volume card a vertical move is the volume, not a swipe (gesture.h).
+  const bool onVolume = onVolumeCard() && !editing;
+  const Gesture gesture = gestures.update(down, x, y, now, onPomodoro && !editing, onVolume);
+  // The deck left the card under a dragging finger (an alert pulled it to the
+  // Pomodoro): let go, so the last level is still sent.
+  if (volSlider.held() && !onVolume) {
+    volSlider.release(now);
+    dirty = true;
+  }
   // While the panel slides in its buttons are not where the hit-test puts
   // them, so nothing is pressed until it has landed.
   if (editing && uiEditorSliding()) return;
@@ -285,6 +307,32 @@ void pollTouch() {
     if (editingDevice) deviceEditorGesture(gesture);
     else editorGesture(gesture);
     return;
+  }
+  if (onVolume) {
+    bool acted = false;
+    switch (gesture) {
+      case Gesture::DragStart:
+        if (volSlider.grab()) {
+          volSlider.drag(gestures.lastY());
+          acted = true;
+        }
+        break;
+      case Gesture::Drag:
+        acted = volSlider.drag(gestures.lastY());
+        break;
+      case Gesture::DragEnd:
+        acted = volSlider.release(now);
+        break;
+      case Gesture::Tap:
+        acted = volSlider.tap(gestures.startX(), gestures.startY(), now);
+        break;
+      default:
+        break;
+    }
+    if (acted) {
+      lastRotate = now;  // touching the card holds off auto-advance, as a swipe does
+      dirty = true;
+    }
   }
   switch (gesture) {
     case Gesture::SwipeNext:  // swipe left advances (a tap does nothing)
@@ -304,8 +352,8 @@ void pollTouch() {
     case Gesture::SwipeUp:  // open the Pomodoro editor (idle timer only)
       if (editorMayOpen(onPomodoro, pomo.view().state)) openEditor();
       break;
-    case Gesture::SwipeDown:  // open the display settings panel, from any card
-      if (devEditorMayOpen(editing)) openDeviceEditor();
+    case Gesture::SwipeDown:  // open the display settings panel, from any card but Volume
+      if (!onVolume && devEditorMayOpen(editing)) openDeviceEditor();
       break;
     default:
       break;
@@ -390,6 +438,10 @@ void setup() {
   // First poll on the first loop pass rather than a full interval from now.
   lastPoll = millis() - pollMs();
   lastRotate = millis();
+  // A bonded cube's deck has the Volume card before the Pomodoro; boot still
+  // lands on the Pomodoro, as it did when it was the only card.
+  deckVolume = volumeShown();
+  cardIndex = pomoIndex();
   dirty = true;
 }
 
@@ -404,7 +456,7 @@ void loop() {
     buzzerPlay(ended.phase == PHASE_FOCUS ? Sound::FocusDone : Sound::BreakDone);
     // Phase over: pull the deck to the Pomodoro card wherever you were. A swipe
     // leaves it again; the DONE state waits for a double tap.
-    cardIndex = uiPomodoroIndex(payload);
+    cardIndex = pomoIndex();
     lastRotate = now;
     uiReplayPomodoro();
     uiAlertStart();
@@ -440,9 +492,28 @@ void loop() {
   }
 
   bool gotData = false;
-  const bool wasOnPomodoro = cardIndex == uiPomodoroIndex(payload);
+  // The card follows the bond. Settled before `was`, so a payload arriving in
+  // the same pass keeps the viewer where this left them.
+  if (volumeShown() != deckVolume) {
+    const DeckSpot spot = deckSpot();
+    deckVolume = !deckVolume;
+    cardIndex = deckKeepIndex(spot, cardIndex, deckSize(), deckVolume);
+    if (onVolumeCard()) uiReplayVolume();
+    dirty = true;
+  }
+  const DeckSpot was = deckSpot();
   if (bleTake(payload)) gotData = true;
   handleBleSettings();
+  // The Mac's volume. Not a reading: it never keeps the screen awake.
+  MacVolume macVol{};
+  if (bleTakeVolume(macVol)) {
+    volSlider.fromMac(macVol, now);
+    dirty = true;
+  }
+  if (volSlider.tick(now)) dirty = true;
+  uint8_t volLevel = 0;
+  bool volMuted = false;
+  if (volSlider.takeSend(now, volLevel, volMuted)) bleSendVolume(volLevel, volMuted);
   if (wifiUp && now - lastPoll >= pollMs()) {
     lastPoll = now;
     netRequest();  // runs on its own task; netTake() hands over the result on a later pass
@@ -461,11 +532,11 @@ void loop() {
       idle.data(now);
     }
     // The deck may have changed size: keep the Pomodoro card under the user.
-    cardIndex = deckKeepIndex(wasOnPomodoro, cardIndex, uiDeckSize(payload));
+    cardIndex = deckKeepIndex(was, cardIndex, deckSize(), deckVolume);
     dirty = true;
   }
 
-  if (rotateMs() > 0 && !editing && now - lastRotate >= rotateMs()) {
+  if (rotateMs() > 0 && !editing && !volSlider.held() && now - lastRotate >= rotateMs()) {
     step(1);
   }
 
@@ -473,7 +544,7 @@ void loop() {
   // changes rather than leaving it to the 1 s housekeeping tick below, which
   // would beat against it and skip or repeat digits.
   const PomoView pv = pomo.view();
-  if (cardIndex == uiPomodoroIndex(payload) && pv.displaySec != lastPomoSec) {
+  if (cardIndex == pomoIndex() && pv.displaySec != lastPomoSec) {
     lastPomoSec = pv.displaySec;
     dirty = true;
   }
@@ -528,8 +599,12 @@ void loop() {
       if (editingDevice) uiDeviceEditor(lcd, editDevice);
       else uiPomodoroEditor(lcd, editSettings);
     }
-    else uiRender(lcd, payload, cardIndex, td.bleLive || netOnline(), age, pv, bv,
-                    td.bleLive ? UiLink::Ble : (wifiUp && netOnline() ? UiLink::Wifi : UiLink::None));
+    else {
+      const VolumeView vv = volSlider.view();
+      uiRender(lcd, payload, cardIndex, td.bleLive || netOnline(), age, pv, bv,
+               td.bleLive ? UiLink::Ble : (wifiUp && netOnline() ? UiLink::Wifi : UiLink::None),
+               deckVolume ? &vv : nullptr);
+    }
     lastDraw = now;
     dirty = false;
   }

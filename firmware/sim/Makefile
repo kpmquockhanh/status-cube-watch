@@ -90,7 +90,7 @@ BENCH_SRCS := ../src/main.cpp ../src/ui.cpp ../src/payload.cpp ../src/gesture.cp
               ../src/pomo_editor.cpp ../src/dev_editor.cpp ../src/settings_json.cpp \
               settings_sim.cpp portal_sim.cpp ota_sim.cpp bench.cpp
 BENCH_OBJ  := $(addprefix build/bench/,$(notdir $(BENCH_SRCS:.cpp=.o)))
-BENCH_RUNS ?= desk linked pomodoro browse editor sleep
+BENCH_RUNS ?= desk linked pomodoro browse editor sleep volume
 
 build/bench/%.o: %.cpp
 	@mkdir -p $(dir $@)

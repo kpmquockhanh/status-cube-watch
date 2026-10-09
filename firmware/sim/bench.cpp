@@ -16,7 +16,7 @@
 // backlight LEDs are not in that figure; the backlight is reported on its own
 // as a duty cycle.
 //
-//   ./build/cube-bench <desk|linked|pomodoro|browse|editor|sleep|render> [slowdown]
+//   ./build/cube-bench <desk|linked|pomodoro|browse|editor|sleep|volume|render> [slowdown]
 
 #include <ArduinoJson.h>
 
@@ -184,6 +184,12 @@ Scenario makeScenario(const std::string &name) {
     s.strokes.push_back(tapZone(t, editorPlus(0)));
     t += 600;
     s.strokes.push_back(tapZone(t, editorDoneBtn()));
+  } else if (name == "volume") {
+    s.what = "Volume card: a drag up the pill, then a tap on the speaker (the Mac echoes each)";
+    s.seconds = 6;
+    s.strokes.push_back(swipe(1000, 50, 150, 190, 150));       // swipe right: Pomodoro -> Volume
+    s.strokes.push_back(Stroke{2000, 600, 120, 230, 120, 70});  // drag from low to high
+    s.strokes.push_back(tapAt(3500, VOL_SPK_CX, VOL_SPK_CY));  // the speaker: mute
   } else if (name == "sleep") {
     s.what = "Mac gone: WiFi fetches fail, screen sleeps after the timeout (2 min)";
     s.seconds = 600;
@@ -497,6 +503,14 @@ void runRender() {
   Pomodoro pomo(pomoConfigFrom(pomoSettings(), 1));
   pomo.longPress(millis());
   const BatteryView bv = batteryView();
+  VolumeSlider volume;
+  MacVolume mv{};
+  mv.known = true;
+  mv.level = 56;
+  mv.canSet = mv.canMute = true;
+  snprintf(mv.name, sizeof(mv.name), "MacBook Pro Speakers");
+  volume.fromMac(mv, 0);
+  const VolumeView vv = volume.view();
 
   struct Case {
     const char *name;
@@ -506,8 +520,9 @@ void runRender() {
       {"usage card", [&] { uiRender(lcd, p, 0, true, 2000, pomo.view(), bv, UiLink::Ble); }},
       {"pomodoro card", [&] {
          pomo.tick(millis());
-         uiRender(lcd, p, 1, true, 2000, pomo.view(), bv, UiLink::Ble);
+         uiRender(lcd, p, uiPomodoroIndex(p), true, 2000, pomo.view(), bv, UiLink::Ble);
        }},
+      {"volume card", [&] { uiRender(lcd, p, uiVolumeIndex(p), true, 2000, pomo.view(), bv, UiLink::Ble, &vv); }},
       {"display panel", [&] { uiDeviceEditor(lcd, deviceSettings()); }},
       {"pomo editor", [&] { uiPomodoroEditor(lcd, pomoSettings()); }},
   };
@@ -563,6 +578,11 @@ int main(int argc, char **argv) {
   }
   if (S.mustSleep && g_backlight != 0) {
     fprintf(stderr, "%s: the screen was still on after %u s with nobody touching it\n", S.name, S.seconds);
+    return 1;
+  }
+  if (!strcmp(S.name, "volume") && g_volRequests < 2) {
+    fprintf(stderr, "%s: %u volume requests reached the Mac, expected the drag's and the mute's\n", S.name,
+            (unsigned)g_volRequests);
     return 1;
   }
   return 0;
