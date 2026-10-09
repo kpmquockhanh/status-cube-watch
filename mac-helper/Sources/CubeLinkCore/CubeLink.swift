@@ -11,6 +11,8 @@ public final class CubeLink: NSObject, CBCentralManagerDelegate, CBPeripheralDel
     public var onSendNow: (() -> Void)?
     /// The cube reports a finished Pomodoro phase: (ended, next).
     public var onPomodoroEnded: ((PomodoroPhase, PomodoroPhase) -> Void)?
+    /// The cube asks for the Mac's output to be set: (level 0...100, muted).
+    public var onVolumeRequest: ((UInt8, Bool) -> Void)?
     /// The cube's settings, read once the link is ready and again after every write. Nil while
     /// disconnected, or when the cube's firmware predates the Settings characteristic.
     public private(set) var cubeSettings: CubeSettings?
@@ -273,6 +275,8 @@ public final class CubeLink: NSObject, CBCentralManagerDelegate, CBPeripheralDel
                 onSendNow?()
             case .pomodoroEnded(let ended, let next):
                 onPomodoroEnded?(ended, next)
+            case .volumeRequest(let level, let muted):
+                onVolumeRequest?(level, muted)
             case .settings(let r):
                 onSettingsResult?(r)
                 if r != .okReboot { refreshSettings() }

@@ -13,6 +13,7 @@ public enum CubeProtocol {
     public static let controlUUID = "6E6D3C10-5D1A-4C1E-9F0B-7C4A2B8E1A03"
     public static let infoUUID = "6E6D3C10-5D1A-4C1E-9F0B-7C4A2B8E1A04"
     public static let settingsUUID = "6E6D3C10-5D1A-4C1E-9F0B-7C4A2B8E1A05"
+    public static let volumeUUID = "6E6D3C10-5D1A-4C1E-9F0B-7C4A2B8E1A06"
     public static let maxSettings = 512  // one ATT value
 }
 
@@ -57,6 +58,8 @@ public enum ControlMessage: Equatable {
     case ack(seq: UInt8)
     case settings(SettingsResult)
     case pomodoroEnded(ended: PomodoroPhase, next: PomodoroPhase)
+    /// Set the Mac's output: an absolute level 0...100 and mute (fw_rev 5).
+    case volumeRequest(level: UInt8, muted: Bool)
 
     public static func parse(_ d: Data) -> ControlMessage? {
         let b = [UInt8](d)
@@ -70,6 +73,9 @@ public enum ControlMessage: Equatable {
         case 0x04:
             guard b.count >= 3, let e = PomodoroPhase(rawValue: b[1]), let n = PomodoroPhase(rawValue: b[2]) else { return nil }
             return .pomodoroEnded(ended: e, next: n)
+        case 0x05:
+            guard b.count >= 3, b[1] <= 100, b[2] <= 1 else { return nil }
+            return .volumeRequest(level: b[1], muted: b[2] == 1)
         default: return nil
         }
     }
