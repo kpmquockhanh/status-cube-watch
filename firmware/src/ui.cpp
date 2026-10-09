@@ -702,6 +702,7 @@ void drawPomodoroCard(LovyanGFX *g, const PomoView &v, float flash, bool online,
 constexpr uint32_t VOL_FILL = 0xCDB8FF;     // lavender: live
 constexpr uint32_t VOL_FIXED = 0x4A5366;    // the output sets its own level (HDMI)
 constexpr uint32_t VOL_ON_FILL = 0x231A3D;  // text and glyph where the fill covers them
+constexpr uint32_t VOL_IDLE = 0x4A5366;     // idle glyph: faint, but visible on the track
 constexpr int VOL_TEXT_MAX_W = 184;         // the name, clear of the pill's corners
 constexpr int VOL_NAME_Y = VOL_PILL_Y + 26;
 constexpr int VOL_NUM_Y = VOL_PILL_Y + 70;
@@ -722,6 +723,7 @@ bool clipSide(LovyanGFX *g, int edge, int pass) {
   return true;
 }
 
+// The name is printable ASCII: volumeParse (volume_frame.h) rejects anything else.
 // The caption: the output's name in capitals ("MAC VOLUME" when there is
 // none), cut with "..." to fit between the pill's corners.
 void volumeLabel(LovyanGFX *g, const char *name, char *out, size_t cap) {
@@ -818,7 +820,7 @@ void drawVolumeCard(LovyanGFX *g, const VolumeView &v, bool online, uint32_t age
       g->setTextColor(over ? onFill : DIM);
       g->drawString(word, LCD_WIDTH / 2, VOL_WORD_Y);
     }
-    drawSpeaker(g, v.level, v.muted, over ? onFill : idle ? FAINT : INK);
+    drawSpeaker(g, v.level, v.muted, over ? onFill : idle ? to565(VOL_IDLE) : INK);
   }
   g->clearClipRect();
   drawTopBar(g, online, ageMs, bat);
