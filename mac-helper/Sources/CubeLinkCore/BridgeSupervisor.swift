@@ -24,9 +24,9 @@ public final class BridgeSupervisor {
         return nil
     }
 
-    /// The bridge directory: the first of CUBE_BRIDGE_DIR, the one install.sh stored (`bridgeDir`), and
-    /// a `bridge/` in `searchFrom` (the working directory, the app bundle) or up to 4 of its parents,
-    /// that holds server.mjs. Nil when none does.
+    /// The bridge directory: the first of CUBE_BRIDGE_DIR, a recorded `bridgeDir` (older installs), and
+    /// a `bridge/` in `searchFrom` (the bundle's Resources, which build-app.sh fills, then the working
+    /// directory and the app bundle) or up to 4 of its parents, that holds server.mjs. Nil when none does.
     public static func findBridgeDir(env: [String: String], recorded: String?, searchFrom: [String],
                                      exists: (String) -> Bool) -> String? {
         var candidates = [env["CUBE_BRIDGE_DIR"], recorded].compactMap { $0 }.filter { !$0.isEmpty }
@@ -58,6 +58,7 @@ public final class BridgeSupervisor {
 
     private var spawnedAt: Date?
     private let bridgeDir: URL
+    private let childEnvironment: ([String: String]) -> [String: String]
     private let port: Int
     private let node: String?
     private let log: (String) -> Void
@@ -68,9 +69,13 @@ public final class BridgeSupervisor {
     private var lastAction: SupervisorAction?
     private var pendingRecheck: DispatchWorkItem?
 
-    /// `client` is shared with the app's own polling; nil makes one for `port`.
-    public init(bridgeDir: URL, port: Int, node: String?, client: BridgeClient? = nil, log: @escaping (String) -> Void) {
+    /// `client` is shared with the app's own polling; nil makes one for `port`. `childEnvironment` maps
+    /// the app's environment to the child's; it runs at every spawn, so a restart picks up new settings.
+    public init(bridgeDir: URL, port: Int, node: String?, client: BridgeClient? = nil,
+                childEnvironment: @escaping ([String: String]) -> [String: String] = { $0 },
+                log: @escaping (String) -> Void) {
         self.bridgeDir = bridgeDir
+        self.childEnvironment = childEnvironment
         self.port = port
         self.node = node
         self.log = log
@@ -94,6 +99,9 @@ public final class BridgeSupervisor {
         pendingRecheck = nil
         process?.terminate()
     }
+
+    /// True while the port is served by a bridge this app did not start, which keeps its own settings.
+    public var isAdopted: Bool { process == nil && lastAction == .adopt }
 
     /// Restarts a bridge this app spawned (it comes back after the backoff); otherwise re-checks the port.
     public func restart() {
@@ -138,7 +146,7 @@ public final class BridgeSupervisor {
         p.executableURL = URL(fileURLWithPath: node)
         p.arguments = ["server.mjs"]
         p.currentDirectoryURL = bridgeDir
-        var env = ProcessInfo.processInfo.environment
+        var env = childEnvironment(ProcessInfo.processInfo.environment)
         env["CUBE_PORT"] = String(port)
         p.environment = env
         Trace.log("bridge", "spawn \(node) server.mjs cwd \(bridgeDir.path) CUBE_PORT=\(port)")

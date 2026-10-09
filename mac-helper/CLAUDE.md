@@ -26,10 +26,11 @@ Running unbundled (`swift run`) works for the bridge and the menu, but posts no 
   - `BridgeSupervisor.decide`, `findNode`, `findBridgeDir`, `announcement` and `shouldResetBackoff`
   - `PushPolicy`, `Backoff`, `encodeFrames`, `ControlMessage.parse`, `encodeVolume` and `foldVolumeName`
   - `CubeSettings` (`parse`, `patch`, `rebase`, `needsReboot`), `MenuModel` and `PomodoroNotice`
+  - `BridgeSettings` (`environment`, `problem`, `imported`)
   - `validatePayloadBody`
 
   The stateful halves are not tested: `CubeLink` (CoreBluetooth) and the `Process` side of `BridgeSupervisor`. Put new logic in a testable static or struct, and have those classes call it.
-- **`ClaudeCubeLink`** (executable) is AppKit glue. `main.swift` is a top-level script that builds every object and connects them through `onX` callback closures, so no component holds a reference to another. `StatusMenu` and `MenuRows` render a `MenuModel`, `SettingsWindow` edits a `CubeSettings`, and `Notifier` posts banners; `SystemVolume` reads and sets the default output through CoreAudio and reports changes (coalesced 30 ms), and `main.swift` writes them to the cube with `CubeLink.writeVolume` (also once on `onReady`) and applies `onVolumeRequest`.
+- **`ClaudeCubeLink`** (executable) is AppKit glue. `main.swift` is a top-level script that builds every object and connects them through `onX` callback closures, so no component holds a reference to another. `StatusMenu` and `MenuRows` render a `MenuModel`, `SettingsWindow` edits a `CubeSettings`, `BridgeSettingsWindow` edits a `BridgeSettings` (saved by `BridgeSettingsStore`: defaults + one Keychain item), and `Notifier` posts banners; `SystemVolume` reads and sets the default output through CoreAudio and reports changes (coalesced 30 ms), and `main.swift` writes them to the cube with `CubeLink.writeVolume` (also once on `onReady`) and applies `onVolumeRequest`.
 
 Everything runs on the main queue. `CBCentralManager` is created with `queue: .main`, and `BridgeClient` and `Process` callbacks hop to main before touching state.
 
@@ -51,7 +52,7 @@ Everything runs on the main queue. `CBCentralManager` is created with `queue: .m
 
   Any failure during setup cancels the connection. The disconnect callback then reconnects with `Backoff` (1 s, doubling, capped at 30 s). `isCurrent` ignores late callbacks from a cube dropped by Forget cube.
 - **Sending.** Each payload goes out as `[ver, seq, idx, total]` frames, written with response. Every write, retries included, gets a new `seq`, and `seq` resets to 0 on connect, matching the cube. If no ACK arrives within 2 s, the app retries once; after that, the next heartbeat tries again.
-- **Bridge supervision.** `BridgeSupervisor` checks `/health`. If something already answers, it adopts that bridge and re-checks every 30 s. Otherwise it spawns `node server.mjs` with `cwd` set to the bridge directory and `CUBE_PORT` set. A child that dies is restarted with backoff, and the backoff resets after 60 s of uptime. Quit, `applicationWillTerminate` and the SIGTERM/SIGINT handlers all call `stop()`. Without that, an orphaned child would be adopted by the next launch, stale code and config included.
+- **Bridge supervision.** `BridgeSupervisor` checks `/health`. If something already answers, it adopts that bridge and re-checks every 30 s. Otherwise it spawns `node server.mjs` with `cwd` set to the bridge directory (normally the copy `build-app.sh` puts in `Contents/Resources/bridge`), `CUBE_PORT` set, and the rest of its environment from `BridgeSettings.environment`, evaluated at each spawn (Apply in Bridge settings calls `restart()`). A child that dies is restarted with backoff, and the backoff resets after 60 s of uptime. Quit, `applicationWillTerminate` and the SIGTERM/SIGINT handlers all call `stop()`. Without that, an orphaned child would be adopted by the next launch, stale code and config included.
 
 ## Keeping the two sides in step
 
@@ -66,6 +67,6 @@ Everything runs on the main queue. `CBCentralManager` is created with `queue: .m
 
 - In the LaunchAgent, `KeepAlive` is `SuccessfulExit=false`, so launchd restarts the app only after a non-zero exit. Intentional exits must return 0: SIGTERM, and a second instance finding the lock held. Anything else makes launchd respawn the app in a loop.
 - The app is an accessory app (`LSUIElement`, `.accessory`). It still sets a main menu with an Edit menu, because without one Cmd-C/V/X/A/Z do nothing in the settings window's text fields.
-- The defaults domain is `com.claude-cube.link` (the bundle id). It holds `bridgeDir` and `nodePath` (written by `install.sh`), `cubeIdentifier`, and `pomodoroNotifications`. The lookup order for the bridge directory and node is: env, then defaults, then a search near the working directory or app bundle.
+- The defaults domain is `com.claude-cube.link` (the bundle id). It holds `nodePath` and `importConfig` (written by `install.sh`; the app removes `importConfig` after the one-time import), `bridgeSettings` (JSON), `cubeIdentifier`, and `pomodoroNotifications`; `bridgeDir` only on installs from before the bridge was bundled. The lookup order for the bridge directory is: env, a leftover `bridgeDir`, the bundled copy, a search near the working directory; for node: env, defaults, fixed paths. The bridge secrets are a generic-password Keychain item (service `com.claude-cube.link`, account `bridge`); the app is ad-hoc signed, so every rebuild asks once for access to it.
 - The package uses Swift 6 tools with the Swift 5 language mode (`swiftLanguageModes: [.v5]`) and targets macOS 13.
 - `log()` in `main.swift` is `Trace.info` and always writes. `Trace.log` writes only when tracing is on. Both use one serial queue, so lines stay in order. When stderr is not a regular file (a launch from Finder or `open`), `main.swift` redirects it to the log file.

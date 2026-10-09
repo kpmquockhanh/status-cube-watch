@@ -13,7 +13,7 @@ curl -s localhost:8787/health            # always 200 while serving; {ok, error,
 ./agent.sh restart                       # reload the LaunchAgent copy (label com.claude-status-cube.bridge, logs in ~/Library/Logs/claude-status-cube/)
 ```
 
-There is no hot reload. `server.mjs` imports `cards.mjs` and the sources once, so after editing them, restart the bridge. Depending on how it was started, that means Ctrl-C, `./agent.sh restart`, or **Restart bridge** in the Mac helper's menu. `preview.html` is re-read from disk on every request, so a browser reload is enough for it.
+There is no hot reload. `server.mjs` imports `cards.mjs` and the sources once, so after editing them, restart the bridge. Depending on how it was started, that means Ctrl-C, `./agent.sh restart`, or, for the Mac helper, `../mac-helper/install.sh install`: the app runs its own bundled copy of this directory, so **Restart bridge** alone reloads the old code (or launch the app with `CUBE_BRIDGE_DIR` pointing here). That copy gets its settings from the app ("Bridge settings…") as env vars, which win over any `config.json`. `preview.html` is re-read from disk on every request, so a browser reload is enough for it.
 
 To try a card layout without a network, a Keychain or a running server, call `buildPayload` directly. To see what the real firmware renderer draws, feed the result to the simulator's frame grab:
 

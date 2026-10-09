@@ -41,17 +41,25 @@ if let i = argv.firstIndex(of: "--port"), i + 1 < argv.count, let p = Int(argv[i
 
 // After the environment, what install.sh recorded in the app's defaults: a launch from Finder or
 // `open` has no LaunchAgent environment and "/" as its working directory, and nvm's node is not on
-// any fixed path. Last, a bridge/ near the working directory or the app bundle (a build in the repo).
+// any fixed path. The bridge normally ships inside the bundle (Contents/Resources/bridge); a bridge/
+// near the working directory or the app bundle covers `swift run` in the repo.
 let cwd = FileManager.default.currentDirectoryPath
 let bridgeDir = URL(fileURLWithPath: BridgeSupervisor.findBridgeDir(
     env: env, recorded: UserDefaults.standard.string(forKey: "bridgeDir"),
-    searchFrom: [cwd, Bundle.main.bundlePath], exists: { FileManager.default.fileExists(atPath: $0) })
+    searchFrom: [Bundle.main.resourcePath ?? "", cwd, Bundle.main.bundlePath],
+    exists: { FileManager.default.fileExists(atPath: $0) })
     ?? env["CUBE_BRIDGE_DIR"] ?? cwd + "/bridge")
 let node = BridgeSupervisor.findNode(env: env, recorded: UserDefaults.standard.string(forKey: "nodePath"),
                                      exists: { FileManager.default.isExecutableFile(atPath: $0) })
 
+// The bridge's own settings (source, extra cards, mail, LAN): kept in the app, handed to the child as env.
+let bridgeStore = BridgeSettingsStore(log: log)
+bridgeStore.importConfigIfOffered()
+
 let client = BridgeClient(port: port)
-let supervisor = BridgeSupervisor(bridgeDir: bridgeDir, port: port, node: node, client: client, log: log)
+let supervisor = BridgeSupervisor(bridgeDir: bridgeDir, port: port, node: node, client: client,
+                                  childEnvironment: { bridgeStore.settings.environment(inherited: $0, secrets: bridgeStore.secrets) },
+                                  log: log)
 let link = CubeLink(log: log)
 var policy = PushPolicy(heartbeat: 5)
 var lastBridgeError = ""
@@ -133,6 +141,25 @@ link.onSettingsResult = { settingsWindow.showResult($0) }
 statusMenu.onShowSettings = {
     link.refreshSettings()  // the cube may have been edited on its own screen since
     settingsWindow.show()
+}
+
+let bridgeSettingsWindow = BridgeSettingsWindow()
+/// What the window says about who runs the bridge, before and after a save.
+func bridgeSettingsNote(saved: Bool) -> String {
+    if supervisor.isAdopted {
+        return (saved ? "Saved, but the" : "The") + " bridge on :\(port) was started outside this app and keeps "
+            + "its own config. Stop it (bridge/agent.sh uninstall) and these apply."
+    }
+    return saved ? "Saved. Restarting the bridge…" : "Apply saves and restarts the bridge."
+}
+bridgeSettingsWindow.onApply = { s, secrets in
+    if let why = bridgeStore.save(s, secrets) { return "Not saved to the Keychain: \(why)" }
+    let note = bridgeSettingsNote(saved: true)
+    if !supervisor.isAdopted { supervisor.restart() }
+    return note
+}
+statusMenu.onShowBridgeSettings = {
+    bridgeSettingsWindow.show(bridgeStore.settings, bridgeStore.secrets, note: bridgeSettingsNote(saved: false))
 }
 
 link.onSendNow = { tick(force: true) }

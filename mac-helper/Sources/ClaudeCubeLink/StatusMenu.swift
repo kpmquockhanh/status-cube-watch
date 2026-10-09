@@ -6,6 +6,7 @@ final class StatusMenu: NSObject, NSMenuDelegate {
     var onSendNow: () -> Void = {}
     var onRestartBridge: () -> Void = {}
     var onShowSettings: () -> Void = {}
+    var onShowBridgeSettings: () -> Void = {}
     var onForgetCube: () -> Void = {}
     var logURL: URL?
     var prefs = PomodoroNoticePrefs()
@@ -62,6 +63,7 @@ final class StatusMenu: NSObject, NSMenuDelegate {
         menu.addItem(action("Send now", #selector(sendNow), key: "s"))
         menu.addItem(action("Restart bridge", #selector(restartBridge), key: "r"))
         menu.addItem(action("Cube settings…", #selector(showSettings), key: ","))
+        menu.addItem(action("Bridge settings…", #selector(showBridgeSettings), key: ""))
         menu.addItem(action("Forget cube", #selector(forgetCube), key: ""))
         let notices = action("Pomodoro notifications", #selector(toggleNotices), key: "")
         noticesItem = notices
@@ -108,6 +110,7 @@ final class StatusMenu: NSObject, NSMenuDelegate {
     @objc private func sendNow() { onSendNow() }
     @objc private func restartBridge() { onRestartBridge() }
     @objc private func showSettings() { onShowSettings() }
+    @objc private func showBridgeSettings() { onShowBridgeSettings() }
     @objc private func forgetCube() { onForgetCube() }
     @objc private func showLog() {
         guard let url = logURL else { return }

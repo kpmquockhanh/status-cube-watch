@@ -8,7 +8,7 @@ A desk display for Claude rate-limit usage. Two halves that talk over plain HTTP
 
 - `bridge/` — Node ≥20 ESM, **zero npm dependencies**. Gathers data on the host and serves one small, fully pre-formatted JSON document at `GET /api/status` (plus `/` = browser mock, `/health`).
 - `firmware/` — PlatformIO / Arduino for a Waveshare ESP32-S3-Touch-LCD-1.69 (240x280 ST7789V2, CST816 touch), drawn with LovyanGFX (no LVGL) + ArduinoJson. It only polls the bridge (or takes the same payload over BLE) and draws strings; it never talks to Anthropic.
-- `mac-helper/` — Swift package building `ClaudeCubeLink.app`: supervises the bridge (`node bridge/server.mjs`) and pushes `/api/status` to the cube over BLE (CoreBluetooth). Optional; BLE users run its `install.sh` instead of `bridge/agent.sh`. It shows a menu bar item (`StatusMenu.swift`: 5h percent tinted at 60/85%, dropdown of cards, bridge/cube status, Send now / Restart bridge / Cube settings… / Forget cube / a "Pomodoro notifications" checkbox / Quit, which also stops the bridge child it started; the checkbox gates the macOS banner `Notifier.swift` posts when the cube reports a finished phase, wording in `PomodoroNotice`); what it displays is derived by the pure `MenuModel` in `CubeLinkCore`.
+- `mac-helper/` — Swift package building `ClaudeCubeLink.app`: supervises the bridge (a copy of `bridge/` that `build-app.sh` puts in `Contents/Resources/bridge`, run with the system `node`; its settings are kept in the app, edited in "Bridge settings…" and passed to the child as the bridge's env vars, secrets in the Keychain, `BridgeSettings` in `CubeLinkCore`) and pushes `/api/status` to the cube over BLE (CoreBluetooth). Optional; BLE users run its `install.sh` instead of `bridge/agent.sh`. It shows a menu bar item (`StatusMenu.swift`: 5h percent tinted at 60/85%, dropdown of cards, bridge/cube status, Send now / Restart bridge / Cube settings… / Bridge settings… / Forget cube / a "Pomodoro notifications" checkbox / Quit, which also stops the bridge child it started; the checkbox gates the macOS banner `Notifier.swift` posts when the cube reports a finished phase, wording in `PomodoroNotice`); what it displays is derived by the pure `MenuModel` in `CubeLinkCore`.
 
 The README is detailed and authoritative for setup, troubleshooting and design rationale.
 
@@ -34,8 +34,8 @@ Mac helper (from `mac-helper/`):
 swift test                                          # frame encoding, push policy, supervisor decisions, shared fixture
 ./install.sh install|status|logs|restart|uninstall  # LaunchAgent; install needs a terminal (Bluetooth-permission prompt)
 ```
-`install.sh` also records `bridgeDir`/`nodePath` in the `com.claude-cube.link` defaults, used after env and before searching near the cwd / app bundle.
-App env: `CUBE_PORT`, `CUBE_BRIDGE_DIR`, `CUBE_NODE`; flag `--port`.
+`install.sh` also records `nodePath` in the `com.claude-cube.link` defaults (and removes the `bridgeDir` older installs recorded), and names `bridge/config.json` in `importConfig`, which the app imports once into its own bridge settings if it has none. Bridge lookup: `CUBE_BRIDGE_DIR`, a leftover `bridgeDir`, the bundled copy, a `bridge/` near the cwd (`swift run`). Edits to `bridge/` reach the installed app only after `./install.sh install`.
+App env: `CUBE_PORT`, `CUBE_BRIDGE_DIR`, `CUBE_NODE`; flag `--port`. The bridge-config env vars (`CUBE_SOURCE`, `CUBE_EXTRA_CARDS`, `CUBE_REFRESH_MS`, `CUBE_HOST`, the admin and Gmail ones) are not passed through to the child: the app's Bridge settings decide them.
 
 Desktop simulator (from `firmware/sim/`, needs `brew install sdl2` and one prior `pio run`):
 ```sh

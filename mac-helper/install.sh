@@ -27,7 +27,6 @@ write_plist() {
   <key>Label</key><string>$LABEL</string>
   <key>ProgramArguments</key><array><string>$APP_BIN</string></array>
   <key>EnvironmentVariables</key><dict>
-    <key>CUBE_BRIDGE_DIR</key><string>$REPO/bridge</string>
     <key>CUBE_PORT</key><string>$port</string>
     <key>CUBE_NODE</key><string>$node_found</string>
   </dict>
@@ -54,12 +53,18 @@ stop_app() {
   echo "warning: Claude Cube Link is still running; quit it from its menu bar item" >&2
 }
 
-# Records the bridge and node paths in the app's defaults, for launches without the LaunchAgent's
-# environment (Finder, `open`: no CUBE_* variables, working directory "/").
+# Records the node path in the app's defaults, for launches without the LaunchAgent's environment
+# (Finder, `open`: no CUBE_* variables), and offers bridge/config.json for import. The bridge is
+# inside the app now; a bridgeDir recorded by an older install would point the app back at the repo, so it goes.
 record_paths() {
   local node_found
   node_found="$(command -v node || true)"
-  defaults write "$BUNDLE_ID" bridgeDir -string "$REPO/bridge"
+  defaults delete "$BUNDLE_ID" bridgeDir 2>/dev/null || true
+  # The bridge settings live in the app now (menu: Bridge settings…). On its next launch the app
+  # imports this file once, only if it has no bridge settings of its own yet.
+  if [ -f "$REPO/bridge/config.json" ]; then
+    defaults write "$BUNDLE_ID" importConfig -string "$REPO/bridge/config.json"
+  fi
   if [ -n "$node_found" ]; then
     defaults write "$BUNDLE_ID" nodePath -string "$node_found"
   else
@@ -102,7 +107,8 @@ case "${1:-}" in
     rm -rf "$APP_DST"
     defaults delete "$BUNDLE_ID" bridgeDir 2>/dev/null || true
     defaults delete "$BUNDLE_ID" nodePath 2>/dev/null || true
-    echo "Uninstalled. (Bluetooth permission and the cube's pairing are kept.)"
+    defaults delete "$BUNDLE_ID" importConfig 2>/dev/null || true
+    echo "Uninstalled. (Bluetooth permission, the cube's pairing and the bridge settings are kept.)"
     ;;
   *)
     echo "usage: $0 install|status|logs|restart|uninstall" >&2

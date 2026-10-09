@@ -70,14 +70,15 @@ unfilled ring reads as a legible nothing; a missing ring reads as a bug.
 The spend and token breakdowns (`TODAY`, `THIS MONTH`, `TOKENS TODAY`,
 `TOP MODEL`, `TOP PROJECT`) are still built in `bridge/cards.mjs` and are one
 flag away -- set `"extraCards": true` in `bridge/config.json`, or run with
-`CUBE_EXTRA_CARDS=1`, to swipe through them as well. They are off by default,
+`CUBE_EXTRA_CARDS=1` (with the Mac helper: **Bridge settings…**), to swipe through them as well. They are off by default,
 and they have no percentage of anything to fill a ring with, so they keep the
 older big-number layout (see **Adding a card**).
 
 ### Unread mail card
 
 Set `"gmail": {"user": "you@gmail.com", "appPassword": "xxxx xxxx xxxx xxxx"}`
-in `bridge/config.json` (or `CUBE_GMAIL_USER` / `CUBE_GMAIL_PASSWORD`) and a
+in `bridge/config.json` (or `CUBE_GMAIL_USER` / `CUBE_GMAIL_PASSWORD`; with the Mac helper, the
+Mail fields in **Bridge settings…**) and a
 number appears next to an envelope in the gap of the rings. The bridge
 reads it over IMAP (`STATUS INBOX (UNSEEN)`, at most once a minute), so the
 device never sees a credential. Create the app password at
@@ -200,19 +201,37 @@ cd mac-helper
    (`read`) until you press Enter, so run it from a terminal, not a script without stdin.
 3. The cube shows a 6-digit code; macOS asks for it. Type it. That is the whole pairing.
 4. From then on it reconnects by itself. The app also runs the Node bridge for you
-   (`node bridge/server.mjs`, restarted if it dies); if something already serves the port, such as
-   a running `bridge/agent.sh` job, the app adopts that bridge instead of starting its own.
+   (`node server.mjs` from a copy of `bridge/` inside the app, restarted if it dies); if something
+   already serves the port, such as a running `bridge/agent.sh` job, the app adopts that bridge
+   instead of starting its own. Node itself is not bundled: it needs Node 20+ installed.
 
 **`install.sh` replaces `bridge/agent.sh`.** BLE users run `mac-helper/install.sh` instead of
 `bridge/agent.sh install`. If the `agent.sh` job is already installed, run
 `bridge/agent.sh uninstall` first; otherwise both LaunchAgents fight for the same port.
+**The bridge ships inside the app.** `build-app.sh` copies the bridge's code (not `config.json`)
+to `ClaudeCubeLink.app/Contents/Resources/bridge`, so the app runs the same way from the
+LaunchAgent, Finder or `open`, wherever the repo is. A change to `bridge/` reaches the app only
+after `./install.sh install` again.
+
+**Bridge settings live in the app**, not in `bridge/config.json`: menu **Bridge settings…** edits
+the usage source (local logs or Admin API, with its key or OAuth token), the spend/token cards,
+the refresh interval, Gmail (address + app password) and whether the bridge serves the LAN (WiFi
+cubes need it; off = `127.0.0.1` only). Apply saves and restarts the bridge, which gets them as the
+bridge's environment variables (`CUBE_SOURCE`, `CUBE_EXTRA_CARDS`, `CUBE_REFRESH_MS`,
+`CUBE_HOST`, `ANTHROPIC_ADMIN_*`, `CUBE_GMAIL_*`), which win over any `config.json`. The secrets are one Keychain item ("Claude Cube Link
+bridge settings"); the rest is in the app's defaults (`bridgeSettings`). On its first launch after
+`./install.sh install` the app imports `bridge/config.json` once, if it has no settings of its own
+yet. Each reinstall re-signs the app, so macOS asks once to let the new build read that Keychain
+item: choose **Always Allow**. A bridge the app adopted (say, a running `agent.sh` job) keeps its own
+config; the window says so.
 The app reads `CUBE_PORT` (default 8787), `CUBE_BRIDGE_DIR` and `CUBE_NODE` (path to `node`) from
-the environment, and takes `--port N` on its command line; `install.sh` writes them into the
-LaunchAgent, which restarts the app only after a crash (`KeepAlive` with `SuccessfulExit=false`).
-`install.sh` also records the bridge directory and node path in the app's defaults
-(`defaults read com.claude-cube.link`), used when the app is started without the LaunchAgent
-(Finder, `open`). Order: `CUBE_BRIDGE_DIR` / `CUBE_NODE`, then the recorded values, then a
-`bridge/` next to the working directory or the app bundle (node: the Homebrew and system paths).
+the environment, and takes `--port N` on its command line; `install.sh` writes the port and node
+into the LaunchAgent, which restarts the app only after a crash (`KeepAlive` with
+`SuccessfulExit=false`), and records the node path in the app's defaults
+(`defaults read com.claude-cube.link`) for launches without the LaunchAgent. Bridge order:
+`CUBE_BRIDGE_DIR` (to run the repo's bridge while working on it), a `bridgeDir` default left by an
+older install (`install.sh install` removes it), the bundled copy, then a `bridge/` next to the
+working directory (`swift run`). Node: `CUBE_NODE`, the recorded path, the Homebrew and system paths.
 The app talks to the bridge on `127.0.0.1`; a bridge whose `host` is pinned to a LAN address
 listens on `127.0.0.1` as well, so any `host` works.
 

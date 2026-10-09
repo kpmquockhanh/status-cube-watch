@@ -56,6 +56,18 @@ import Testing
     #expect(BridgeSupervisor.findBridgeDir(env: [:], recorded: nil, searchFrom: ["/repo"], exists: exists) == "/repo/bridge")
 }
 
+@Test func findsTheBridgeInsideTheBundleFirst() {
+    let res = "/Users/me/Applications/ClaudeCubeLink.app/Contents/Resources"
+    let present: Set<String> = [res + "/bridge/server.mjs", "/repo/bridge/server.mjs"]
+    let exists: (String) -> Bool = { present.contains($0) }
+    // Finder launch: cwd "/", nothing recorded.
+    #expect(BridgeSupervisor.findBridgeDir(env: [:], recorded: nil, searchFrom: [res, "/", "/Users/me/Applications/ClaudeCubeLink.app"],
+                                           exists: exists) == res + "/bridge")
+    // The environment still overrides it, for working on the bridge.
+    #expect(BridgeSupervisor.findBridgeDir(env: ["CUBE_BRIDGE_DIR": "/repo/bridge"], recorded: nil, searchFrom: [res],
+                                           exists: exists) == "/repo/bridge")
+}
+
 @Test func bridgeSearchStopsAFewLevelsUp() {
     let exists: (String) -> Bool = { $0 == "/a/bridge/server.mjs" }
     #expect(BridgeSupervisor.findBridgeDir(env: [:], recorded: nil, searchFrom: ["/a/b/c/d/e"], exists: exists) == "/a/bridge")
