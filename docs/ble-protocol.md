@@ -13,6 +13,7 @@ Everything here is pinned by `firmware/src/ble_frame.h` and `firmware/sim/fixtur
 | Control | `6e6d3c10-5d1a-4c1e-9f0b-7c4a2b8e1a03` | notify                                   |
 | Info    | `6e6d3c10-5d1a-4c1e-9f0b-7c4a2b8e1a04` | read (encrypted + authenticated)         |
 | Settings| `6e6d3c10-5d1a-4c1e-9f0b-7c4a2b8e1a05` | read + write (encrypted + authenticated) |
+| Volume  | `6e6d3c10-5d1a-4c1e-9f0b-7c4a2b8e1a06` | write (encrypted + authenticated), fw_rev 5+ |
 
 Info is 2 bytes: `[proto_ver, fw_rev]`. Reading it is what triggers pairing, so the Mac reads
 Info first, checks `proto_ver == 1`, then subscribes to Control, then writes payloads.
@@ -39,6 +40,7 @@ negotiated write length (`maximumWriteValueLength(for: .withResponse)`, about 50
 | `02 <seq>`   | the payload with that seq was reassembled (not necessarily valid JSON) |
 | `03 <result>`| a Settings write was handled: `00` saved, `01` rejected (nothing changed), `02` saved and the cube is rebooting |
 | `04 <ended> <next>` | a Pomodoro phase just ended (added in fw_rev 3, protocol still 1). `<ended>` is the phase that finished and `<next>` the one a double tap would start: `00` focus, `01` short break, `02` long break. Fire and forget: no ack, and it is dropped if no Mac is subscribed |
+| `05 <level> <muted>` | set the Mac's output to `<level>` (0..100) and mute it when `<muted>` is `01` (added in fw_rev 5, protocol still 1). An absolute target, so a lost or repeated message cannot drift the volume. Fire and forget: no ack, and it is dropped if no Mac is subscribed. A Mac that does not know `05` ignores it |
 
 ## Liveness
 
@@ -86,3 +88,35 @@ result the Mac reads Settings again to see what was stored. A rejected write is 
 returns: the cube republishes the stored values. Settings saved on the cube itself (the display
 panel or the Pomodoro editor) are republished as the editor closes, so the next read returns them;
 nothing is notified.
+
+## Volume (added in fw_rev 5, protocol still 1)
+
+The Mac writes its output state to the Volume characteristic, with response, at most 26 bytes:
+
+    [ver=1][level][flags][name...]
+
+- `level`: 0..100, or `ff` when the Mac has no output device.
+- `flags`: bit0 muted, bit1 the volume can be set, bit2 mute can be set. Other bits are 0, and the
+  cube ignores them.
+- `name`: the output device name, printable ASCII (0x20..0x7E), 0..23 bytes, no terminator. The
+  Mac folds it first: diacritics stripped, other non-ASCII dropped, cut to 23 bytes.
+
+The cube drops the whole write when the value is shorter than 3 bytes, `ver` is not 1, `level` is
+over 100 and not `ff`, or the name holds a byte outside 0x20..0x7E. A dropped write keeps the
+previous state.
+
+When the Mac writes:
+
+- once, after it has subscribed to Control;
+- then on every change to the volume, mute, name or default output device, coalesced over 30 ms.
+
+The cube forgets the state when the link drops, and its Volume card then shows NO MAC. A cube
+without the characteristic (fw_rev < 5) gets no writes, and the Mac logs that once per connection.
+
+Latency: the idle connection parameters let the cube skip up to 6 connection events, so a write
+can take about 300 ms to land. A drag on the cube goes the other way (Control `05`) and the fill
+follows the finger locally, so this only delays how fast a change made on the Mac's keyboard
+shows on the cube.
+
+Golden encodings for both directions are the `vol_request` and `vol_state` lines in
+`firmware/sim/fixtures/ble-frames.txt`.
