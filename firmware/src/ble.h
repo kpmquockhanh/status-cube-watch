@@ -52,3 +52,6 @@ bool bleTakeVolume(MacVolume &out);
 void bleSendVolume(uint8_t level, bool muted);
 // Asks the Mac to press a media key: Control `06 <key>` (fw_rev 6). Fire and forget.
 void bleSendMedia(MediaKey key);
+// Asks the Mac to unlock its screen: Control `07` (fw_rev 7). Fire and forget;
+// the Mac acts only while it is locked and "Unlock with cube" is on.
+void bleSendUnlock();

@@ -1322,6 +1322,44 @@ void uiBlePair(Display &lcd, uint32_t passkey) {
   present(lcd);
 }
 
+void uiUnlock(Display &lcd, bool waiting, const PomoView &pomo) {
+  g_animating = false;
+  LovyanGFX *g = target(lcd);
+  g->fillScreen(BG);
+  const uint16_t col = waiting ? DIM : g_palette[ACC_ACCENT];
+
+  // A padlock: the shackle is a ring with its lower half cut away, plus legs
+  // down into the body. While waiting it is lifted and the right leg is free.
+  constexpr int CX = LCD_WIDTH / 2, BODY_Y = 98, BODY_W = 64, BODY_H = 50;
+  const int sy = waiting ? BODY_Y - 26 : BODY_Y - 14;
+  g->fillSmoothCircle(CX, sy, 24, col);
+  g->fillSmoothCircle(CX, sy, 16, BG);
+  g->fillRect(CX - 25, sy, 50, 26, BG);
+  g->fillRect(CX - 24, sy, 8, BODY_Y - sy, col);
+  if (!waiting) g->fillRect(CX + 16, sy, 8, BODY_Y - sy, col);
+  g->fillSmoothRoundRect(CX - BODY_W / 2, BODY_Y, BODY_W, BODY_H, 9, col);
+  g->fillSmoothCircle(CX, BODY_Y + 20, 6, BG);
+  g->fillRect(CX - 2, BODY_Y + 22, 5, 14, BG);
+
+  g->setTextDatum(middle_center);
+  g->setFont(&V_B24.font);
+  g->setTextColor(INK, BG);
+  g->drawString(waiting ? "Unlocking" : "Tap to unlock", CX, 186);
+  drawCaps(g, waiting ? "Check your Mac" : "Your Mac is locked", CX, 214, DIM, middle_center);
+
+  const bool session = pomo.state == POMO_FOCUS || pomo.state == POMO_BREAK || pomo.state == POMO_PAUSED;
+  if (session) {
+    char clock[8], line[24];
+    pomoFormatTime(pomo.displaySec, clock, sizeof(clock));
+    snprintf(line, sizeof(line), "%s %s%s", pomo.phase == PHASE_FOCUS ? "Focus" : "Break", clock,
+             pomo.state == POMO_PAUSED ? " paused" : "");
+    drawCaps(g, line, CX, 256, ACC_POMO, middle_center);
+  } else {
+    drawCaps(g, "Swipe for the cards", CX, 256, MUTED, middle_center);
+  }
+  present(lcd);
+}
+
 void uiOta(Display &lcd, uint8_t percent) {
   LovyanGFX *g = target(lcd);
   g->fillScreen(BG);

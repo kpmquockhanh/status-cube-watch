@@ -179,10 +179,15 @@ link.onPomodoroEnded = { ended, next in
 notifier.start()
 let systemVolume = SystemVolume()
 let nowPlaying = NowPlaying(log: log)
-/// The Volume frame: the output's state plus whether anything is playing.
+let screenLock = ScreenLock()
+let unlocker = Unlocker(log: log)
+var unlockPolicy = UnlockPolicy()
+/// The Volume frame: the output's state, whether anything is playing, and whether the cube should
+/// offer to unlock the Mac.
 func volumeFrame(_ v: MacVolume) -> Data {
     var v = v
     v.playing = nowPlaying.playing
+    v.locked = UnlockPolicy.offer(enabled: unlocker.isEnabled, locked: screenLock.isLocked)
     return encodeVolume(v)
 }
 systemVolume.onChange = { v in
@@ -205,6 +210,27 @@ link.onMediaKey = { key in
     Trace.log("media", "cube presses \(key)")
     mediaKeys.press(key)
 }
+screenLock.onChange = { locked in
+    Trace.log("unlock", "screen \(locked ? "locked" : "unlocked")")
+    _ = link.writeVolume(volumeFrame(systemVolume.current()))
+}
+link.onUnlock = {
+    switch unlockPolicy.decide(enabled: unlocker.isEnabled, locked: screenLock.isLocked,
+                               trusted: unlocker.isTrusted, now: Date()) {
+    case .type:
+        log("unlocking: tapped on the cube")
+        unlocker.unlock()
+    case .ignore(let why):
+        log("unlock request ignored: \(why)")
+    }
+}
+statusMenu.unlockOn = unlocker.isEnabled
+statusMenu.onToggleUnlock = {
+    if unlocker.isEnabled { unlocker.disable() } else { unlocker.enableInteractively() }
+    statusMenu.unlockOn = unlocker.isEnabled
+    _ = link.writeVolume(volumeFrame(systemVolume.current()))
+}
+screenLock.start()
 link.onStateChange = { Trace.log("link", "state -> \($0)"); refreshMenu() }
 statusMenu.onSendNow = { tick(force: true) }
 statusMenu.onRestartBridge = { supervisor.restart() }

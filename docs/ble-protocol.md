@@ -48,6 +48,7 @@ negotiated write length (`maximumWriteValueLength(for: .withResponse)`, about 50
 | `04 <ended> <next>` | a Pomodoro phase just ended (added in fw_rev 3, protocol still 1). `<ended>` is the phase that finished and `<next>` the one a double tap would start: `00` focus, `01` short break, `02` long break. Fire and forget: no ack, and it is dropped if no Mac is subscribed |
 | `05 <level> <muted>` | set the Mac's output to `<level>` (0..100) and mute it when `<muted>` is `01` (added in fw_rev 5, protocol still 1). An absolute target, so a lost or repeated message cannot drift the volume. Fire and forget: no ack, and it is dropped if no Mac is subscribed. A Mac that does not know `05` ignores it |
 | `06 <key>` | press a media key on the Mac: `00` play/pause, `01` next, `02` previous (added in fw_rev 6, protocol still 1). The Volume card's buttons send it. Fire and forget: no ack, and it is dropped if no Mac is subscribed. A Mac that does not know `06` ignores it |
+| `07` | unlock the Mac's screen: a tap on the cube's unlock prompt (added in fw_rev 7, protocol still 1). The Mac types the stored login password only while its screen is locked, "Unlock Mac with cube" is on and it holds the Accessibility permission, and at most once per 5 s; otherwise it logs why and does nothing. Fire and forget: no ack, and it is dropped if no Mac is subscribed. A Mac that does not know `07` ignores it |
 
 ## Liveness
 
@@ -105,8 +106,9 @@ The Mac writes its output state to the Volume characteristic, with response, at 
 - `level`: 0..100, or `ff` when the Mac has no output device.
 - `flags`: bit0 muted, bit1 the volume can be set, bit2 mute can be set, bit3 the Now Playing state
   is known, bit4 something is playing (bits 3-4 from fw_rev 6: the play/pause button shows play or
-  pause; with bit3 clear it shows both). Other bits are 0, and the cube ignores them, so older
-  firmware ignores bits 3-4. The Mac reads the state through an `osascript` child, because macOS
+  pause; with bit3 clear it shows both), bit5 the Mac's screen is locked and it will unlock for
+  Control `07` (fw_rev 7, see "Unlock" below). Other bits are 0, and the cube ignores them, so older
+  firmware ignores the bits it does not know. The Mac reads the state through an `osascript` child, because macOS
   answers MediaRemote's now-playing queries only for Apple-signed processes, and rewrites the
   frame whenever it changes.
 - `name`: the output device name, printable ASCII (0x20..0x7E), 0..23 bytes, no terminator. The
@@ -131,3 +133,21 @@ shows on the cube.
 
 Golden encodings for both directions are the `vol_request` and `vol_state` lines in
 `firmware/sim/fixtures/ble-frames.txt`.
+
+## Unlock (added in fw_rev 7, protocol still 1)
+
+The Mac sets Volume flag bit5 while its screen is locked and the user turned on "Unlock Mac with
+cube" (the menu item stores the login password in the Mac's Keychain after checking it with
+OpenDirectory). It rewrites the Volume frame when either changes. The cube covers its deck with a
+"Tap to unlock" screen while the bit is set; a tap sends Control `07` and the screen says UNLOCKING
+until the bit clears, or for 6 s, then asks again. A swipe shows the deck; the prompt returns after
+30 s without a touch, or on the next lock. A Pomodoro phase end also puts it aside, so the alert shows.
+
+The password never crosses the link: `07` carries nothing, and the Mac decides on its own state
+(locked, feature on, Accessibility granted, 5 s since the last attempt) before it wakes the display
+and types the password and Return as keyboard events. It checks the stored password again first, so
+one changed since it was stored is never typed. The link is the bonded, passkey-paired one, so only
+the paired cube can ask; anyone holding that cube can, which is the trade the user opts into. It
+cannot help at the FileVault login after a restart, since the app is not running yet.
+
+The golden encoding is the `unlock` line in `firmware/sim/fixtures/ble-frames.txt`.

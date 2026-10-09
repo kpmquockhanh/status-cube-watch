@@ -63,6 +63,9 @@ constexpr VolRect VOL_PREV_ZONE = volRowZone(0);
 constexpr VolRect VOL_PLAY_ZONE = volRowZone(1);
 constexpr VolRect VOL_NEXT_ZONE = volRowZone(2);
 constexpr VolRect VOL_MUTE_ZONE{VOL_MUTE_X, VOL_MUTE_Y, VOL_MUTE_W, VOL_MUTE_H};
+// After a play/pause tap the button shows the new state at once; the Mac's
+// reports are not shown until one agrees, or this long has passed.
+constexpr uint32_t VOLUME_PLAY_GUESS_MS = 1500;
 // How long a pressed media button stays highlighted.
 constexpr uint32_t VOLUME_PRESS_MS = 180;
 
@@ -143,8 +146,24 @@ class VolumeSlider {
     apply(v);
   }
 
+  // Play/pause was tapped: show the opposite of what the Mac last said until
+  // it reports the same (or VOLUME_PLAY_GUESS_MS passes). Nothing when the
+  // Mac has not said whether anything plays. True when the view changed.
+  bool guessPlayToggled(uint32_t now) {
+    if (state() == VolState::NoMac || !_mac.playKnown) return false;
+    const int8_t shown = _playGuess >= 0 ? _playGuess : (_mac.playing ? 1 : 0);
+    _playGuess = shown ? 0 : 1;
+    _playGuessAt = now;
+    return true;
+  }
+
   // Ends the hold window and applies a parked state. True when the view changed.
   bool tick(uint32_t now) {
+    if (_playGuess >= 0 && now - _playGuessAt >= VOLUME_PLAY_GUESS_MS) {
+      _playGuess = -1;  // the Mac never agreed: show what it says
+      tick(now);
+      return true;
+    }
     if (_quiet && now - _releasedAt >= VOLUME_HOLD_MS) _quiet = false;
     if (_held || _quiet || !_hasParked) return false;
     apply(_parked);
@@ -216,7 +235,11 @@ class VolumeSlider {
     v.canMute = _mac.canMute;
     v.tracking = _held;
     v.pressed = -1;  // main.cpp sets it: the press is not the slider's state
-    v.playing = v.state == VolState::NoMac || !_mac.playKnown ? -1 : _mac.playing ? 1 : 0;
+    v.playing = v.state == VolState::NoMac      ? -1
+                : _playGuess >= 0                ? _playGuess
+                : !_mac.playKnown                ? -1
+                : _mac.playing                   ? 1
+                                                 : 0;
     memcpy(v.name, _mac.name, sizeof(v.name));
     return v;
   }
@@ -225,6 +248,8 @@ class VolumeSlider {
 
  private:
   void apply(const MacVolume &v) {
+    // The Mac caught up with the guess (or stopped knowing): the guess is done.
+    if (_playGuess >= 0 && (!v.playKnown || (v.playing ? 1 : 0) == _playGuess)) _playGuess = -1;
     _mac = v;
     _level = v.level == VOLUME_NO_DEVICE ? 0 : v.level;
     _muted = v.muted;
@@ -241,6 +266,8 @@ class VolumeSlider {
   bool _hasParked = false;
   uint8_t _level = 0;
   bool _muted = false, _held = false, _quiet = false;
+  int8_t _playGuess = -1;  // the play state shown after a tap, -1 none
+  uint32_t _playGuessAt = 0;
   int _grabY = 0;
   uint8_t _grabLevel = 0;
   uint32_t _releasedAt = 0;

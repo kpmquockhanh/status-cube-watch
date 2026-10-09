@@ -44,10 +44,10 @@ private func volumeFixture(_ kind: String) throws -> [Substring] {
         let flags = UInt8(head[1], radix: 16)!
         let v = MacVolume(level: head[0] == "none" ? nil : UInt8(head[0])!,
                           muted: flags & 1 != 0, canSet: flags & 2 != 0, canMute: flags & 4 != 0, name: name,
-                          playing: flags & 8 != 0 ? flags & 16 != 0 : nil)
+                          playing: flags & 8 != 0 ? flags & 16 != 0 : nil, locked: flags & 32 != 0)
         #expect(encodeVolume(v) == Data(bytes))
     }
-    #expect(lines.count == 6)
+    #expect(lines.count == 7)
 }
 
 @Test func parsesVolumeRequests() {

@@ -31,6 +31,7 @@
 #include "touch_map.h"
 #include "transport_policy.h"
 #include "ui.h"
+#include "unlock_prompt.h"
 #include "volume_slider.h"
 
 // Divides every Pomodoro duration. Leave at 1. `make run POMO_FAST=60` in
@@ -78,6 +79,8 @@ VolumeSlider volSlider;
 int8_t mediaPressed = -1;
 uint32_t mediaPressedAt = 0;
 bool deckVolume = false;
+// The Mac is locked and unlocks for a tap (unlock_prompt.h): a screen over the deck.
+UnlockPrompt unlock;
 bool volumeShown() { return bleBonded(); }
 uint8_t deckSize() { return uiDeckSize(payload, deckVolume); }
 uint8_t pomoIndex() { return uiPomodoroIndex(payload, deckVolume); }
@@ -294,14 +297,17 @@ void pollTouch() {
     if (!down) swallowTouch = false;
     return;
   }
+  if (down) unlock.touch(now);
+  // The unlock prompt covers the deck: a tap there is for it alone.
+  const bool onUnlock = !editing && unlock.screen(now) != UnlockScreen::Hidden;
   // Multi-taps only mean something on the Pomodoro card. Everywhere else a tap
   // is a plain Tap, delivered at once (the editors hit-test it).
-  const bool onPomodoro = cardIndex == pomoIndex();
+  const bool onPomodoro = cardIndex == pomoIndex() && !onUnlock;
   // On the Volume card a vertical move is the volume, not a swipe (gesture.h).
   // Whether it is the slider's touch is decided where the finger landed, so a touch that began on
   // another card never reaches it; the latch clears on the lift pass, after the gesture is routed.
   if (landing) {
-    touchOnVolume = onVolumeCard() && !editing;
+    touchOnVolume = onVolumeCard() && !editing && !onUnlock;
     touchOnVolumeRow = touchOnVolume && volumeInRow(y);
   }
   const bool onVolume = touchOnVolume && onVolumeCard() && !editing;
@@ -324,6 +330,18 @@ void pollTouch() {
     else editorGesture(gesture);
     return;
   }
+  if (onUnlock) {
+    if (gesture == Gesture::Tap) {
+      if (unlock.tap(now)) bleSendUnlock();
+      dirty = true;
+    } else if (gesture == Gesture::SwipeNext || gesture == Gesture::SwipePrev || gesture == Gesture::SwipeUp ||
+               gesture == Gesture::SwipeDown) {
+      unlock.dismiss(now);  // show the deck; the prompt comes back when the cube is left alone
+      lastRotate = now;
+      dirty = true;
+    }
+    return;
+  }
   if (onVolume) {
     bool acted = false;
     switch (gesture) {
@@ -343,6 +361,7 @@ void pollTouch() {
         MediaKey key;
         if (volSlider.state() != VolState::NoMac && volumeMediaAt(gestures.startX(), gestures.startY(), key)) {
           bleSendMedia(key);
+          if (key == MediaKey::PlayPause) volSlider.guessPlayToggled(now);
           mediaPressed = (int8_t)key;
           mediaPressedAt = now;
           acted = true;
@@ -483,6 +502,7 @@ void loop() {
     // leaves it again; the DONE state waits for a double tap.
     cardIndex = pomoIndex();
     lastRotate = now;
+    unlock.dismiss(now);  // the alert is drawn on the card, so the prompt steps aside
     uiReplayPomodoro();
     uiAlertStart();
     dirty = true;
@@ -533,8 +553,10 @@ void loop() {
   MacVolume macVol{};
   if (bleTakeVolume(macVol)) {
     volSlider.fromMac(macVol, now);
+    unlock.fromMac(macVol.known && macVol.macLocked, now);  // unknown = the link dropped
     dirty = true;
   }
+  if (unlock.tick(now)) dirty = true;
   if (volSlider.tick(now)) dirty = true;
   if (mediaPressed >= 0 && now - mediaPressedAt >= VOLUME_PRESS_MS) {
     mediaPressed = -1;
@@ -573,7 +595,8 @@ void loop() {
   // changes rather than leaving it to the 1 s housekeeping tick below, which
   // would beat against it and skip or repeat digits.
   const PomoView pv = pomo.view();
-  if (cardIndex == pomoIndex() && pv.displaySec != lastPomoSec) {
+  const bool clockShown = cardIndex == pomoIndex() || (!editing && unlock.screen(now) != UnlockScreen::Hidden);
+  if (clockShown && pv.displaySec != lastPomoSec) {
     lastPomoSec = pv.displaySec;
     dirty = true;
   }
@@ -618,9 +641,10 @@ void loop() {
     const bool pairing = bleState() == BleState::Pairing;
     const bool waiting = !pairWaitDismissed && waitingToPair();
     const bool editorUp = editing && !uiEditorSliding();
+    const UnlockScreen us = editing ? UnlockScreen::Hidden : unlock.screen(now);
     // Only the deck pulses the backlight for an alert; another screen ends it
     // and restores the level (the display panel's preview while it is open).
-    if ((pairing || waiting || editorUp) && uiAlertCancel())
+    if ((pairing || waiting || editorUp || us != UnlockScreen::Hidden) && uiAlertCancel())
       lcd.setBrightness(editingDevice ? editDevice.backlight : deviceSettings().backlight);
     if (pairing) uiBlePair(lcd, blePasskey());  // the code must be seen
     else if (waiting) uiBlePair(lcd, 0);
@@ -628,6 +652,7 @@ void loop() {
       if (editingDevice) uiDeviceEditor(lcd, editDevice);
       else uiPomodoroEditor(lcd, editSettings);
     }
+    else if (us != UnlockScreen::Hidden) uiUnlock(lcd, us == UnlockScreen::Waiting, pv);
     else {
       VolumeView vv = volSlider.view();
       vv.pressed = mediaPressed;

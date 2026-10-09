@@ -9,14 +9,19 @@ public struct MacVolume: Equatable {
     public var name: String
     /// Whether the Now Playing app is playing; nil = unknown (the cube then draws play/pause).
     public var playing: Bool?
+    /// Not volume: the Mac is locked and unlocks for the cube's tap (bit 5, fw_rev 7). The Volume frame
+    /// is the one Mac -> cube state the cube already takes, so the lock rides on it.
+    public var locked: Bool
 
-    public init(level: UInt8?, muted: Bool, canSet: Bool, canMute: Bool, name: String, playing: Bool? = nil) {
+    public init(level: UInt8?, muted: Bool, canSet: Bool, canMute: Bool, name: String, playing: Bool? = nil,
+                locked: Bool = false) {
         self.level = level
         self.muted = muted
         self.canSet = canSet
         self.canMute = canMute
         self.name = name
         self.playing = playing
+        self.locked = locked
     }
 
     public static let noDevice = MacVolume(level: nil, muted: false, canSet: false, canMute: false, name: "")
@@ -50,6 +55,7 @@ public func encodeVolume(_ v: MacVolume) -> Data {
         flags |= 8
         if playing { flags |= 16 }
     }
+    if v.locked { flags |= 32 }  // the cube shows its unlock prompt
     let level = v.level.map { min($0, 100) } ?? VolumeFrame.noDevice
     return Data([VolumeFrame.version, level, flags]) + Data(foldVolumeName(v.name).utf8)
 }

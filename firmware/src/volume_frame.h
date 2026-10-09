@@ -3,7 +3,7 @@
 // no Arduino, host-tested in sim/tests/volume_frame_test.cpp.
 //
 //   Mac -> cube, Volume characteristic: [ver=1][level][flags][name...]
-//   cube -> Mac, Control:               [0x05][level][muted]
+//   cube -> Mac, Control:               [0x05][level][muted], [0x06][key], [0x07]
 #include <stddef.h>
 #include <stdint.h>
 #include <string.h>
@@ -17,6 +17,8 @@ constexpr size_t VOLUME_FRAME_MAX = 3 + VOLUME_NAME_MAX;  // 26
 constexpr uint8_t VOL_FLAG_MUTED = 1, VOL_FLAG_CAN_SET = 2, VOL_FLAG_CAN_MUTE = 4;
 // Whether the Mac's Now Playing app plays (fw_rev 6): KNOWN set, then PLAYING says which.
 constexpr uint8_t VOL_FLAG_PLAY_KNOWN = 8, VOL_FLAG_PLAYING = 16;
+// Not volume: the Mac's screen is locked and it will unlock for Control 07 (fw_rev 7).
+constexpr uint8_t VOL_FLAG_MAC_LOCKED = 32;
 constexpr size_t BLE_VOLUME_REQ_LEN = 3;
 
 // What the Mac last reported. known=false: nothing yet, or the link dropped.
@@ -28,6 +30,7 @@ struct MacVolume {
   bool canMute;
   bool playKnown;  // the Mac reported whether anything plays
   bool playing;
+  bool macLocked;  // the Mac is locked and waits for a tap on the unlock prompt
   char name[VOLUME_NAME_MAX + 1];
 };
 
@@ -48,6 +51,7 @@ inline bool volumeParse(const uint8_t *d, size_t n, MacVolume &out) {
   v.canMute = (d[2] & VOL_FLAG_CAN_MUTE) != 0;
   v.playKnown = (d[2] & VOL_FLAG_PLAY_KNOWN) != 0;
   v.playing = v.playKnown && (d[2] & VOL_FLAG_PLAYING) != 0;
+  v.macLocked = (d[2] & VOL_FLAG_MAC_LOCKED) != 0;
   out = v;
   return true;
 }
@@ -68,7 +72,12 @@ inline void mediaRequestEncode(MediaKey key, uint8_t out[BLE_MEDIA_REQ_LEN]) {
   out[1] = (uint8_t)key;
 }
 
+// Asks the Mac to unlock its screen: Control [0x07].
+constexpr size_t BLE_UNLOCK_REQ_LEN = 1;
+inline void unlockRequestEncode(uint8_t out[BLE_UNLOCK_REQ_LEN]) { out[0] = BLE_CTRL_UNLOCK; }
+
 inline bool volumeSame(const MacVolume &a, const MacVolume &b) {
   return a.known == b.known && a.level == b.level && a.muted == b.muted && a.canSet == b.canSet &&
-         a.canMute == b.canMute && a.playKnown == b.playKnown && a.playing == b.playing && strcmp(a.name, b.name) == 0;
+         a.canMute == b.canMute && a.playKnown == b.playKnown && a.playing == b.playing &&
+         a.macLocked == b.macLocked && strcmp(a.name, b.name) == 0;
 }

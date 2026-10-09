@@ -7,7 +7,8 @@
 //   pair          a Mac is pairing: the passkey screen shows
 // CUBE_VOLUME (only while bonded) is what the Mac reports for the Volume card,
 // once: a level 0..100, `muted` (56, muted), `fixed` (an HDMI output), or
-// `none` / unset (no Volume write: the card shows NO MAC).
+// `none` / unset (no Volume write: the card shows NO MAC). CUBE_LOCKED=1 adds
+// the Mac-locked flag, so the unlock prompt shows; a tap logs [ble] (sim) unlock.
 
 #include <Arduino.h>
 
@@ -83,6 +84,9 @@ bool bleTakeVolume(MacVolume &out) {
   static bool sent = false;
   if (sent || !bleBonded()) return false;
   const char *e = getenv("CUBE_VOLUME");
+  const char *lk = getenv("CUBE_LOCKED");  // the Mac is locked: the unlock prompt shows
+  const bool locked = lk && !strcmp(lk, "1");
+  if (locked && (!e || !strcmp(e, "none"))) e = "56";  // the lock rides on a Volume write
   if (!e || !strcmp(e, "none")) return false;
   MacVolume v{};
   v.known = true;
@@ -98,6 +102,7 @@ bool bleTakeVolume(MacVolume &out) {
   } else {
     v.level = (uint8_t)constrain(atoi(e), 0, 100);
   }
+  v.macLocked = locked;
   sent = true;
   out = v;
   return true;
@@ -107,6 +112,8 @@ void bleSendMedia(MediaKey key) {
   static const char *const names[] = {"play/pause", "next", "previous"};
   Serial.printf("[ble] (sim) media %s\n", names[(int)key]);
 }
+
+void bleSendUnlock() { Serial.println("[ble] (sim) unlock"); }
 
 void bleSendVolume(uint8_t level, bool muted) {
   Serial.printf("[ble] (sim) volume %u%s\n", (unsigned)level, muted ? " muted" : "");

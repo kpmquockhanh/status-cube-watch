@@ -4,8 +4,10 @@ import Foundation
 ///
 /// macOS (15.4 and later) answers MediaRemote's now-playing queries only for Apple-signed
 /// processes: called from this app they report "not playing" while something plays. So one
-/// long-lived `osascript` (Apple-signed) asks MediaRemote twice a second and prints `1`
+/// long-lived `osascript` (Apple-signed) asks MediaRemote four times a second and prints `1`
 /// (playing) or `0` (paused, or nothing to play) whenever that changes, and again every 5 s.
+/// (The cube shows its own guess right after a tap, so this mostly matters for changes made on
+/// the Mac; one check costs well under a millisecond.)
 /// The repeat lets the child notice this app is gone: its next write fails and it exits.
 /// Main queue only.
 final class NowPlaying {
@@ -28,12 +30,12 @@ final class NowPlaying {
         let last = '', since = 0;
         for (;;) {
           const now = R.localIsPlaying ? '1' : '0';
-          if (now !== last || ++since >= 10) {
+          if (now !== last || ++since >= 20) {
             out.writeData($(now + '\\n').dataUsingEncoding($.NSUTF8StringEncoding));
             last = now;
             since = 0;
           }
-          delay(0.5);
+          delay(0.25);
         }
         """
 

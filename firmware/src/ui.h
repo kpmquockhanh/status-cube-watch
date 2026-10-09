@@ -70,5 +70,10 @@ void uiPortal(Display &lcd, const char *apName, const char *apIp, const char *la
 // on the Mac; with 0 it shows the "waiting for a Mac" variant.
 void uiBlePair(Display &lcd, uint32_t passkey);
 
+// The Mac is locked: a tap asks it to unlock (unlock_prompt.h). `waiting`: a
+// tap was sent and the Mac has not answered yet. A running Pomodoro session
+// shows its phase and clock underneath, so a break stays readable.
+void uiUnlock(Display &lcd, bool waiting, const PomoView &pomo);
+
 // Progress screen while an OTA image is arriving.
 void uiOta(Display &lcd, uint8_t percent);

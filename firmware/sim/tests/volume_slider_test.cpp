@@ -256,6 +256,50 @@ void testMediaZones() {
   CHECK(s.view().playing == 0);
 }
 
+// A play/pause tap shows the new state at once; the Mac's reports do not undo
+// it until one agrees, or VOLUME_PLAY_GUESS_MS passes.
+void testPlayGuess() {
+  MacVolume playing = live(40);
+  playing.playKnown = playing.playing = true;
+  MacVolume paused = playing;
+  paused.playing = false;
+
+  VolumeSlider s;
+  s.fromMac(playing, 0);
+  CHECK(s.view().playing == 1);
+  CHECK(s.guessPlayToggled(100));
+  CHECK(s.view().playing == 0);             // at once, before the Mac says anything
+  s.fromMac(playing, 200);                  // a stale report (a volume echo): the guess holds
+  CHECK(s.view().playing == 0);
+  s.fromMac(paused, 400);                   // the Mac agrees: the guess is done
+  CHECK(s.view().playing == 0);
+  CHECK(!s.tick(100 + VOLUME_PLAY_GUESS_MS));  // nothing left to expire
+  s.fromMac(playing, 2000);                 // played again from the Mac: shown at once
+  CHECK(s.view().playing == 1);
+
+  // The Mac never agrees (nothing reacted): back to what it says after the window.
+  VolumeSlider t;
+  t.fromMac(playing, 0);
+  CHECK(t.guessPlayToggled(0));
+  CHECK(!t.tick(VOLUME_PLAY_GUESS_MS - 1));
+  CHECK(t.view().playing == 0);
+  CHECK(t.tick(VOLUME_PLAY_GUESS_MS));
+  CHECK(t.view().playing == 1);
+
+  // Two quick taps: the second flips the guess, not the Mac's state.
+  VolumeSlider u;
+  u.fromMac(paused, 0);
+  CHECK(u.guessPlayToggled(0) && u.view().playing == 1);
+  CHECK(u.guessPlayToggled(50) && u.view().playing == 0);
+
+  // No guess when the Mac has not said whether anything plays, or with no Mac.
+  VolumeSlider v;
+  v.fromMac(live(40), 0);
+  CHECK(!v.guessPlayToggled(0) && v.view().playing == -1);
+  VolumeSlider w;
+  CHECK(!w.guessPlayToggled(0) && w.view().playing == -1);
+}
+
 }  // namespace
 
 void testPillHit() {
@@ -295,5 +339,6 @@ int main() {
   testSpeakerToggle();
   testChangeUnmutes();
   testMediaZones();
+  testPlayGuess();
   return checksDone("volume_slider_test");
 }

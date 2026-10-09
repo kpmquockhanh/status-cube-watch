@@ -56,6 +56,18 @@ Tick an item only when you observed it. Logs: `./install.sh logs` (Mac, from `ma
 - [ ] With notifications switched off for Claude Cube Link in System Settings, the menu item reads "(off in System Settings)" and is greyed out.
 - [ ] Dismiss the first permission prompt without answering: the item stays enabled with no hint, and opening the menu asks again.
 
+## Unlock with cube
+
+- [ ] Menu > Unlock Mac with cube…: a wrong password is refused and asked again; the right one turns the item on, and macOS offers the Accessibility pane.
+- [ ] Lock the Mac (Ctrl-Cmd-Q): the cube shows Tap to unlock within a second. A tap: UNLOCKING, then the Mac is unlocked and the cube is back on its cards.
+- [ ] Lock, let the Mac's display sleep, then tap: the display wakes and the password still lands whole (no first characters lost).
+- [ ] Without the Accessibility permission: a tap does nothing on the Mac, the log says why, and the cube asks again after 6 s.
+- [ ] Two quick taps after the prompt returns: the password is typed once (5 s gap).
+- [ ] Change the login password: a tap types nothing and the log says the stored password no longer works.
+- [ ] Item off: locking the Mac shows no prompt on the cube, and the Keychain item `com.claude-cube.link` / `unlock` is gone.
+- [ ] Swipe on the prompt: the cards show; after 30 s untouched the prompt returns. A Pomodoro phase end while locked shows the alert, not the prompt.
+- [ ] Lock screens on recent macOS accept the synthetic keystrokes (note the macOS version tested).
+
 ## Volume card
 
 - [ ] `AudioObjectGetPropertyData` reads `kAudioHardwareServiceDeviceProperty_VirtualMainVolume` on the built-in speakers: `CUBE_TRACE=1` shows `[trace:volume] mac N` matching the menu bar slider.

@@ -7,7 +7,7 @@
 //   ./build/cube-shot out @portal   # <out>-portal.png: a screen that is not a
 //                                   # payload card (see renderSpecial):
 //                                   # @portal, @ota, @ble-pair, @ble-wait, @pomo-ready|focus|paused|break|done|long|edit,
-//                                   # @dev-edit, @vol-56|muted|full|zero|fixed|noout|long|none|press|playing|paused
+//                                   # @dev-edit, @unlock|unlock-wait|unlock-pomo, @vol-56|muted|full|zero|fixed|noout|long|none|press|playing|paused
 //
 // Reads the payload JSON from the file named on the command line, or stdin.
 
@@ -227,6 +227,15 @@ bool renderSpecial(Display &lcd, const char *name) {
     uiBlePair(lcd, 482913);
   } else if (!strcmp(name, "ble-wait")) {
     uiBlePair(lcd, 0);
+  } else if (!strcmp(name, "unlock")) {
+    uiUnlock(lcd, false, Pomodoro(PomoConfig{25 * 60000u, 5 * 60000u, 15 * 60000u, 4}).view());
+  } else if (!strcmp(name, "unlock-wait")) {
+    uiUnlock(lcd, true, Pomodoro(PomoConfig{25 * 60000u, 5 * 60000u, 15 * 60000u, 4}).view());
+  } else if (!strcmp(name, "unlock-pomo")) {
+    Pomodoro p(PomoConfig{25 * 60000u, 5 * 60000u, 15 * 60000u, 4});
+    p.longPress(0);
+    p.tick(6 * 60000u + 18000u);
+    uiUnlock(lcd, false, p.view());
   } else if (!strcmp(name, "pomo-edit")) {
     uiPomodoroEditor(lcd, PomoSettings{30, 5, 15, 4});
   } else if (!strcmp(name, "dev-edit")) {

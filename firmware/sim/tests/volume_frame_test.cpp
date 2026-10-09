@@ -82,10 +82,11 @@ void testStateFixture() {
     CHECK(v.canMute == ((flags & VOL_FLAG_CAN_MUTE) != 0));
     CHECK(v.playKnown == ((flags & VOL_FLAG_PLAY_KNOWN) != 0));
     CHECK(v.playing == ((flags & VOL_FLAG_PLAYING) != 0));
+    CHECK(v.macLocked == ((flags & VOL_FLAG_MAC_LOCKED) != 0));
     CHECK(name == v.name);
     n++;
   }
-  CHECK(n == 6);
+  CHECK(n == 7);
 }
 
 // Every rejection leaves the previous state untouched.
@@ -122,7 +123,7 @@ void testAccepts() {
   uint8_t full[VOLUME_FRAME_MAX];
   full[0] = 1;
   full[1] = 100;
-  full[2] = 0xF8;  // only unknown flag bits: ignored
+  full[2] = 0xC0;  // only unknown flag bits: ignored
   for (size_t i = 3; i < sizeof(full); i++) full[i] = 'x';
   CHECK(volumeParse(full, sizeof(full), v));
   CHECK(strlen(v.name) == VOLUME_NAME_MAX && !v.muted && !v.canSet && !v.canMute);

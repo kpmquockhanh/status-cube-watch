@@ -369,6 +369,13 @@ void bleSendMedia(MediaKey key) {
   notifyControl(m, sizeof(m));
 }
 
+void bleSendUnlock() {
+  uint8_t m[BLE_UNLOCK_REQ_LEN];
+  unlockRequestEncode(m);
+  notifyControl(m, sizeof(m));
+  Serial.println("[ble] unlock requested");
+}
+
 void bleSendVolume(uint8_t level, bool muted) {
   uint8_t m[BLE_VOLUME_REQ_LEN];
   volumeRequestEncode(level, muted, m);

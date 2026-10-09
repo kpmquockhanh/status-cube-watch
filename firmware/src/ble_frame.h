@@ -9,7 +9,7 @@
 #include <string.h>
 
 constexpr uint8_t BLE_PROTO_VER = 1;
-constexpr uint8_t BLE_FW_REV = 6;  // bumped when behaviour the Mac can see changes
+constexpr uint8_t BLE_FW_REV = 7;  // bumped when behaviour the Mac can see changes
 constexpr size_t BLE_HDR = 4;      // ver, seq, idx, total
 constexpr uint8_t BLE_MAX_CHUNKS = 16;
 constexpr size_t BLE_MAX_PAYLOAD = 2048;
@@ -21,6 +21,7 @@ constexpr uint8_t BLE_CTRL_POMO_ENDED = 0x04;  // cube -> Mac: [0x04, ended, nex
 constexpr size_t BLE_POMO_ENDED_LEN = 3;
 constexpr uint8_t BLE_CTRL_VOLUME = 0x05;  // cube -> Mac: [0x05, level, muted] set the Mac's output (fw_rev 5)
 constexpr uint8_t BLE_CTRL_MEDIA = 0x06;   // cube -> Mac: [0x06, key] press a media key (fw_rev 6)
+constexpr uint8_t BLE_CTRL_UNLOCK = 0x07;  // cube -> Mac: [0x07] unlock the Mac's screen (fw_rev 7)
 
 // Writes the Control frame for a finished Pomodoro phase into `out`; returns its length.
 inline size_t bleEncodePomoEnded(uint8_t ended, uint8_t next, uint8_t out[BLE_POMO_ENDED_LEN]) {

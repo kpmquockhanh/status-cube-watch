@@ -8,6 +8,12 @@ final class StatusMenu: NSObject, NSMenuDelegate {
     var onShowSettings: () -> Void = {}
     var onShowBridgeSettings: () -> Void = {}
     var onForgetCube: () -> Void = {}
+    var onToggleUnlock: () -> Void = {}
+    /// The "Unlock Mac with cube…" checkbox: a password is stored.
+    var unlockOn = false {
+        didSet { unlockItem?.state = unlockOn ? .on : .off }
+    }
+    private var unlockItem: NSMenuItem?
     var logURL: URL?
     var prefs = PomodoroNoticePrefs()
     var onMenuWillOpen: () -> Void = {}
@@ -69,6 +75,10 @@ final class StatusMenu: NSObject, NSMenuDelegate {
         noticesItem = notices
         styleNoticesItem()
         menu.addItem(notices)
+        let unlock = action("Unlock Mac with cube…", #selector(toggleUnlock), key: "")
+        unlock.state = unlockOn ? .on : .off
+        unlockItem = unlock
+        menu.addItem(unlock)
         menu.addItem(.separator())
         menu.addItem(action("Show log", #selector(showLog), key: "l"))
         let trace = action("Verbose trace", #selector(toggleTrace), key: "")
@@ -112,6 +122,7 @@ final class StatusMenu: NSObject, NSMenuDelegate {
     @objc private func showSettings() { onShowSettings() }
     @objc private func showBridgeSettings() { onShowBridgeSettings() }
     @objc private func forgetCube() { onForgetCube() }
+    @objc private func toggleUnlock() { onToggleUnlock() }
     @objc private func showLog() {
         guard let url = logURL else { return }
         if !FileManager.default.fileExists(atPath: url.path) {

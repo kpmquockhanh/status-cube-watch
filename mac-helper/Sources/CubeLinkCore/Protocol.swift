@@ -69,6 +69,8 @@ public enum ControlMessage: Equatable {
     case volumeRequest(level: UInt8, muted: Bool)
     /// Press a media key on the Mac (fw_rev 6).
     case media(MediaKey)
+    /// Unlock the Mac's screen: a tap on the cube's unlock prompt (fw_rev 7).
+    case unlock
 
     public static func parse(_ d: Data) -> ControlMessage? {
         let b = [UInt8](d)
@@ -88,6 +90,7 @@ public enum ControlMessage: Equatable {
         case 0x06:
             guard b.count >= 2, let k = MediaKey(rawValue: b[1]) else { return nil }
             return .media(k)
+        case 0x07: return .unlock
         default: return nil
         }
     }
