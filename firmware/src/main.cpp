@@ -312,7 +312,7 @@ void pollTouch() {
     bool acted = false;
     switch (gesture) {
       case Gesture::DragStart:
-        if (volSlider.grab()) {
+        if (volumeInPill(gestures.startX(), gestures.startY()) && volSlider.grab()) {
           volSlider.drag(gestures.lastY());
           acted = true;
         }

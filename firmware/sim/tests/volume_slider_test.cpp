@@ -215,7 +215,30 @@ void testChangeUnmutes() {
 
 }  // namespace
 
+void testPillHit() {
+  CHECK(volumeInPill(VOL_PILL_X, VOL_PILL_Y));
+  CHECK(volumeInPill(VOL_PILL_X + VOL_PILL_W - 1, VOL_PILL_Y + VOL_PILL_H - 1));
+  CHECK(!volumeInPill(VOL_PILL_X - 1, VOL_PILL_Y + 10));
+  CHECK(!volumeInPill(VOL_PILL_X + VOL_PILL_W, VOL_PILL_Y + 10));
+  CHECK(!volumeInPill(VOL_PILL_X + 10, VOL_PILL_Y - 1));
+  CHECK(!volumeInPill(VOL_PILL_X + 10, VOL_PILL_Y + VOL_PILL_H));
+  // A drag that never grabbed does nothing: drag and release are no-ops.
+  VolumeSlider s;
+  MacVolume m{};
+  m.known = true;
+  m.level = 40;
+  m.canSet = m.canMute = true;
+  s.fromMac(m, 0);
+  CHECK(!s.held());
+  CHECK(!s.drag(VOL_TRAVEL_BOTTOM));
+  CHECK(!s.release(10));
+  uint8_t l = 0;
+  bool mu = false;
+  CHECK(!s.takeSend(100, l, mu));
+}
+
 int main() {
+  testPillHit();
   testGeometry();
   testNoMacByDefault();
   testLiveApplies();

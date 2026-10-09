@@ -243,6 +243,8 @@ uint32_t g_bleLastPush = 0, g_bleLastGood = 0;
 uint32_t g_volEchoAt = 0;
 bool g_volSent = false;
 uint32_t g_volRequests = 0;
+uint32_t g_volPlain = 0;  // requests with muted == false
+bool g_volLastMuted = false;
 MacVolume g_volEcho{};
 // What a Settings read over BLE would return: net_ble.cpp publishes it at
 // bleBegin() and again whenever it is told the stored settings changed.
@@ -366,6 +368,8 @@ bool bleTakeVolume(MacVolume &out) {
 
 void bleSendVolume(uint8_t level, bool muted) {
   g_volRequests++;
+  if (!muted) g_volPlain++;
+  g_volLastMuted = muted;
   g_volEcho.level = level;
   g_volEcho.muted = muted;
   if (!g_volEchoAt) g_volEchoAt = millis() ? millis() : 1;
@@ -580,9 +584,9 @@ int main(int argc, char **argv) {
     fprintf(stderr, "%s: the screen was still on after %u s with nobody touching it\n", S.name, S.seconds);
     return 1;
   }
-  if (!strcmp(S.name, "volume") && g_volRequests < 2) {
-    fprintf(stderr, "%s: %u volume requests reached the Mac, expected the drag's and the mute's\n", S.name,
-            (unsigned)g_volRequests);
+  if (!strcmp(S.name, "volume") && (g_volRequests < 2 || g_volPlain < 1 || !g_volLastMuted)) {
+    fprintf(stderr, "%s: %u volume requests reached the Mac, expected a drag level then a final mute (%u unmuted, last muted=%d)\n", S.name,
+            (unsigned)g_volRequests, (unsigned)g_volPlain, (int)g_volLastMuted);
     return 1;
   }
   return 0;
