@@ -11,16 +11,16 @@ struct Pad {
   GestureTracker t;
   uint32_t last = 0;
   bool wasDown = false;
-  Gesture raw(uint32_t now, bool down, int x, int y, bool multi = false) {
+  Gesture raw(uint32_t now, bool down, int x, int y, bool multi = false, bool drag = false) {
     last = now;
     wasDown = down;
-    return t.update(down, (int16_t)x, (int16_t)y, now, multi);
+    return t.update(down, (int16_t)x, (int16_t)y, now, multi, drag);
   }
-  Gesture at(uint32_t now, bool down, int x, int y, bool multi = false) {
+  Gesture at(uint32_t now, bool down, int x, int y, bool multi = false, bool drag = false) {
     if (down && wasDown) {
-      while (now - last > 50u) raw(last + 50u, true, x, y, multi);
+      while (now - last > 50u) raw(last + 50u, true, x, y, multi, drag);
     }
-    return raw(now, down, x, y, multi);
+    return raw(now, down, x, y, multi, drag);
   }
 };
 
@@ -255,6 +255,79 @@ void testStartPoint() {
   CHECK(p.t.startY() == 40);
 }
 
+// Drag mode (the Volume card): a vertical move locks to a drag once it is
+// DRAG_LOCK_PX from where it landed, and reports every move until the lift.
+void testDragLock() {
+  Pad p;
+  CHECK(p.raw(0, true, 120, 200, false, true) == Gesture::None);
+  CHECK(p.raw(20, true, 120, 195, false, true) == Gesture::None);  // 5 px: undecided
+  CHECK(p.raw(40, true, 121, 188, false, true) == Gesture::DragStart);
+  CHECK(p.t.lastY() == 188);
+  CHECK(p.raw(60, true, 121, 150, false, true) == Gesture::Drag);
+  CHECK(p.t.lastY() == 150);
+  CHECK(p.raw(80, true, 121, 150, false, true) == Gesture::None);  // finger still
+  CHECK(p.raw(100, true, 121, 170, false, true) == Gesture::Drag);  // back down
+  CHECK(p.raw(120, false, 0, 0, false, true) == Gesture::DragEnd);
+  CHECK(p.raw(140, false, 0, 0, false, true) == Gesture::None);
+}
+
+// A quick vertical flick in drag mode is a drag, never a swipe (it would open
+// a panel on the Volume card).
+void testDragFlickIsNotSwipe() {
+  Pad p;
+  p.raw(0, true, 120, 200, false, true);
+  CHECK(p.raw(30, true, 120, 170, false, true) == Gesture::DragStart);
+  CHECK(p.raw(60, true, 120, 100, false, true) == Gesture::Drag);
+  CHECK(p.raw(90, false, 0, 0, false, true) == Gesture::DragEnd);
+}
+
+// Horizontal still changes card in drag mode.
+void testDragModeHorizontalSwipe() {
+  Pad p;
+  CHECK(p.raw(0, true, 200, 100, false, true) == Gesture::None);
+  CHECK(p.raw(50, true, 150, 102, false, true) == Gesture::None);  // locked horizontal
+  CHECK(p.raw(100, true, 100, 100, false, true) == Gesture::None);
+  CHECK(p.raw(200, false, 0, 0, false, true) == Gesture::SwipeNext);
+}
+
+// A move that locked horizontal and then wandered vertical is nothing: it can
+// neither become a drag nor a vertical swipe.
+void testDragModeHorizontalThenVertical() {
+  Pad p;
+  p.raw(0, true, 100, 150, false, true);
+  CHECK(p.raw(30, true, 112, 150, false, true) == Gesture::None);  // locked horizontal
+  CHECK(p.raw(60, true, 112, 100, false, true) == Gesture::None);  // no DragStart now
+  CHECK(p.raw(90, false, 0, 0, false, true) == Gesture::None);     // and no SwipeUp
+}
+
+void testDragModeTap() {
+  Pad p;
+  p.raw(0, true, 100, 100, false, true);
+  p.raw(40, true, 103, 102, false, true);
+  CHECK(p.raw(80, false, 0, 0, false, true) == Gesture::Tap);
+}
+
+// Review Focus 3: the deck moves off the Volume card mid-drag (an alert), so
+// main.cpp turns drag mode off. The drag runs to its end; the lift is DragEnd,
+// not a swipe on whatever card is now showing.
+void testDragEndAfterModeOff() {
+  Pad p;
+  p.raw(0, true, 120, 200, false, true);
+  CHECK(p.raw(20, true, 120, 185, false, true) == Gesture::DragStart);
+  CHECK(p.raw(40, true, 120, 150, false, false) == Gesture::Drag);
+  CHECK(p.raw(60, true, 120, 110, false, false) == Gesture::Drag);
+  CHECK(p.raw(80, false, 0, 0, false, false) == Gesture::DragEnd);
+}
+
+// Drag mode off: nothing new. A slow vertical move is still nothing.
+void testDragModeOffUnchanged() {
+  Pad p;
+  CHECK(p.raw(0, true, 120, 200) == Gesture::None);
+  CHECK(p.raw(400, true, 120, 190) == Gesture::None);
+  CHECK(p.raw(800, true, 120, 180) == Gesture::None);
+  CHECK(p.raw(801, false, 0, 0) == Gesture::None);
+}
+
 }  // namespace
 
 
@@ -277,5 +350,12 @@ int main() {
   testVerticalClassification();
   testVerticalSwipeOnMultiCard();
   testStartPoint();
+  testDragLock();
+  testDragFlickIsNotSwipe();
+  testDragModeHorizontalSwipe();
+  testDragModeHorizontalThenVertical();
+  testDragModeTap();
+  testDragEndAfterModeOff();
+  testDragModeOffUnchanged();
   return checksDone("gesture_test");
 }
