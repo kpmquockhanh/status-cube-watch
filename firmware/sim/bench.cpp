@@ -185,11 +185,11 @@ Scenario makeScenario(const std::string &name) {
     t += 600;
     s.strokes.push_back(tapZone(t, editorDoneBtn()));
   } else if (name == "volume") {
-    s.what = "Volume card: a drag up the pill, then a tap on the speaker (the Mac echoes each)";
+    s.what = "Volume card: a drag up the card, then a tap on the number (the Mac echoes each)";
     s.seconds = 6;
     s.strokes.push_back(swipe(1000, 50, 150, 190, 150));       // swipe right: Pomodoro -> Volume
-    s.strokes.push_back(Stroke{2000, 600, 120, 230, 120, 70});  // drag from low to high
-    s.strokes.push_back(tapAt(3500, VOL_SPK_CX, VOL_SPK_CY));  // the speaker: mute
+    s.strokes.push_back(Stroke{2000, 600, 120, 180, 120, 60});  // drag up, above the button row
+    s.strokes.push_back(tapAt(3500, VOL_MUTE_CX, VOL_MUTE_CY));  // the number: mute
   } else if (name == "sleep") {
     s.what = "Mac gone: WiFi fetches fail, screen sleeps after the timeout (2 min)";
     s.seconds = 600;
@@ -386,6 +386,8 @@ bool bleTakeVolume(MacVolume &out) {
   }
   return false;
 }
+
+void bleSendMedia(MediaKey) {}
 
 void bleSendVolume(uint8_t level, bool muted) {
   g_volRequests++;

@@ -1,6 +1,7 @@
 #include <Arduino.h>
 #include <ArduinoJson.h>
 #include <NimBLEDevice.h>
+#include <Preferences.h>
 #include <esp_random.h>
 
 #include "ble.h"
@@ -184,6 +185,24 @@ struct ControlCb : NimBLECharacteristicCallbacks {
   }
 };
 
+// A bonded Mac caches the GATT table and never rediscovers on its own, so a
+// firmware that adds a characteristic stays invisible to it. When the firmware
+// revision differs from the one that last advertised, flag Service Changed for
+// the whole range: NimBLE persists it against each bonded peer's CCCD and
+// indicates it once that peer reconnects and restores encryption, and macOS
+// then rediscovers. Needs the GATT server started (advertising starts it).
+void announceGattChange() {
+  Preferences p;
+  if (!p.begin("ble", false)) return;
+  const uint8_t last = p.getUChar("gr", 0);
+  if (last != BLE_FW_REV) {
+    NimBLEDevice::getServer()->sendServiceChangedIndication();
+    p.putUChar("gr", BLE_FW_REV);
+    Serial.printf("[ble] GATT rev %u -> %u: service changed queued for bonded peers\n", last, BLE_FW_REV);
+  }
+  p.end();
+}
+
 ServerCb g_serverCb;
 PayloadCb g_payloadCb;
 ControlCb g_controlCb;
@@ -231,6 +250,7 @@ void bleBegin() {
   const bool started = adv->start();
   Serial.printf("[ble] advertising start=%d\n", (int)started);
   if (!started) Serial.println("[ble] ERROR: advertising failed to start");
+  if (started) announceGattChange();
   g_state = BleState::Advertising;
   Serial.printf("[ble] advertising, bonds %d\n", NimBLEDevice::getNumBonds());
 }
@@ -341,6 +361,12 @@ bool bleTakeVolume(MacVolume &out) {
   }
   out = g_vol;
   return changed;
+}
+
+void bleSendMedia(MediaKey key) {
+  uint8_t m[BLE_MEDIA_REQ_LEN];
+  mediaRequestEncode(key, m);
+  notifyControl(m, sizeof(m));
 }
 
 void bleSendVolume(uint8_t level, bool muted) {

@@ -43,6 +43,22 @@ void testRequestFixture() {
   CHECK(n == 3);  // a missing fixture must fail, not pass vacuously
 }
 
+// media <key> <bytes>
+void testMediaFixture() {
+  int n = 0;
+  for (const std::string &l : fixtureLines("media")) {
+    std::istringstream in(l);
+    unsigned key = 0;
+    in >> key;
+    const std::vector<uint8_t> want = hex(in);
+    uint8_t got[BLE_MEDIA_REQ_LEN];
+    mediaRequestEncode((MediaKey)key, got);
+    CHECK(want.size() == BLE_MEDIA_REQ_LEN && memcmp(got, want.data(), BLE_MEDIA_REQ_LEN) == 0);
+    n++;
+  }
+  CHECK(n == 3);
+}
+
 // vol_state <level|none> <flags hex> "<name>" <bytes>
 void testStateFixture() {
   int n = 0;
@@ -64,10 +80,12 @@ void testStateFixture() {
     CHECK(v.muted == ((flags & VOL_FLAG_MUTED) != 0));
     CHECK(v.canSet == ((flags & VOL_FLAG_CAN_SET) != 0));
     CHECK(v.canMute == ((flags & VOL_FLAG_CAN_MUTE) != 0));
+    CHECK(v.playKnown == ((flags & VOL_FLAG_PLAY_KNOWN) != 0));
+    CHECK(v.playing == ((flags & VOL_FLAG_PLAYING) != 0));
     CHECK(name == v.name);
     n++;
   }
-  CHECK(n == 4);
+  CHECK(n == 6);
 }
 
 // Every rejection leaves the previous state untouched.
@@ -127,6 +145,7 @@ void testEncodeClamps() {
 
 int main() {
   testRequestFixture();
+  testMediaFixture();
   testStateFixture();
   testRejects();
   testAccepts();

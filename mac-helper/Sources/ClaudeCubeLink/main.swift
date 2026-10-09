@@ -100,7 +100,10 @@ let app = NSApplication.shared
 app.setActivationPolicy(.accessory)
 let appDelegate = AppDelegate()  // NSApp.delegate is weak; this global keeps it alive
 // Stop the bridge child, or it outlives the app and the next launch adopts it, stale code and config included.
-appDelegate.onTerminate = { supervisor.stop() }
+appDelegate.onTerminate = {
+    nowPlaying.stop()
+    supervisor.stop()
+}
 app.delegate = appDelegate
 let statusMenu = StatusMenu()
 
@@ -175,16 +178,33 @@ link.onPomodoroEnded = { ended, next in
 }
 notifier.start()
 let systemVolume = SystemVolume()
+let nowPlaying = NowPlaying(log: log)
+/// The Volume frame: the output's state plus whether anything is playing.
+func volumeFrame(_ v: MacVolume) -> Data {
+    var v = v
+    v.playing = nowPlaying.playing
+    return encodeVolume(v)
+}
 systemVolume.onChange = { v in
     Trace.log("volume", "mac \(v.level.map(String.init) ?? "none")\(v.muted ? " muted" : "") \(v.name)")
-    _ = link.writeVolume(encodeVolume(v))
+    _ = link.writeVolume(volumeFrame(v))
 }
-link.onReady = { _ = link.writeVolume(encodeVolume(systemVolume.current())) }
+nowPlaying.onChange = { playing in
+    Trace.log("media", "now playing: \(playing.map { $0 ? "playing" : "paused" } ?? "unknown")")
+    _ = link.writeVolume(volumeFrame(systemVolume.current()))
+}
+link.onReady = { _ = link.writeVolume(volumeFrame(systemVolume.current())) }
 link.onVolumeRequest = { level, muted in
     Trace.log("volume", "cube asks \(level)\(muted ? " muted" : "")")
     systemVolume.apply(level: level, muted: muted)
 }
 systemVolume.start()
+let mediaKeys = MediaKeys(log: log)
+nowPlaying.start()
+link.onMediaKey = { key in
+    Trace.log("media", "cube presses \(key)")
+    mediaKeys.press(key)
+}
 link.onStateChange = { Trace.log("link", "state -> \($0)"); refreshMenu() }
 statusMenu.onSendNow = { tick(force: true) }
 statusMenu.onRestartBridge = { supervisor.restart() }
@@ -203,6 +223,7 @@ for sig in [SIGTERM, SIGINT] {
     signal(sig, SIG_IGN)
     let src = DispatchSource.makeSignalSource(signal: sig, queue: .main)
     src.setEventHandler {
+        nowPlaying.stop()
         supervisor.stop()
         exit(0)
     }

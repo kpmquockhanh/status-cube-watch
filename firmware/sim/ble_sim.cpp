@@ -103,6 +103,11 @@ bool bleTakeVolume(MacVolume &out) {
   return true;
 }
 
+void bleSendMedia(MediaKey key) {
+  static const char *const names[] = {"play/pause", "next", "previous"};
+  Serial.printf("[ble] (sim) media %s\n", names[(int)key]);
+}
+
 void bleSendVolume(uint8_t level, bool muted) {
   Serial.printf("[ble] (sim) volume %u%s\n", (unsigned)level, muted ? " muted" : "");
 }

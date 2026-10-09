@@ -20,6 +20,19 @@ private func volumeFixture(_ kind: String) throws -> [Substring] {
     #expect(lines.count == 3)
 }
 
+@Test func mediaKeyMatchesTheFirmwareFixture() throws {
+    let lines = try volumeFixture("media")
+    let keys: [MediaKey] = [.playPause, .next, .previous]
+    for line in lines {
+        let f = line.split(separator: " ")
+        let bytes = f.dropFirst(1).map { UInt8($0, radix: 16)! }
+        #expect(ControlMessage.parse(Data(bytes)) == .media(keys[Int(f[0])!]))
+    }
+    #expect(lines.count == 3)
+    #expect(ControlMessage.parse(Data([0x06])) == nil)     // no key
+    #expect(ControlMessage.parse(Data([0x06, 3])) == nil)  // unknown key
+}
+
 @Test func volumeStateMatchesTheFirmwareFixture() throws {
     let lines = try volumeFixture("vol_state")
     for line in lines {
@@ -30,10 +43,11 @@ private func volumeFixture(_ kind: String) throws -> [Substring] {
         let bytes = line[line.index(after: q1)...].split(separator: " ").map { UInt8($0, radix: 16)! }
         let flags = UInt8(head[1], radix: 16)!
         let v = MacVolume(level: head[0] == "none" ? nil : UInt8(head[0])!,
-                          muted: flags & 1 != 0, canSet: flags & 2 != 0, canMute: flags & 4 != 0, name: name)
+                          muted: flags & 1 != 0, canSet: flags & 2 != 0, canMute: flags & 4 != 0, name: name,
+                          playing: flags & 8 != 0 ? flags & 16 != 0 : nil)
         #expect(encodeVolume(v) == Data(bytes))
     }
-    #expect(lines.count == 4)
+    #expect(lines.count == 6)
 }
 
 @Test func parsesVolumeRequests() {

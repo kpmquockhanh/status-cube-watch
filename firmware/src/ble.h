@@ -50,3 +50,5 @@ void bleNotifyPomodoro(uint8_t ended, uint8_t next);
 bool bleTakeVolume(MacVolume &out);
 // Asks the Mac to set its output: Control `05 <level> <muted>`. Fire and forget.
 void bleSendVolume(uint8_t level, bool muted);
+// Asks the Mac to press a media key: Control `06 <key>` (fw_rev 6). Fire and forget.
+void bleSendMedia(MediaKey key);

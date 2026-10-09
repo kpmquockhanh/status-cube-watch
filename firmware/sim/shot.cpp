@@ -7,7 +7,7 @@
 //   ./build/cube-shot out @portal   # <out>-portal.png: a screen that is not a
 //                                   # payload card (see renderSpecial):
 //                                   # @portal, @ota, @ble-pair, @ble-wait, @pomo-ready|focus|paused|break|done|long|edit,
-//                                   # @dev-edit, @vol-56|muted|full|zero|fixed|noout|long|none
+//                                   # @dev-edit, @vol-56|muted|full|zero|fixed|noout|long|none|press|playing|paused
 //
 // Reads the payload JSON from the file named on the command line, or stdin.
 
@@ -169,8 +169,16 @@ bool volumeShot(Display &lcd, const char *state) {
   m.known = true;
   m.canSet = m.canMute = true;
   snprintf(m.name, sizeof(m.name), "MacBook Pro Speakers");
+  int8_t pressed = -1;
   if (!strcmp(state, "56")) {
     m.level = 56;
+  } else if (!strcmp(state, "playing") || !strcmp(state, "paused")) {  // the Mac reports Now Playing
+    m.level = 56;
+    m.playKnown = true;
+    m.playing = !strcmp(state, "playing");
+  } else if (!strcmp(state, "press")) {  // play/pause just tapped
+    m.level = 56;
+    pressed = (int8_t)MediaKey::PlayPause;
   } else if (!strcmp(state, "muted")) {
     m.level = 56;
     m.muted = true;
@@ -196,7 +204,8 @@ bool volumeShot(Display &lcd, const char *state) {
   }
   VolumeSlider s;
   s.fromMac(m, 0);
-  const VolumeView vv = s.view();
+  VolumeView vv = s.view();
+  vv.pressed = pressed;
   const Payload none{};
   const PomoView pv = Pomodoro(PomoConfig{25 * 60000u, 5 * 60000u, 15 * 60000u, 4}).view();
   for (int frame = 0; frame < 400; frame++) {

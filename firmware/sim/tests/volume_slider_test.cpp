@@ -5,6 +5,12 @@
 
 namespace {
 
+// Where the finger lands in these tests (mid-card), the bar's centre line, and
+// the travel that moves the level by 10.
+constexpr int Y0 = 148;
+constexpr int BX = VOL_BAR_X + VOL_BAR_W / 2;
+constexpr int UP10 = 16;
+
 MacVolume live(uint8_t level, bool muted = false) {
   MacVolume m{};
   m.known = true;
@@ -16,36 +22,39 @@ MacVolume live(uint8_t level, bool muted = false) {
 }
 
 void testGeometry() {
-  CHECK(volumeLevelAt(147) == 50);
-  CHECK(volumeLevelAt(55) == 99);
-  CHECK(volumeLevelAt(239) == 1);
-  CHECK(volumeLevelAt(VOL_TRAVEL_TOP) == 100);
-  CHECK(volumeLevelAt(VOL_TRAVEL_BOTTOM) == 0);
-  CHECK(volumeLevelAt(0) == 100);    // above the travel: clamped
-  CHECK(volumeLevelAt(280) == 0);    // below it
-  CHECK(volumeFillTop(100) == VOL_PILL_Y);
-  CHECK(volumeFillTop(0) == VOL_PILL_Y + VOL_PILL_H);
-  CHECK(volumeFillTop(50) == 147);
-  // The fill edge sits on the finger: reading it back gives the level it was drawn from.
-  for (int L = 1; L <= 99; L++) CHECK(volumeLevelAt(volumeFillTop((float)L)) == L);
-  // Higher level, higher fill (smaller y), never the other way round.
+  CHECK(volumeLevelAfter(40, 0) == 40);              // no travel, no change
+  CHECK(volumeLevelAfter(40, -UP10) == 50);          // up raises
+  CHECK(volumeLevelAfter(40, UP10) == 30);           // down lowers
+  CHECK(volumeLevelAfter(0, -VOL_DRAG_PX) == 100);   // the whole range in VOL_DRAG_PX
+  CHECK(volumeLevelAfter(100, VOL_DRAG_PX) == 0);
+  CHECK(volumeLevelAfter(90, -VOL_DRAG_PX) == 100);  // clamped
+  CHECK(volumeLevelAfter(10, VOL_DRAG_PX) == 0);
+  CHECK(volumeLevelAfter(40, -1) == 41);             // one pixel is a step (1.64 px each)
+  CHECK(volumeLevelAfter(40, 1) == 39);
+  // Monotonic: farther up, never lower.
+  for (int dy = 200; dy > -200; dy--) CHECK(volumeLevelAfter(50, dy - 1) >= volumeLevelAfter(50, dy));
+  CHECK(volumeFillTop(100) == VOL_BAR_Y);
+  CHECK(volumeFillTop(0) == VOL_BAR_Y + VOL_BAR_H);
+  CHECK(volumeFillTop(50) == VOL_BAR_Y + VOL_BAR_H / 2);
   int prev = volumeFillTop(0.0f);
   for (int i = 1; i <= 400; i++) {
     const int y = volumeFillTop(i * 0.25f);
     CHECK(y <= prev);
     prev = y;
   }
-  CHECK(VOL_PILL_RECT.contains(VOL_SPK_CX, VOL_SPK_CY));
-  CHECK(VOL_SPEAKER_ZONE.contains(VOL_SPK_CX, VOL_SPK_CY));
-  CHECK(!VOL_SPEAKER_ZONE.contains(VOL_SPK_CX, 147));
+  CHECK(VOL_PILL_RECT.contains(VOL_MUTE_CX, VOL_MUTE_CY));
+  CHECK(VOL_MUTE_ZONE.contains(VOL_MUTE_CX, VOL_MUTE_CY));
+  CHECK(!VOL_MUTE_ZONE.contains(VOL_MUTE_CX, VOL_ROW_Y));  // not the buttons
+  CHECK(!VOL_MUTE_ZONE.contains(BX, Y0));                  // not the bar
+  CHECK(!VOL_MUTE_ZONE.contains(VOL_MUTE_CX, 60));         // not the name
 }
 
 void testNoMacByDefault() {
   VolumeSlider s;
   CHECK(s.state() == VolState::NoMac);
-  CHECK(!s.grab());
-  CHECK(!s.tap(120, 147, 0));
-  CHECK(!s.tap(VOL_SPK_CX, VOL_SPK_CY, 0));
+  CHECK(!s.grab(Y0));
+  CHECK(!s.tap(BX, Y0, 0));
+  CHECK(!s.tap(VOL_MUTE_CX, VOL_MUTE_CY, 0));
   const VolumeView v = s.view();
   CHECK(v.state == VolState::NoMac && v.level == 0 && !v.muted && v.name[0] == '\0');
   uint8_t l;
@@ -68,17 +77,19 @@ void testDragThrottle() {
   s.fromMac(live(40), 0);
   uint8_t l = 0;
   bool m = true;
-  CHECK(s.grab());
+  CHECK(s.grab(Y0));
   CHECK(s.held() && s.view().tracking);
-  CHECK(s.drag(147));
+  CHECK(s.view().level == 40);               // landing alone changes nothing
+  CHECK(!s.takeSend(1000, l, m));
+  CHECK(s.drag(Y0 - UP10));
   CHECK(s.takeSend(1000, l, m) && l == 50 && !m);
-  CHECK(s.drag(100));
+  CHECK(s.drag(Y0 - 2 * UP10));
   CHECK(!s.takeSend(1020, l, m));            // 20 ms after the last: wait
-  CHECK(s.takeSend(1050, l, m) && l == volumeLevelAt(100));
-  CHECK(s.drag(80));
+  CHECK(s.takeSend(1050, l, m) && l == 60);
+  CHECK(s.drag(Y0 - 3 * UP10));
   CHECK(s.release(1070));
   CHECK(!s.held());
-  CHECK(s.takeSend(1070, l, m) && l == volumeLevelAt(80));  // final value, unthrottled
+  CHECK(s.takeSend(1070, l, m) && l == volumeLevelAfter(40, -3 * UP10));  // final value, unthrottled
   CHECK(!s.takeSend(1100, l, m));            // nothing left
   CHECK(!s.drag(60));                        // released: drags mean nothing
 }
@@ -86,8 +97,8 @@ void testDragThrottle() {
 void testDragSameLevelIsNoChange() {
   VolumeSlider s;
   s.fromMac(live(50), 0);
-  CHECK(s.grab());
-  CHECK(!s.drag(147));  // already 50, not muted
+  CHECK(s.grab(Y0));
+  CHECK(!s.drag(Y0));  // back where it landed: already 50, not muted
   uint8_t l;
   bool m;
   CHECK(!s.takeSend(0, l, m));
@@ -98,8 +109,8 @@ void testDragSameLevelIsNoChange() {
 void testHoldParksMacState() {
   VolumeSlider s;
   s.fromMac(live(40), 0);
-  CHECK(s.grab());
-  CHECK(s.drag(147));                    // 50
+  CHECK(s.grab(Y0));
+  CHECK(s.drag(Y0 - UP10));              // 50
   s.fromMac(live(45), 1000);             // an echo of a level the drag already passed
   CHECK(s.view().level == 50);
   CHECK(s.release(1100));
@@ -121,8 +132,8 @@ void testLinkDropMidDrag() {
   s.fromMac(live(40), 0);
   uint8_t l;
   bool m;
-  CHECK(s.grab());
-  CHECK(s.drag(100));
+  CHECK(s.grab(Y0));
+  CHECK(s.drag(Y0 - UP10));
   s.fromMac(MacVolume{}, 500);
   CHECK(s.state() == VolState::NoMac);
   CHECK(!s.held());
@@ -138,19 +149,19 @@ void testFixed() {
   strcpy(hdmi.name, "HDMI");
   s.fromMac(hdmi, 0);
   CHECK(s.state() == VolState::Fixed);
-  CHECK(!s.grab());
-  CHECK(!s.tap(120, 147, 0));              // no tap-jump
+  CHECK(!s.grab(Y0));
+  CHECK(!s.tap(BX, Y0, 0));               // the bar does nothing
   CHECK(s.view().level == 100);
   uint8_t l;
   bool m;
-  CHECK(s.tap(VOL_SPK_CX, VOL_SPK_CY, 0));  // the speaker still mutes
+  CHECK(s.tap(VOL_MUTE_CX, VOL_MUTE_CY, 0));  // the number still mutes
   CHECK(s.view().muted);
   CHECK(s.takeSend(0, l, m) && l == 100 && m);
 
   VolumeSlider t;
   hdmi.canMute = false;
   t.fromMac(hdmi, 0);
-  CHECK(!t.tap(VOL_SPK_CX, VOL_SPK_CY, 0));
+  CHECK(!t.tap(VOL_MUTE_CX, VOL_MUTE_CY, 0));
 }
 
 // Review Focus 1: no output device. Nothing reacts, and the fill is empty, not 255.
@@ -161,25 +172,24 @@ void testNoOutput() {
   none.level = VOLUME_NO_DEVICE;
   s.fromMac(none, 0);
   CHECK(s.state() == VolState::NoOutput);
-  CHECK(!s.grab());
-  CHECK(!s.tap(VOL_SPK_CX, VOL_SPK_CY, 0));
-  CHECK(!s.tap(120, 100, 0));
+  CHECK(!s.grab(Y0));
+  CHECK(!s.tap(VOL_MUTE_CX, VOL_MUTE_CY, 0));
+  CHECK(!s.tap(BX, Y0, 0));
   const VolumeView v = s.view();
   CHECK(v.level == 0 && !v.muted);
 }
 
-void testTapJump() {
+// A tap never changes the level: not on the bar, not on the name.
+void testTapNeverSetsLevel() {
   VolumeSlider s;
   s.fromMac(live(40), 0);
   uint8_t l;
   bool m;
-  CHECK(s.tap(120, 147, 0));
-  CHECK(s.view().level == 50);
-  CHECK(s.takeSend(0, l, m) && l == 50 && !m);
-  CHECK(!s.tap(120, 147, 10));  // the same height again: nothing to send
-  CHECK(!s.takeSend(10, l, m));
-  CHECK(!s.tap(5, 147, 20));    // left of the pill
-  CHECK(!s.tap(120, 20, 20));   // above it (the top bar)
+  CHECK(!s.tap(BX, Y0, 0));                // the bar
+  CHECK(!s.tap(BX, VOL_BAR_Y + 4, 0));     // its top
+  CHECK(!s.tap(5, Y0, 0));                 // the card's edge
+  CHECK(s.view().level == 40 && !s.view().muted);
+  CHECK(!s.takeSend(0, l, m));
 }
 
 void testSpeakerToggle() {
@@ -187,10 +197,10 @@ void testSpeakerToggle() {
   s.fromMac(live(40), 0);
   uint8_t l;
   bool m;
-  CHECK(s.tap(VOL_SPK_CX, VOL_SPK_CY, 0));
+  CHECK(s.tap(VOL_MUTE_CX, VOL_MUTE_CY, 0));
   CHECK(s.view().muted && s.view().level == 40);
   CHECK(s.takeSend(0, l, m) && l == 40 && m);
-  CHECK(s.tap(VOL_SPK_CX + 20, VOL_SPK_CY - 20, 100));
+  CHECK(s.tap(VOL_MUTE_CX + 20, VOL_MUTE_CY - 20, 100));
   CHECK(!s.view().muted);
   CHECK(s.takeSend(100, l, m) && l == 40 && !m);
 }
@@ -200,17 +210,50 @@ void testChangeUnmutes() {
   s.fromMac(live(40, true), 0);
   uint8_t l;
   bool m;
-  CHECK(s.grab());
-  CHECK(s.drag(volumeFillTop(40)));  // the same level as before: unmuting is still a change
-  CHECK(s.view().level == 40);
+  CHECK(s.grab(Y0));
+  CHECK(s.view().muted);                 // landing alone does not unmute
+  CHECK(s.drag(Y0 - UP10));
+  CHECK(s.view().level == 50);
   CHECK(!s.view().muted);
-  CHECK(s.takeSend(0, l, m) && !m);
+  CHECK(s.takeSend(0, l, m) && l == 50 && !m);
   CHECK(s.release(10));
 
   VolumeSlider t;
   t.fromMac(live(40, true), 0);
-  CHECK(t.tap(120, 147, 0));
-  CHECK(!t.view().muted && t.view().level == 50);
+  CHECK(!t.tap(BX, Y0, 0));              // a tap on the bar does not unmute either
+  CHECK(t.view().muted && t.view().level == 40);
+}
+
+// The button row: each glyph's centre hits its own zone, the zones tile the
+// row under the bar, and a media tap leaves the slider alone.
+void testMediaZones() {
+  MediaKey k;
+  CHECK(volumeMediaAt(VOL_PREV_CX, VOL_ROW_Y, k) && k == MediaKey::Previous);
+  CHECK(volumeMediaAt(VOL_PLAY_CX, VOL_ROW_Y, k) && k == MediaKey::PlayPause);
+  CHECK(volumeMediaAt(VOL_NEXT_CX, VOL_ROW_Y, k) && k == MediaKey::Next);
+  CHECK(VOL_PLAY_CX == 120);                                 // centred on the screen
+  CHECK(!volumeMediaAt(BX, Y0, k));                          // the bar
+  CHECK(!volumeMediaAt(VOL_PLAY_CX, Y0, k));                 // above the row
+  CHECK(VOL_PREV_ZONE.x + VOL_PREV_ZONE.w == VOL_PLAY_ZONE.x);
+  CHECK(VOL_PLAY_ZONE.x + VOL_PLAY_ZONE.w == VOL_NEXT_ZONE.x);
+  CHECK(VOL_NEXT_ZONE.x + VOL_NEXT_ZONE.w <= 240);
+  CHECK(VOL_ROW_TOP >= VOL_BAR_Y + VOL_BAR_H);
+  CHECK(VOL_ROW_TOP >= VOL_MUTE_Y + VOL_MUTE_H);              // never both mute and a media key
+  CHECK(VOL_PLAY_ZONE.w >= 70 && VOL_PLAY_ZONE.h >= 64);
+  CHECK(volumeInRow(VOL_ROW_Y) && volumeInRow(VOL_ROW_TOP));
+  CHECK(!volumeInRow(Y0) && !volumeInRow(VOL_BAR_Y + VOL_BAR_H - 1));
+  VolumeSlider s;
+  s.fromMac(live(40), 0);
+  CHECK(!s.tap(VOL_PLAY_CX, VOL_ROW_Y, 0));                // the slider ignores it
+  CHECK(s.view().level == 40 && !s.view().muted && s.view().pressed == -1);
+  CHECK(s.view().playing == -1);                             // the Mac has not said
+  MacVolume p = live(40);
+  p.playKnown = p.playing = true;
+  s.fromMac(p, 0);
+  CHECK(s.view().playing == 1);
+  p.playing = false;
+  s.fromMac(p, 0);
+  CHECK(s.view().playing == 0);
 }
 
 }  // namespace
@@ -230,7 +273,7 @@ void testPillHit() {
   m.canSet = m.canMute = true;
   s.fromMac(m, 0);
   CHECK(!s.held());
-  CHECK(!s.drag(VOL_TRAVEL_BOTTOM));
+  CHECK(!s.drag(Y0 + UP10));
   CHECK(!s.release(10));
   uint8_t l = 0;
   bool mu = false;
@@ -248,8 +291,9 @@ int main() {
   testLinkDropMidDrag();
   testFixed();
   testNoOutput();
-  testTapJump();
+  testTapNeverSetsLevel();
   testSpeakerToggle();
   testChangeUnmutes();
+  testMediaZones();
   return checksDone("volume_slider_test");
 }

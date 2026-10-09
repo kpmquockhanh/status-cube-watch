@@ -18,6 +18,12 @@ Everything here is pinned by `firmware/src/ble_frame.h` and `firmware/sim/fixtur
 Info is 2 bytes: `[proto_ver, fw_rev]`. Reading it is what triggers pairing, so the Mac reads
 Info first, checks `proto_ver == 1`, then subscribes to Control, then writes payloads.
 
+A bonded Mac caches this table. When the cube boots a `fw_rev` other than the one it last
+advertised (NVS namespace `ble`, key `gr`), it queues a Service Changed indication for the whole
+handle range; NimBLE delivers it to each bonded Mac once that Mac reconnects and restores
+encryption. The Mac then drops its cache (`didModifyServices`) and runs the sequence above again.
+So bump `fw_rev` whenever the table changes.
+
 ## Payload frames
 
 Each write: `[ver=1][seq][idx][total]` + JSON bytes. The JSON is the bridge's `/api/status`
@@ -41,6 +47,7 @@ negotiated write length (`maximumWriteValueLength(for: .withResponse)`, about 50
 | `03 <result>`| a Settings write was handled: `00` saved, `01` rejected (nothing changed), `02` saved and the cube is rebooting |
 | `04 <ended> <next>` | a Pomodoro phase just ended (added in fw_rev 3, protocol still 1). `<ended>` is the phase that finished and `<next>` the one a double tap would start: `00` focus, `01` short break, `02` long break. Fire and forget: no ack, and it is dropped if no Mac is subscribed |
 | `05 <level> <muted>` | set the Mac's output to `<level>` (0..100) and mute it when `<muted>` is `01` (added in fw_rev 5, protocol still 1). An absolute target, so a lost or repeated message cannot drift the volume. Fire and forget: no ack, and it is dropped if no Mac is subscribed. A Mac that does not know `05` ignores it |
+| `06 <key>` | press a media key on the Mac: `00` play/pause, `01` next, `02` previous (added in fw_rev 6, protocol still 1). The Volume card's buttons send it. Fire and forget: no ack, and it is dropped if no Mac is subscribed. A Mac that does not know `06` ignores it |
 
 ## Liveness
 
@@ -96,8 +103,12 @@ The Mac writes its output state to the Volume characteristic, with response, at 
     [ver=1][level][flags][name...]
 
 - `level`: 0..100, or `ff` when the Mac has no output device.
-- `flags`: bit0 muted, bit1 the volume can be set, bit2 mute can be set. Other bits are 0, and the
-  cube ignores them.
+- `flags`: bit0 muted, bit1 the volume can be set, bit2 mute can be set, bit3 the Now Playing state
+  is known, bit4 something is playing (bits 3-4 from fw_rev 6: the play/pause button shows play or
+  pause; with bit3 clear it shows both). Other bits are 0, and the cube ignores them, so older
+  firmware ignores bits 3-4. The Mac reads the state through an `osascript` child, because macOS
+  answers MediaRemote's now-playing queries only for Apple-signed processes, and rewrites the
+  frame whenever it changes.
 - `name`: the output device name, printable ASCII (0x20..0x7E), 0..23 bytes, no terminator. The
   Mac folds it first: diacritics stripped, other non-ASCII dropped, cut to 23 bytes.
 

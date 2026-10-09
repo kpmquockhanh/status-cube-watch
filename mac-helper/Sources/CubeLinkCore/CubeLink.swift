@@ -13,6 +13,8 @@ public final class CubeLink: NSObject, CBCentralManagerDelegate, CBPeripheralDel
     public var onPomodoroEnded: ((PomodoroPhase, PomodoroPhase) -> Void)?
     /// The cube asks for the Mac's output to be set: (level 0...100, muted).
     public var onVolumeRequest: ((UInt8, Bool) -> Void)?
+    /// The cube asks for a media key to be pressed (play/pause, next, previous).
+    public var onMediaKey: ((MediaKey) -> Void)?
     /// The link became ready (Control subscribed). The Volume state is written from here.
     public var onReady: (() -> Void)?
     /// The cube's settings, read once the link is ready and again after every write. Nil while
@@ -249,6 +251,16 @@ public final class CubeLink: NSObject, CBCentralManagerDelegate, CBPeripheralDel
         p.discoverCharacteristics([payloadID, controlID, infoID, settingsID, volumeID], for: svc)
     }
 
+    /// The cube sent Service Changed (new firmware with a different GATT table): macOS has
+    /// dropped its cached copy, so rediscover and run the setup sequence again.
+    public func peripheral(_ p: CBPeripheral, didModifyServices invalidatedServices: [CBService]) {
+        guard isCurrent(p), invalidatedServices.contains(where: { $0.uuid == serviceID }) else { return }
+        log("cube's GATT table changed; rediscovering")
+        setReady(false)
+        state = .connecting
+        p.discoverServices([serviceID])
+    }
+
     public func peripheral(_ p: CBPeripheral, didDiscoverCharacteristicsFor s: CBService, error: Error?) {
         if let error {
             explain(error)
@@ -319,6 +331,8 @@ public final class CubeLink: NSObject, CBCentralManagerDelegate, CBPeripheralDel
                 onPomodoroEnded?(ended, next)
             case .volumeRequest(let level, let muted):
                 onVolumeRequest?(level, muted)
+            case .media(let key):
+                onMediaKey?(key)
             case .settings(let r):
                 onSettingsResult?(r)
                 if r != .okReboot { refreshSettings() }

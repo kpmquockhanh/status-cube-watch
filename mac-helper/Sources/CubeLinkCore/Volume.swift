@@ -7,13 +7,16 @@ public struct MacVolume: Equatable {
     public var canSet: Bool
     public var canMute: Bool
     public var name: String
+    /// Whether the Now Playing app is playing; nil = unknown (the cube then draws play/pause).
+    public var playing: Bool?
 
-    public init(level: UInt8?, muted: Bool, canSet: Bool, canMute: Bool, name: String) {
+    public init(level: UInt8?, muted: Bool, canSet: Bool, canMute: Bool, name: String, playing: Bool? = nil) {
         self.level = level
         self.muted = muted
         self.canSet = canSet
         self.canMute = canMute
         self.name = name
+        self.playing = playing
     }
 
     public static let noDevice = MacVolume(level: nil, muted: false, canSet: false, canMute: false, name: "")
@@ -43,6 +46,10 @@ public func encodeVolume(_ v: MacVolume) -> Data {
     if v.muted { flags |= 1 }
     if v.canSet { flags |= 2 }
     if v.canMute { flags |= 4 }
+    if let playing = v.playing {  // bit 3: the state is known, bit 4: playing (fw_rev 6 draws it)
+        flags |= 8
+        if playing { flags |= 16 }
+    }
     let level = v.level.map { min($0, 100) } ?? VolumeFrame.noDevice
     return Data([VolumeFrame.version, level, flags]) + Data(foldVolumeName(v.name).utf8)
 }

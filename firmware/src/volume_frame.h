@@ -15,6 +15,8 @@ constexpr uint8_t VOLUME_NO_DEVICE = 0xFF;  // level when the Mac has no output 
 constexpr size_t VOLUME_NAME_MAX = 23;
 constexpr size_t VOLUME_FRAME_MAX = 3 + VOLUME_NAME_MAX;  // 26
 constexpr uint8_t VOL_FLAG_MUTED = 1, VOL_FLAG_CAN_SET = 2, VOL_FLAG_CAN_MUTE = 4;
+// Whether the Mac's Now Playing app plays (fw_rev 6): KNOWN set, then PLAYING says which.
+constexpr uint8_t VOL_FLAG_PLAY_KNOWN = 8, VOL_FLAG_PLAYING = 16;
 constexpr size_t BLE_VOLUME_REQ_LEN = 3;
 
 // What the Mac last reported. known=false: nothing yet, or the link dropped.
@@ -24,6 +26,8 @@ struct MacVolume {
   bool muted;
   bool canSet;    // the device's volume can be set (false: HDMI and the like)
   bool canMute;
+  bool playKnown;  // the Mac reported whether anything plays
+  bool playing;
   char name[VOLUME_NAME_MAX + 1];
 };
 
@@ -42,6 +46,8 @@ inline bool volumeParse(const uint8_t *d, size_t n, MacVolume &out) {
   v.muted = (d[2] & VOL_FLAG_MUTED) != 0;
   v.canSet = (d[2] & VOL_FLAG_CAN_SET) != 0;
   v.canMute = (d[2] & VOL_FLAG_CAN_MUTE) != 0;
+  v.playKnown = (d[2] & VOL_FLAG_PLAY_KNOWN) != 0;
+  v.playing = v.playKnown && (d[2] & VOL_FLAG_PLAYING) != 0;
   out = v;
   return true;
 }
@@ -54,7 +60,15 @@ inline void volumeRequestEncode(uint8_t level, bool muted, uint8_t out[BLE_VOLUM
   out[2] = muted ? 1 : 0;
 }
 
+// Media keys the Volume card can press on the Mac: Control [0x06][key].
+enum class MediaKey : uint8_t { PlayPause = 0, Next = 1, Previous = 2 };
+constexpr size_t BLE_MEDIA_REQ_LEN = 2;
+inline void mediaRequestEncode(MediaKey key, uint8_t out[BLE_MEDIA_REQ_LEN]) {
+  out[0] = BLE_CTRL_MEDIA;
+  out[1] = (uint8_t)key;
+}
+
 inline bool volumeSame(const MacVolume &a, const MacVolume &b) {
   return a.known == b.known && a.level == b.level && a.muted == b.muted && a.canSet == b.canSet &&
-         a.canMute == b.canMute && strcmp(a.name, b.name) == 0;
+         a.canMute == b.canMute && a.playKnown == b.playKnown && a.playing == b.playing && strcmp(a.name, b.name) == 0;
 }

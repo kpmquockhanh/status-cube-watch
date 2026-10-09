@@ -52,6 +52,13 @@ public enum PomodoroPhase: UInt8, Equatable {
     case longBreak = 2
 }
 
+/// A media key the cube's Volume card asks the Mac to press (Control `06 <key>`, fw_rev 6).
+public enum MediaKey: UInt8, Equatable {
+    case playPause = 0
+    case next = 1
+    case previous = 2
+}
+
 /// What the cube sends on the Control characteristic.
 public enum ControlMessage: Equatable {
     case sendNow
@@ -60,6 +67,8 @@ public enum ControlMessage: Equatable {
     case pomodoroEnded(ended: PomodoroPhase, next: PomodoroPhase)
     /// Set the Mac's output: an absolute level 0...100 and mute (fw_rev 5).
     case volumeRequest(level: UInt8, muted: Bool)
+    /// Press a media key on the Mac (fw_rev 6).
+    case media(MediaKey)
 
     public static func parse(_ d: Data) -> ControlMessage? {
         let b = [UInt8](d)
@@ -76,6 +85,9 @@ public enum ControlMessage: Equatable {
         case 0x05:
             guard b.count >= 3, b[1] <= 100, b[2] <= 1 else { return nil }
             return .volumeRequest(level: b[1], muted: b[2] == 1)
+        case 0x06:
+            guard b.count >= 2, let k = MediaKey(rawValue: b[1]) else { return nil }
+            return .media(k)
         default: return nil
         }
     }

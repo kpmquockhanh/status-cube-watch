@@ -74,6 +74,9 @@ bool dirty = true;
 // and the Pomodoro. `deckVolume` is what the deck was last built with, so a
 // bond coming or going can keep the viewer on their card.
 VolumeSlider volSlider;
+// The media button last tapped on the Volume card (a MediaKey, -1 none), lit for VOLUME_PRESS_MS.
+int8_t mediaPressed = -1;
+uint32_t mediaPressedAt = 0;
 bool deckVolume = false;
 bool volumeShown() { return bleBonded(); }
 uint8_t deckSize() { return uiDeckSize(payload, deckVolume); }
@@ -99,6 +102,7 @@ bool pairWaitDismissed = false;  // a touch dismisses the first-boot "waiting fo
 Orientation orient;
 uint8_t appliedRot = 0;
 bool imuUp = false;
+bool touchOnVolumeRow = false;  // ... and landed in its button row: a tap there, never a drag
 bool touchOnVolume = false;  // the finger now down landed on the Volume card (latched at landing)
 bool touchDown = false;  // a finger was on the glass at the last poll: do not flip under it
 uint32_t lastImu = 0;
@@ -296,10 +300,16 @@ void pollTouch() {
   // On the Volume card a vertical move is the volume, not a swipe (gesture.h).
   // Whether it is the slider's touch is decided where the finger landed, so a touch that began on
   // another card never reaches it; the latch clears on the lift pass, after the gesture is routed.
-  if (landing) touchOnVolume = onVolumeCard() && !editing;
+  if (landing) {
+    touchOnVolume = onVolumeCard() && !editing;
+    touchOnVolumeRow = touchOnVolume && volumeInRow(y);
+  }
   const bool onVolume = touchOnVolume && onVolumeCard() && !editing;
-  if (!down) touchOnVolume = false;
-  const Gesture gesture = gestures.update(down, x, y, now, onPomodoro && !editing, onVolume);
+  const bool onVolumeRow = onVolume && touchOnVolumeRow;
+  if (!down) touchOnVolume = touchOnVolumeRow = false;
+  // In the button row the tracker stays in tap mode: a press that drifts a few
+  // pixels is still a Tap (TAP_MAX_PX), not a drag of the slider.
+  const Gesture gesture = gestures.update(down, x, y, now, onPomodoro && !editing, onVolume && !onVolumeRow);
   // The deck left the card under a dragging finger (an alert pulled it to the
   // Pomodoro): let go, so the last level is still sent.
   if (volSlider.held() && !onVolume) {
@@ -318,7 +328,7 @@ void pollTouch() {
     bool acted = false;
     switch (gesture) {
       case Gesture::DragStart:
-        if (volumeInPill(gestures.startX(), gestures.startY()) && volSlider.grab()) {
+        if (volumeInPill(gestures.startX(), gestures.startY()) && volSlider.grab(gestures.startY())) {
           volSlider.drag(gestures.lastY());
           acted = true;
         }
@@ -329,9 +339,18 @@ void pollTouch() {
       case Gesture::DragEnd:
         acted = volSlider.release(now);
         break;
-      case Gesture::Tap:
-        acted = volSlider.tap(gestures.startX(), gestures.startY(), now);
+      case Gesture::Tap: {
+        MediaKey key;
+        if (volSlider.state() != VolState::NoMac && volumeMediaAt(gestures.startX(), gestures.startY(), key)) {
+          bleSendMedia(key);
+          mediaPressed = (int8_t)key;
+          mediaPressedAt = now;
+          acted = true;
+        } else {
+          acted = volSlider.tap(gestures.startX(), gestures.startY(), now);
+        }
         break;
+      }
       default:
         break;
     }
@@ -517,6 +536,10 @@ void loop() {
     dirty = true;
   }
   if (volSlider.tick(now)) dirty = true;
+  if (mediaPressed >= 0 && now - mediaPressedAt >= VOLUME_PRESS_MS) {
+    mediaPressed = -1;
+    dirty = true;
+  }
   uint8_t volLevel = 0;
   bool volMuted = false;
   if (volSlider.takeSend(now, volLevel, volMuted)) bleSendVolume(volLevel, volMuted);
@@ -606,7 +629,8 @@ void loop() {
       else uiPomodoroEditor(lcd, editSettings);
     }
     else {
-      const VolumeView vv = volSlider.view();
+      VolumeView vv = volSlider.view();
+      vv.pressed = mediaPressed;
       uiRender(lcd, payload, cardIndex, td.bleLive || netOnline(), age, pv, bv,
                td.bleLive ? UiLink::Ble : (wifiUp && netOnline() ? UiLink::Wifi : UiLink::None),
                deckVolume ? &vv : nullptr);

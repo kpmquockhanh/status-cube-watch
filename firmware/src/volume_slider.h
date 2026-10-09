@@ -8,28 +8,72 @@
 
 #include "volume_frame.h"
 
-// The pill: full width less a 14 px gutter, between the top bar and the dots.
+// The card body, between the top bar and the dots: a vertical drag that starts
+// anywhere in it moves the level by how far the finger travels (relative, like
+// a scroll wheel), so touching alone never changes the volume.
 constexpr int VOL_PILL_X = 14;
 constexpr int VOL_PILL_Y = 42;
 constexpr int VOL_PILL_W = 212;
 constexpr int VOL_PILL_H = 210;
-constexpr int VOL_PILL_R = 40;
-// The finger's travel, inset from the pill so both ends are easy to reach: at
-// or above TOP is 100, at or below BOTTOM is 0.
-constexpr int VOL_TRAVEL_TOP = 54;
-constexpr int VOL_TRAVEL_BOTTOM = 240;
-// The speaker glyph's centre; a tap around it toggles mute.
-constexpr int VOL_SPK_CX = 120;
-constexpr int VOL_SPK_CY = 218;
+// The drawn bar: a slim capsule on the right that fills from the bottom,
+// ending above the button row.
+constexpr int VOL_BAR_X = 184;
+constexpr int VOL_BAR_Y = 50;
+constexpr int VOL_BAR_W = 30;
+constexpr int VOL_BAR_H = 128;
+constexpr int VOL_BAR_R = VOL_BAR_W / 2;
+// How far a finger travels for the whole 0..100 range.
+constexpr int VOL_DRAG_PX = 164;
+// The button row, full width under the bar: previous, play/pause and next (a
+// tap presses that media key on the Mac). Three equal zones, each
+// VOL_ROW_ZONE_W wide and the row's full height, so they are easy to hit. A
+// touch that lands in the row is never a drag (main.cpp), so a finger that
+// wobbles on a button still taps it.
+constexpr int VOL_ROW_TOP = 186;
+constexpr int VOL_ROW_BOTTOM = 258;
+constexpr int VOL_ROW_Y = 220;  // the glyphs' centre line
+constexpr int VOL_ROW_X = 9;
+constexpr int VOL_ROW_ZONE_W = 74;
+constexpr int VOL_PREV_CX = VOL_ROW_X + VOL_ROW_ZONE_W / 2;
+constexpr int VOL_PLAY_CX = VOL_PREV_CX + VOL_ROW_ZONE_W;  // 120: the screen's centre
+constexpr int VOL_NEXT_CX = VOL_PLAY_CX + VOL_ROW_ZONE_W;
+// The number: a tap anywhere on it (the left column under the name, down to
+// the row) toggles mute.
+constexpr int VOL_MUTE_X = 8;
+constexpr int VOL_MUTE_Y = 78;
+constexpr int VOL_MUTE_W = VOL_BAR_X - 8 - VOL_MUTE_X;
+constexpr int VOL_MUTE_H = VOL_ROW_TOP - VOL_MUTE_Y;
+constexpr int VOL_MUTE_CX = VOL_MUTE_X + VOL_MUTE_W / 2;
+constexpr int VOL_MUTE_CY = VOL_MUTE_Y + VOL_MUTE_H / 2;
 
 struct VolRect {
   int16_t x, y, w, h;
   bool contains(int px, int py) const { return px >= x && px < x + w && py >= y && py < y + h; }
 };
 constexpr VolRect VOL_PILL_RECT{VOL_PILL_X, VOL_PILL_Y, VOL_PILL_W, VOL_PILL_H};
-// Where a drag may grab the slider, and a tap jumps the level.
+// Where a drag may grab the slider.
 inline bool volumeInPill(int x, int y) { return VOL_PILL_RECT.contains(x, y); }
-constexpr VolRect VOL_SPEAKER_ZONE{VOL_SPK_CX - 30, VOL_SPK_CY - 25, 60, 50};
+// Where a touch lands to be a button press rather than a drag.
+inline bool volumeInRow(int y) { return y >= VOL_ROW_TOP; }
+constexpr VolRect volRowZone(int i) {
+  return VolRect{(int16_t)(VOL_ROW_X + i * VOL_ROW_ZONE_W), (int16_t)VOL_ROW_TOP, (int16_t)VOL_ROW_ZONE_W,
+                 (int16_t)(VOL_ROW_BOTTOM - VOL_ROW_TOP)};
+}
+constexpr VolRect VOL_PREV_ZONE = volRowZone(0);
+constexpr VolRect VOL_PLAY_ZONE = volRowZone(1);
+constexpr VolRect VOL_NEXT_ZONE = volRowZone(2);
+constexpr VolRect VOL_MUTE_ZONE{VOL_MUTE_X, VOL_MUTE_Y, VOL_MUTE_W, VOL_MUTE_H};
+// How long a pressed media button stays highlighted.
+constexpr uint32_t VOLUME_PRESS_MS = 180;
+
+// The media key under a tap, if any.
+inline bool volumeMediaAt(int x, int y, MediaKey &key) {
+  if (VOL_PREV_ZONE.contains(x, y)) key = MediaKey::Previous;
+  else if (VOL_PLAY_ZONE.contains(x, y)) key = MediaKey::PlayPause;
+  else if (VOL_NEXT_ZONE.contains(x, y)) key = MediaKey::Next;
+  else return false;
+  return true;
+}
 
 // After a lift (or a tap), Mac states are parked this long: echoes of levels
 // the finger already passed must not jerk the fill back.
@@ -37,32 +81,20 @@ constexpr uint32_t VOLUME_HOLD_MS = 600;
 // Fewest ms between two requests while dragging.
 constexpr uint32_t VOLUME_SEND_MS = 50;
 
-// The level for a finger at height `y`, rounded to the nearest step.
-constexpr uint8_t volumeLevelAt(int y) {
-  return y <= VOL_TRAVEL_TOP      ? 100
-         : y >= VOL_TRAVEL_BOTTOM ? 0
-                                  : (uint8_t)(((VOL_TRAVEL_BOTTOM - y) * 100 + (VOL_TRAVEL_BOTTOM - VOL_TRAVEL_TOP) / 2) /
-                                              (VOL_TRAVEL_BOTTOM - VOL_TRAVEL_TOP));
+// The level after a finger that grabbed at `fromLevel` moved `dy` px (down is
+// positive), rounded to the nearest step and clamped to 0..100.
+inline uint8_t volumeLevelAfter(uint8_t fromLevel, int dy) {
+  const int delta = -dy * 100;
+  const int steps = (delta >= 0 ? delta + VOL_DRAG_PX / 2 : delta - VOL_DRAG_PX / 2) / VOL_DRAG_PX;
+  const int l = (int)fromLevel + steps;
+  return (uint8_t)(l < 0 ? 0 : l > 100 ? 100 : l);
 }
 
-// The fill's top edge for a level (fractional while it eases): the inverse of
-// volumeLevelAt, so the edge sits under the finger that set the level. The
-// travel maps 1..99 linearly; the two end segments stretch from the travel to
-// the pill's own top and bottom, so 100 fills the whole pill and 0 empties it.
+// The fill's top edge for a level (fractional while it eases): 0 empties the
+// bar, 100 fills it.
 inline int volumeFillTop(float level) {
   const float L = level < 0.0f ? 0.0f : level > 100.0f ? 100.0f : level;
-  const float top99 = (float)VOL_TRAVEL_BOTTOM - (float)(VOL_TRAVEL_BOTTOM - VOL_TRAVEL_TOP) * 99.0f / 100.0f;
-  const float bot1 = (float)VOL_TRAVEL_BOTTOM - (float)(VOL_TRAVEL_BOTTOM - VOL_TRAVEL_TOP) * 1.0f / 100.0f;
-  const float pillBottom = (float)(VOL_PILL_Y + VOL_PILL_H);
-  float y;
-  if (L > 99.0f) {
-    y = top99 + ((float)VOL_PILL_Y - top99) * (L - 99.0f);
-  } else if (L < 1.0f) {
-    y = pillBottom + (bot1 - pillBottom) * L;
-  } else {
-    y = (float)VOL_TRAVEL_BOTTOM - (float)(VOL_TRAVEL_BOTTOM - VOL_TRAVEL_TOP) * L / 100.0f;
-  }
-  return (int)(y + 0.5f);
+  return (int)((float)(VOL_BAR_Y + VOL_BAR_H) - (float)VOL_BAR_H * L / 100.0f + 0.5f);
 }
 
 enum class VolState : uint8_t {
@@ -79,6 +111,8 @@ struct VolumeView {
   bool muted;
   bool canMute;
   bool tracking;  // a finger holds the fill: draw it at `level`, no easing
+  int8_t pressed;  // the media button to highlight (a MediaKey), or -1
+  int8_t playing;  // the Mac's Now Playing app: 1 playing, 0 paused, -1 unknown (draw play/pause)
   char name[VOLUME_NAME_MAX + 1];
 };
 
@@ -117,18 +151,22 @@ class VolumeSlider {
     return true;
   }
 
-  // A drag began on the card. Only a live, settable output can be dragged.
-  bool grab() {
+  // A drag began on the card, the finger having landed at height `y`. Only a
+  // live, settable output can be dragged. Grabbing changes nothing by itself.
+  bool grab(int y) {
     if (state() != VolState::Live) return false;
     _held = true;
     _quiet = false;
+    _grabY = y;
+    _grabLevel = _level;
     return true;
   }
 
-  // The finger is at height `y`. True when the level or mute changed.
+  // The finger is at height `y`: the level moves by its travel since grab().
+  // True when the level or mute changed.
   bool drag(int y) {
     if (!_held) return false;
-    const uint8_t l = volumeLevelAt(y);
+    const uint8_t l = volumeLevelAfter(_grabLevel, y - _grabY);
     if (l == _level && !_muted) return false;
     _level = l;
     _muted = false;  // any level change unmutes
@@ -146,22 +184,13 @@ class VolumeSlider {
     return true;
   }
 
-  // A tap: the speaker zone toggles mute; elsewhere on the pill the level jumps
-  // to that height. True when something changed.
+  // A tap: on the number it toggles mute. Anywhere else a tap does nothing:
+  // only a drag changes the level. True when something changed.
   bool tap(int x, int y, uint32_t now) {
     const VolState s = state();
     if (s == VolState::NoMac || s == VolState::NoOutput) return false;
-    if (VOL_SPEAKER_ZONE.contains(x, y)) {
-      if (!_mac.canMute) return false;
-      _muted = !_muted;
-      queue(now);
-      return true;
-    }
-    if (s != VolState::Live || !volumeInPill(x, y)) return false;
-    const uint8_t l = volumeLevelAt(y);
-    if (l == _level && !_muted) return false;
-    _level = l;
-    _muted = false;
+    if (!VOL_MUTE_ZONE.contains(x, y) || !_mac.canMute) return false;
+    _muted = !_muted;
     queue(now);
     return true;
   }
@@ -186,6 +215,8 @@ class VolumeSlider {
     v.muted = (v.state == VolState::Live || v.state == VolState::Fixed) && _muted;
     v.canMute = _mac.canMute;
     v.tracking = _held;
+    v.pressed = -1;  // main.cpp sets it: the press is not the slider's state
+    v.playing = v.state == VolState::NoMac || !_mac.playKnown ? -1 : _mac.playing ? 1 : 0;
     memcpy(v.name, _mac.name, sizeof(v.name));
     return v;
   }
@@ -210,6 +241,8 @@ class VolumeSlider {
   bool _hasParked = false;
   uint8_t _level = 0;
   bool _muted = false, _held = false, _quiet = false;
+  int _grabY = 0;
+  uint8_t _grabLevel = 0;
   uint32_t _releasedAt = 0;
   bool _pending = false, _sendNow = false;
   uint32_t _lastSend = 0;

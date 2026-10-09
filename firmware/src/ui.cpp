@@ -695,78 +695,112 @@ void drawPomodoroCard(LovyanGFX *g, const PomoView &v, float flash, bool online,
 }
 
 // --- the Volume card ---------------------------------------------------------
-// One rounded pill filling from the bottom; volume_slider.h owns the geometry,
-// shared with the hit-testing. The text and the speaker are drawn twice through
-// a clip at the fill's edge: light over the track, dark where the fill covers
-// them, so they read at any level.
-constexpr uint32_t VOL_FILL = 0xCDB8FF;     // lavender: live
-constexpr uint32_t VOL_FIXED = 0x4A5366;    // the output sets its own level (HDMI)
-constexpr uint32_t VOL_ON_FILL = 0x231A3D;  // text and glyph where the fill covers them
-constexpr uint32_t VOL_IDLE = 0x4A5366;     // idle glyph: faint, but visible on the track
-constexpr int VOL_TEXT_MAX_W = 184;         // the name, clear of the pill's corners
-constexpr int VOL_NAME_Y = VOL_PILL_Y + 26;
-constexpr int VOL_NUM_Y = VOL_PILL_Y + 70;
-constexpr int VOL_WORD_Y = VOL_PILL_Y + 104;
+// Minimal: the output's name, the level as a large number and, when it is not
+// simply live, one status word, in a left column; a slim bar on the right that
+// fills from the bottom; under both a full-width row of the previous /
+// play-pause / next media keys. A tap on the number mutes.
+// volume_slider.h owns the geometry, shared with the hit-testing.
+constexpr uint32_t VOL_FILL = 0xE8ECF2;  // live: near-white, the one bright thing on the card
+constexpr uint32_t VOL_OFF = 0x4A5366;   // muted, or an output that sets its own level (HDMI)
+constexpr int VOL_COL_X = 24;            // the left column
+constexpr int VOL_TEXT_MAX_W = VOL_BAR_X - VOL_COL_X - 16;
+constexpr int VOL_NAME_Y = 62;
+constexpr int VOL_NUM_Y = 134;  // baseline
+constexpr int VOL_WORD_Y = 162;
 
 GaugeAnim g_volAnim;
 
-// Clips to the screen above (pass 0) or below (pass 1) the fill edge. False
-// when that part is empty, so the pass can be skipped.
-bool clipSide(LovyanGFX *g, int edge, int pass) {
-  if (pass == 0) {
-    if (edge <= 0) return false;
-    g->setClipRect(0, 0, LCD_WIDTH, edge);
-  } else {
-    if (edge >= LCD_HEIGHT) return false;
-    g->setClipRect(0, edge, LCD_WIDTH, LCD_HEIGHT - edge);
+// `text` cut with "..." until it fits VOL_TEXT_MAX_W (the font must be set).
+void volumeFit(LovyanGFX *g, char *text, size_t cap) {
+  if (g->textWidth(text) <= VOL_TEXT_MAX_W) return;
+  size_t n = strlen(text);
+  char cut[40] = "...";
+  while (n > 0) {
+    text[--n] = '\0';
+    while (n > 0 && text[n - 1] == ' ') text[--n] = '\0';
+    snprintf(cut, sizeof(cut), "%s...", text);
+    if (g->textWidth(cut) <= VOL_TEXT_MAX_W) break;
   }
-  return true;
+  snprintf(text, cap, "%s", cut);
 }
 
 // The name is printable ASCII: volumeParse (volume_frame.h) rejects anything else.
 // The caption: the output's name in capitals ("MAC VOLUME" when there is
-// none), cut with "..." to fit between the pill's corners.
-void volumeLabel(LovyanGFX *g, const char *name, char *out, size_t cap) {
+// none), on one line or wrapped at a space onto two, the second cut with "..."
+// if it still does not fit beside the bar.
+void volumeLabel(LovyanGFX *g, const char *name, char *l1, char *l2, size_t cap) {
   size_t n = 0;
-  for (const char *c = name; *c && n + 1 < cap; c++) out[n++] = (*c >= 'a' && *c <= 'z') ? (char)(*c - 32) : *c;
-  out[n] = '\0';
-  if (!n) snprintf(out, cap, "MAC VOLUME");
+  for (const char *c = name; *c && n + 1 < cap; c++) l1[n++] = (*c >= 'a' && *c <= 'z') ? (char)(*c - 32) : *c;
+  l1[n] = '\0';
+  l2[0] = '\0';
+  if (!n) snprintf(l1, cap, "MAC VOLUME");
   g->setFont(&V_S12.font);
-  if (g->textWidth(out) <= VOL_TEXT_MAX_W) return;
-  char cut[40] = "...";
-  while (n > 0) {
-    out[--n] = '\0';
-    while (n > 0 && out[n - 1] == ' ') out[--n] = '\0';
-    snprintf(cut, sizeof(cut), "%s...", out);
-    if (g->textWidth(cut) <= VOL_TEXT_MAX_W) break;
-  }
-  snprintf(out, cap, "%s", cut);
-}
-
-// The speaker near the bottom of the pill: 0..3 waves by level, or a cross
-// when muted (the spec's "slashed": a cross reads better at this size).
-void drawSpeaker(LovyanGFX *g, uint8_t level, bool muted, uint16_t col) {
-  const int x = VOL_SPK_CX - 14, y = VOL_SPK_CY;
-  g->fillRect(x, y - 4, 6, 9, col);
-  g->fillTriangle(x + 5, y - 4, x + 13, y - 11, x + 13, y + 11, col);
-  g->fillTriangle(x + 5, y - 4, x + 13, y + 11, x + 5, y + 4, col);
-  if (muted) {
-    g->drawWideLine(x + 18, y - 7, x + 30, y + 7, 1.5f, col);
-    g->drawWideLine(x + 18, y + 7, x + 30, y - 7, 1.5f, col);
+  if (g->textWidth(l1) <= VOL_TEXT_MAX_W) return;
+  // The last space whose prefix fits ends the first line.
+  for (size_t i = strlen(l1); i > 0; i--) {
+    if (l1[i - 1] != ' ') continue;
+    char head[40];
+    snprintf(head, sizeof(head), "%.*s", (int)(i - 1), l1);
+    if (g->textWidth(head) > VOL_TEXT_MAX_W) continue;
+    snprintf(l2, cap, "%s", l1 + i);
+    snprintf(l1, cap, "%s", head);
+    volumeFit(g, l2, cap);
     return;
   }
-  const int waves = level == 0 ? 0 : level <= 33 ? 1 : level <= 66 ? 2 : 3;
-  for (int w = 0; w < waves; w++) {
-    const int r = 6 + 5 * w;
-    g->fillArc(x + 13, y, r, r + 2, -40.0f, 40.0f, col);
+  volumeFit(g, l1, cap);  // one long word
+}
+
+// Antialiased glyph pieces: LovyanGFX's wedge lines are the only smooth
+// primitive besides circles and round rects, so the icons are built from them.
+
+// A filled triangle with softened corners: the fill, then a thin stroke round its edges.
+void smoothTriangle(LovyanGFX *g, int x0, int y0, int x1, int y1, int x2, int y2, uint16_t col) {
+  g->fillTriangle(x0, y0, x1, y1, x2, y2, col);
+  g->drawWideLine(x0, y0, x1, y1, 0.9f, col);
+  g->drawWideLine(x1, y1, x2, y2, 0.9f, col);
+  g->drawWideLine(x2, y2, x0, y0, 0.9f, col);
+}
+
+// Previous / next: a triangle and a bar, mirrored. `dir` 1 points right.
+void drawSkip(LovyanGFX *g, int cx, int cy, int dir, uint16_t col) {
+  const int tip = cx + 7 * dir, base = cx - 7 * dir;
+  smoothTriangle(g, base, cy - 10, base, cy + 10, tip, cy, col);
+  const int bar = dir > 0 ? cx + 8 : cx - 12;
+  g->fillSmoothRoundRect(bar, cy - 10, 4, 21, 2, col);
+}
+
+// Play when paused, pause when playing, both in one when the Mac has not said.
+void drawPlayPause(LovyanGFX *g, int cx, int cy, int8_t playing, uint16_t col) {
+  if (playing == 1) {
+    g->fillSmoothRoundRect(cx - 8, cy - 10, 6, 21, 2, col);
+    g->fillSmoothRoundRect(cx + 2, cy - 10, 6, 21, 2, col);
+  } else if (playing == 0) {
+    smoothTriangle(g, cx - 6, cy - 11, cx - 6, cy + 11, cx + 11, cy, col);  // nudged right: optical centre
+  } else {
+    smoothTriangle(g, cx - 12, cy - 9, cx - 12, cy + 9, cx + 1, cy, col);
+    g->fillSmoothRoundRect(cx + 4, cy - 9, 4, 19, 2, col);
+    g->fillSmoothRoundRect(cx + 10, cy - 9, 4, 19, 2, col);
   }
+}
+
+// The button row: previous, play/pause (on a disc: the main action) and next,
+// one per equal zone. A pressed button lights its disc for VOLUME_PRESS_MS.
+void drawVolumeRow(LovyanGFX *g, const VolumeView &v) {
+  constexpr int DISC_R = 27;
+  const uint16_t ink = v.state != VolState::NoMac ? INK : MUTED;
+  const int8_t p = v.pressed;
+  if (p == (int8_t)MediaKey::Previous) g->fillSmoothCircle(VOL_PREV_CX, VOL_ROW_Y, DISC_R, FAINT);
+  if (p == (int8_t)MediaKey::Next) g->fillSmoothCircle(VOL_NEXT_CX, VOL_ROW_Y, DISC_R, FAINT);
+  g->fillSmoothCircle(VOL_PLAY_CX, VOL_ROW_Y, DISC_R, p == (int8_t)MediaKey::PlayPause ? MUTED : FAINT);
+  drawSkip(g, VOL_PREV_CX, VOL_ROW_Y, -1, ink);
+  drawPlayPause(g, VOL_PLAY_CX, VOL_ROW_Y, v.playing, ink);
+  drawSkip(g, VOL_NEXT_CX, VOL_ROW_Y, 1, ink);
 }
 
 void drawVolumeCard(LovyanGFX *g, const VolumeView &v, bool online, uint32_t ageMs, const BatteryView &bat) {
   const uint32_t now = millis();
   const bool live = v.state == VolState::Live, fixed = v.state == VolState::Fixed;
-  const bool idle = v.state == VolState::NoMac || v.state == VolState::NoOutput;
-  const uint32_t rgb = fixed ? VOL_FIXED : v.muted ? POMO_MUTED : VOL_FILL;
+  const uint32_t rgb = fixed || v.muted ? VOL_OFF : VOL_FILL;
   GaugeAnim &a = g_volAnim;
   if (v.tracking) {
     // Under the finger: no easing, the fill is where the finger is.
@@ -783,46 +817,45 @@ void drawVolumeCard(LovyanGFX *g, const VolumeView &v, bool online, uint32_t age
   uint32_t shownRgb = rgb;
   const float shown = stepGauge(a, v.level, rgb, now, shownRgb);
   const int edge = volumeFillTop(shown);
-  const int bottom = VOL_PILL_Y + VOL_PILL_H;
+  const int bottom = VOL_BAR_Y + VOL_BAR_H;
 
-  g->fillSmoothRoundRect(VOL_PILL_X, VOL_PILL_Y, VOL_PILL_W, VOL_PILL_H, VOL_PILL_R, to565(RING_TRACK));
+  g->fillSmoothRoundRect(VOL_BAR_X, VOL_BAR_Y, VOL_BAR_W, VOL_BAR_H, VOL_BAR_R, to565(RING_TRACK));
   if (edge < bottom) {
-    // The same rounded shape, clipped to below the edge: smooth corners at any
-    // level and a flat top.
-    g->setClipRect(VOL_PILL_X, edge, VOL_PILL_W, bottom - edge);
-    g->fillSmoothRoundRect(VOL_PILL_X, VOL_PILL_Y, VOL_PILL_W, VOL_PILL_H, VOL_PILL_R, to565(shownRgb));
+    // The same capsule clipped to below the edge: round ends at any level.
+    g->setClipRect(VOL_BAR_X, edge, VOL_BAR_W, bottom - edge);
+    g->fillSmoothRoundRect(VOL_BAR_X, VOL_BAR_Y, VOL_BAR_W, VOL_BAR_H, VOL_BAR_R, to565(shownRgb));
     g->clearClipRect();
   }
 
-  char label[32];
-  volumeLabel(g, v.name, label, sizeof(label));
+  char l1[32], l2[32];
+  volumeLabel(g, v.name, l1, l2, sizeof(l1));
+  g->setFont(&V_S12.font);
+  g->setTextDatum(baseline_left);
+  g->setTextColor(DIM, BG);
+  g->drawString(l1, VOL_COL_X, VOL_NAME_Y);
+  if (*l2) g->drawString(l2, VOL_COL_X, VOL_NAME_Y + 16);
+
   char num[8];
   if (live) snprintf(num, sizeof(num), "%u", (unsigned)v.level);
   else snprintf(num, sizeof(num), "--");
+  g->setFont(&V_B44.font);
+  g->setTextColor(live && !v.muted ? INK : MUTED, BG);
+  g->drawString(num, VOL_COL_X, VOL_NUM_Y);
+  if (live) {
+    const int w = g->textWidth(num);
+    g->setFont(&V_B18.font);
+    g->setTextColor(v.muted ? MUTED : DIM, BG);
+    g->drawString("%", VOL_COL_X + w + 2, VOL_NUM_Y);
+  }
+
   const char *word = v.state == VolState::NoMac      ? "NO MAC"
                      : v.state == VolState::NoOutput ? "NO OUTPUT"
                      : fixed                         ? "FIXED"
                      : v.muted                       ? "MUTED"
                                                      : "";
-  const uint16_t onFill = fixed ? INK : to565(VOL_ON_FILL);
-  g->setTextDatum(middle_center);
-  for (int pass = 0; pass < 2; pass++) {
-    if (!clipSide(g, edge, pass)) continue;
-    const bool over = pass == 1;
-    g->setFont(&V_S12.font);
-    g->setTextColor(over ? onFill : DIM);
-    g->drawString(label, LCD_WIDTH / 2, VOL_NAME_Y);
-    g->setFont(&V_B44.font);
-    g->setTextColor(over ? onFill : INK);
-    g->drawString(num, LCD_WIDTH / 2, VOL_NUM_Y);
-    if (*word) {
-      g->setFont(&V_S12.font);
-      g->setTextColor(over ? onFill : DIM);
-      g->drawString(word, LCD_WIDTH / 2, VOL_WORD_Y);
-    }
-    drawSpeaker(g, v.level, v.muted, over ? onFill : idle ? to565(VOL_IDLE) : INK);
-  }
-  g->clearClipRect();
+  if (*word) drawCaps(g, word, VOL_COL_X, VOL_WORD_Y, DIM, baseline_left);
+
+  drawVolumeRow(g, v);
   drawTopBar(g, online, ageMs, bat);
 }
 
