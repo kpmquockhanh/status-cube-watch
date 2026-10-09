@@ -5,12 +5,16 @@
 #include "payload.h"
 #include "pomo_settings.h"
 #include "pomodoro.h"
+#include "volume_slider.h"
 
 void uiBegin(Display &lcd);
-// The deck is the bridge's cards plus one local card at the end: the Pomodoro
-// timer. It exists even with no payload (bridge down), where it is the only card.
-uint8_t uiDeckSize(const Payload &p);       // always >= 1
-uint8_t uiPomodoroIndex(const Payload &p);  // the last index
+// The deck is the bridge's cards, then the local cards: the Volume card while
+// a Mac is bonded (`volume`), then the Pomodoro timer, always last. The
+// Pomodoro exists even with no payload (bridge down, no Mac): then it is the
+// only card.
+uint8_t uiDeckSize(const Payload &p, bool volume = false);       // always >= 1
+uint8_t uiVolumeIndex(const Payload &p);                         // valid only when the card is in the deck
+uint8_t uiPomodoroIndex(const Payload &p, bool volume = false);  // the last index
 
 // Where the data on screen came from, shown as a small marker in the top bar.
 enum class UiLink : uint8_t { None, Ble, Wifi };
@@ -18,8 +22,10 @@ enum class UiLink : uint8_t { None, Ble, Wifi };
 // Draws one card plus the shared chrome. Everything is composed into an
 // off-screen sprite, then only the rows that differ from the last frame are
 // sent (every screen below works the same way), so the panel never tears.
+// `vol`: the Volume card's state, or nullptr when the deck has no Volume card.
 void uiRender(Display &lcd, const Payload &p, uint8_t index, bool online, uint32_t ageMs,
-              const PomoView &pomo, const BatteryView &bat, UiLink link = UiLink::None);
+              const PomoView &pomo, const BatteryView &bat, UiLink link = UiLink::None,
+              const VolumeView *vol = nullptr);
 // True when the last uiRender left a ring or a colour part-way through its
 // transition, so the caller knows to keep drawing frames.
 bool uiAnimating();
@@ -31,6 +37,8 @@ void uiReplay(uint8_t index);
 // Makes the Pomodoro card sweep its ring in from empty again (as uiReplay does
 // for payload cards).
 void uiReplayPomodoro();
+// Makes the next uiRender of the Volume card sweep its fill in from empty.
+void uiReplayVolume();
 // Starts the Pomodoro phase-end alert: the ring and the backlight pulse for
 // about two seconds. uiAnimating() stays true while it runs.
 void uiAlertStart();

@@ -6,7 +6,8 @@
 //   ./build/cube-shot out card.json # <out>-0.png, <out>-1.png, ...
 //   ./build/cube-shot out @portal   # <out>-portal.png: a screen that is not a
 //                                   # payload card (see renderSpecial):
-//                                   # @portal, @ota, @ble-pair, @ble-wait, @pomo-ready|focus|paused|break|done|long|edit
+//                                   # @portal, @ota, @ble-pair, @ble-wait, @pomo-ready|focus|paused|break|done|long|edit,
+//                                   # @dev-edit, @vol-56|muted|full|zero|fixed|noout|long|none
 //
 // Reads the payload JSON from the file named on the command line, or stdin.
 
@@ -161,6 +162,51 @@ bool pomodoroShot(Display &lcd, const char *state) {
   return true;
 }
 
+// The Volume card in a named state, fed through the real VolumeSlider, with an
+// empty payload (the deck is Volume, Pomodoro), drawn until the fill settles.
+bool volumeShot(Display &lcd, const char *state) {
+  MacVolume m{};
+  m.known = true;
+  m.canSet = m.canMute = true;
+  snprintf(m.name, sizeof(m.name), "MacBook Pro Speakers");
+  if (!strcmp(state, "56")) {
+    m.level = 56;
+  } else if (!strcmp(state, "muted")) {
+    m.level = 56;
+    m.muted = true;
+  } else if (!strcmp(state, "full")) {
+    m.level = 100;
+  } else if (!strcmp(state, "zero")) {
+    m.level = 0;
+  } else if (!strcmp(state, "fixed")) {
+    m.level = 100;
+    m.canSet = false;
+    snprintf(m.name, sizeof(m.name), "HDMI");
+  } else if (!strcmp(state, "noout")) {
+    m.level = VOLUME_NO_DEVICE;
+    m.canSet = m.canMute = false;
+    m.name[0] = '\0';
+  } else if (!strcmp(state, "long")) {
+    m.level = 30;
+    snprintf(m.name, sizeof(m.name), "LG UltraFine Display Au");  // 23 bytes: the most the Mac sends
+  } else if (!strcmp(state, "none")) {
+    m = MacVolume{};
+  } else {
+    return false;
+  }
+  VolumeSlider s;
+  s.fromMac(m, 0);
+  const VolumeView vv = s.view();
+  const Payload none{};
+  const PomoView pv = Pomodoro(PomoConfig{25 * 60000u, 5 * 60000u, 15 * 60000u, 4}).view();
+  for (int frame = 0; frame < 400; frame++) {
+    uiRender(lcd, none, uiVolumeIndex(none), true, 4000, pv, batteryViewFromEnv(), linkFromEnv(), &vv);
+    if (!uiAnimating()) break;
+    delay(8);
+  }
+  return true;
+}
+
 // Screens that are not payload cards. Selected with `@name` on the command
 // line; the grab goes to <prefix>-<name>.png. Returns false for an unknown name.
 bool renderSpecial(Display &lcd, const char *name) {
@@ -176,6 +222,8 @@ bool renderSpecial(Display &lcd, const char *name) {
     uiPomodoroEditor(lcd, PomoSettings{30, 5, 15, 4});
   } else if (!strcmp(name, "dev-edit")) {
     uiDeviceEditor(lcd, DeviceSettings{160, 15, 0, 5, 2});
+  } else if (!strncmp(name, "vol-", 4)) {
+    if (!volumeShot(lcd, name + 4)) return false;
   } else if (!strncmp(name, "pomo-", 5)) {
     if (!pomodoroShot(lcd, name + 5)) return false;
   } else {

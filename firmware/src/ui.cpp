@@ -694,6 +694,136 @@ void drawPomodoroCard(LovyanGFX *g, const PomoView &v, float flash, bool online,
   drawGaugeCard(g, card, style, fitFont(g, "88:88", VALUE_MAX_W, VALUE_MAX_H), g_pomoAnim, millis(), online, ageMs, bat);
 }
 
+// --- the Volume card ---------------------------------------------------------
+// One rounded pill filling from the bottom; volume_slider.h owns the geometry,
+// shared with the hit-testing. The text and the speaker are drawn twice through
+// a clip at the fill's edge: light over the track, dark where the fill covers
+// them, so they read at any level.
+constexpr uint32_t VOL_FILL = 0xCDB8FF;     // lavender: live
+constexpr uint32_t VOL_FIXED = 0x4A5366;    // the output sets its own level (HDMI)
+constexpr uint32_t VOL_ON_FILL = 0x231A3D;  // text and glyph where the fill covers them
+constexpr int VOL_TEXT_MAX_W = 184;         // the name, clear of the pill's corners
+constexpr int VOL_NAME_Y = VOL_PILL_Y + 26;
+constexpr int VOL_NUM_Y = VOL_PILL_Y + 70;
+constexpr int VOL_WORD_Y = VOL_PILL_Y + 104;
+
+GaugeAnim g_volAnim;
+
+// Clips to the screen above (pass 0) or below (pass 1) the fill edge. False
+// when that part is empty, so the pass can be skipped.
+bool clipSide(LovyanGFX *g, int edge, int pass) {
+  if (pass == 0) {
+    if (edge <= 0) return false;
+    g->setClipRect(0, 0, LCD_WIDTH, edge);
+  } else {
+    if (edge >= LCD_HEIGHT) return false;
+    g->setClipRect(0, edge, LCD_WIDTH, LCD_HEIGHT - edge);
+  }
+  return true;
+}
+
+// The caption: the output's name in capitals ("MAC VOLUME" when there is
+// none), cut with "..." to fit between the pill's corners.
+void volumeLabel(LovyanGFX *g, const char *name, char *out, size_t cap) {
+  size_t n = 0;
+  for (const char *c = name; *c && n + 1 < cap; c++) out[n++] = (*c >= 'a' && *c <= 'z') ? (char)(*c - 32) : *c;
+  out[n] = '\0';
+  if (!n) snprintf(out, cap, "MAC VOLUME");
+  g->setFont(&V_S12.font);
+  if (g->textWidth(out) <= VOL_TEXT_MAX_W) return;
+  char cut[40] = "...";
+  while (n > 0) {
+    out[--n] = '\0';
+    while (n > 0 && out[n - 1] == ' ') out[--n] = '\0';
+    snprintf(cut, sizeof(cut), "%s...", out);
+    if (g->textWidth(cut) <= VOL_TEXT_MAX_W) break;
+  }
+  snprintf(out, cap, "%s", cut);
+}
+
+// The speaker near the bottom of the pill: 0..3 waves by level, or a cross
+// when muted (the spec's "slashed": a cross reads better at this size).
+void drawSpeaker(LovyanGFX *g, uint8_t level, bool muted, uint16_t col) {
+  const int x = VOL_SPK_CX - 14, y = VOL_SPK_CY;
+  g->fillRect(x, y - 4, 6, 9, col);
+  g->fillTriangle(x + 5, y - 4, x + 13, y - 11, x + 13, y + 11, col);
+  g->fillTriangle(x + 5, y - 4, x + 13, y + 11, x + 5, y + 4, col);
+  if (muted) {
+    g->drawWideLine(x + 18, y - 7, x + 30, y + 7, 1.5f, col);
+    g->drawWideLine(x + 18, y + 7, x + 30, y - 7, 1.5f, col);
+    return;
+  }
+  const int waves = level == 0 ? 0 : level <= 33 ? 1 : level <= 66 ? 2 : 3;
+  for (int w = 0; w < waves; w++) {
+    const int r = 6 + 5 * w;
+    g->fillArc(x + 13, y, r, r + 2, -40.0f, 40.0f, col);
+  }
+}
+
+void drawVolumeCard(LovyanGFX *g, const VolumeView &v, bool online, uint32_t ageMs, const BatteryView &bat) {
+  const uint32_t now = millis();
+  const bool live = v.state == VolState::Live, fixed = v.state == VolState::Fixed;
+  const bool idle = v.state == VolState::NoMac || v.state == VolState::NoOutput;
+  const uint32_t rgb = fixed ? VOL_FIXED : v.muted ? POMO_MUTED : VOL_FILL;
+  GaugeAnim &a = g_volAnim;
+  if (v.tracking) {
+    // Under the finger: no easing, the fill is where the finger is.
+    if (!a.seen) {
+      a.seen = true;
+      a.colFrom = a.colTo = rgb;
+      a.colStart = now - COLOR_MS;
+    }
+    a.from = a.to = a.shown = v.level;
+    a.start = now;
+    a.dur = 0;
+    g_animating = true;
+  }
+  uint32_t shownRgb = rgb;
+  const float shown = stepGauge(a, v.level, rgb, now, shownRgb);
+  const int edge = volumeFillTop(shown);
+  const int bottom = VOL_PILL_Y + VOL_PILL_H;
+
+  g->fillSmoothRoundRect(VOL_PILL_X, VOL_PILL_Y, VOL_PILL_W, VOL_PILL_H, VOL_PILL_R, to565(RING_TRACK));
+  if (edge < bottom) {
+    // The same rounded shape, clipped to below the edge: smooth corners at any
+    // level and a flat top.
+    g->setClipRect(VOL_PILL_X, edge, VOL_PILL_W, bottom - edge);
+    g->fillSmoothRoundRect(VOL_PILL_X, VOL_PILL_Y, VOL_PILL_W, VOL_PILL_H, VOL_PILL_R, to565(shownRgb));
+    g->clearClipRect();
+  }
+
+  char label[32];
+  volumeLabel(g, v.name, label, sizeof(label));
+  char num[8];
+  if (live) snprintf(num, sizeof(num), "%u", (unsigned)v.level);
+  else snprintf(num, sizeof(num), "--");
+  const char *word = v.state == VolState::NoMac      ? "NO MAC"
+                     : v.state == VolState::NoOutput ? "NO OUTPUT"
+                     : fixed                         ? "FIXED"
+                     : v.muted                       ? "MUTED"
+                                                     : "";
+  const uint16_t onFill = fixed ? INK : to565(VOL_ON_FILL);
+  g->setTextDatum(middle_center);
+  for (int pass = 0; pass < 2; pass++) {
+    if (!clipSide(g, edge, pass)) continue;
+    const bool over = pass == 1;
+    g->setFont(&V_S12.font);
+    g->setTextColor(over ? onFill : DIM);
+    g->drawString(label, LCD_WIDTH / 2, VOL_NAME_Y);
+    g->setFont(&V_B44.font);
+    g->setTextColor(over ? onFill : INK);
+    g->drawString(num, LCD_WIDTH / 2, VOL_NUM_Y);
+    if (*word) {
+      g->setFont(&V_S12.font);
+      g->setTextColor(over ? onFill : DIM);
+      g->drawString(word, LCD_WIDTH / 2, VOL_WORD_Y);
+    }
+    drawSpeaker(g, v.level, v.muted, over ? onFill : idle ? FAINT : INK);
+  }
+  g->clearClipRect();
+  drawTopBar(g, online, ageMs, bat);
+}
+
 // --- the settings sheets -----------------------------------------------------
 // Both the Pomodoro editor (rises from the bottom) and the display panel (drops
 // from the top) are sheets: a lifted background with rounded corners on the edge
@@ -961,6 +1091,8 @@ void uiReplay(uint8_t index) {
 
 void uiReplayPomodoro() { g_pomoAnim.seen = false; }
 
+void uiReplayVolume() { g_volAnim.seen = false; }
+
 void uiAlertStart() {
   g_alertStart = millis();
   g_alertOn = true;
@@ -972,12 +1104,14 @@ bool uiAlertCancel() {
   return was;
 }
 
-uint8_t uiDeckSize(const Payload &p) { return (p.valid ? p.nCards : 0) + 1; }
+uint8_t uiDeckSize(const Payload &p, bool volume) { return (p.valid ? p.nCards : 0) + (volume ? 2 : 1); }
 
-uint8_t uiPomodoroIndex(const Payload &p) { return p.valid ? p.nCards : 0; }
+uint8_t uiVolumeIndex(const Payload &p) { return p.valid ? p.nCards : 0; }
+
+uint8_t uiPomodoroIndex(const Payload &p, bool volume) { return uiVolumeIndex(p) + (volume ? 1 : 0); }
 
 void uiRender(Display &lcd, const Payload &p, uint8_t index, bool online, uint32_t ageMs,
-              const PomoView &pomo, const BatteryView &bat, UiLink link) {
+              const PomoView &pomo, const BatteryView &bat, UiLink link, const VolumeView *vol) {
   g_animating = false;
   g_link = link;
 
@@ -995,13 +1129,16 @@ void uiRender(Display &lcd, const Payload &p, uint8_t index, bool online, uint32
     }
   }
 
-  const uint8_t deck = uiDeckSize(p);
+  const bool hasVol = vol != nullptr;
+  const uint8_t deck = uiDeckSize(p, hasVol);
   const uint8_t i = index % deck;
   LovyanGFX *g = target(lcd);
   g->fillScreen(BG);
 
-  if (i == uiPomodoroIndex(p)) {
+  if (i == uiPomodoroIndex(p, hasVol)) {
     drawPomodoroCard(g, pomo, flash * ALERT_RING_MIX, online, ageMs, bat);
+  } else if (hasVol && i == uiVolumeIndex(p)) {
+    drawVolumeCard(g, *vol, online, ageMs, bat);
   } else {
     const Card &card = p.cards[i];
     if (card.gauge >= GAUGE_BLANK && card.gauge2 >= GAUGE_BLANK) {
