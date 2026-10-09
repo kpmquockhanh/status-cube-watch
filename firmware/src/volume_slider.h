@@ -28,7 +28,7 @@ struct VolRect {
 };
 constexpr VolRect VOL_PILL_RECT{VOL_PILL_X, VOL_PILL_Y, VOL_PILL_W, VOL_PILL_H};
 // Where a drag may grab the slider, and a tap jumps the level.
-constexpr bool volumeInPill(int x, int y) { return VOL_PILL_RECT.contains(x, y); }
+inline bool volumeInPill(int x, int y) { return VOL_PILL_RECT.contains(x, y); }
 constexpr VolRect VOL_SPEAKER_ZONE{VOL_SPK_CX - 30, VOL_SPK_CY - 25, 60, 50};
 
 // After a lift (or a tap), Mac states are parked this long: echoes of levels
