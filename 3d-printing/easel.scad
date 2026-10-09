@@ -9,9 +9,11 @@
 part = "assembly";
 
 $fn = 48;
-include <board.scad>   // board facts, fit tunables (clr, lip_t, board_flip, ...) and board helpers
+include <board.scad>   // board facts, fit tunables (clr, lip_t, ...) and board helpers
 
 // ---- tunables ---------------------------------------------------------------
+board_flip = false;         // board turned 180 deg in its pocket (the IMU auto-rotates the picture). false keeps
+                            // the active area low in the bezel, which the tip force needs
 tilt = 65;                  // screen angle from the desk; the board turns about O, the base stays put
 W = 46;  D = 81;            // footprint
 wall = 2.4;                 // tray walls and floor
@@ -50,8 +52,8 @@ ridge_r = [3.2, 4.4];  ridge_y0 = 0.5;        // hinge ridges on the leg fronts:
 // centre (Waveshare rear view), so the plug goes in from inside and the lead leaves flat across the PCB
 // rear. A groove in the carrier's front face takes it from the plug, down at cord_x, past the lower post to
 // below the PCB; from there it drops through the chin cavity beside the leg into the lid slot on that side.
-bat_x = 25.2;  bat_z = 28.1;                  // VERIFY: header opening face (board x), header centre (board z)
-bat_h = 3.6;  bat_w = 6.0;  bat_plug = 3.5;   // VERIFY: mated height off the PCB, width along z, plug out of the header
+bat_x = 25.3;  bat_z = 10.5;                  // STEP: header inner face (board x), header centre (board z); VERIFY it opens inwards
+bat_h = 3.6;  bat_w = 5.0;  bat_plug = 3.5;   // mated height off the PCB (STEP), plug width along z (2-pin MX1.25 ~4.5); VERIFY: plug out of the header
 cord_d = 1.6;                                 // the lead (two 28 AWG wires), as a round envelope
 cord_w = 3.0;  cord_depth = 1.6;              // groove width, and depth into the back plate
 cord_x = 20;                                  // board x of the groove's upright run
@@ -229,7 +231,9 @@ module cord_groove() board_frame() for (i = [0 : len(cord_groove_pts) - 2]) hull
 cord_slot_x = (board_flip ? lead_x[0] : lead_x[1]) + slot_w/2;
 cord_pts = concat(
   [b2g(flipp([bat_x - bat_plug - 0.5, pcb_rear + bat_h/2, bat_z]))],
-  [for (p = [[cord_x, cord_y, cord_hz - 2], [cord_x, cord_y, 10], [cord_x1, cord_y, -1.5], [cord_x1, cord_y, -4.5],
+  // into the groove no lower than its bend at z 10; round the chin corner >= ~1.6 above the deck
+  [for (p = [[cord_x, cord_y, max(cord_hz - 2, 10)], [cord_x, cord_y, 10], [cord_x1, cord_y, -1.5],
+             [cord_x1, cord_y, max(-4.5, deck_zb(cord_y) + 1.8)],
              [cord_x1, 4.5, -5.5]]) b2g([cmx(p[0]), p[1], p[2]])],
   [[cord_slot_x, slot_y0 + slot_l/2, deck + 1], [cord_slot_x, slot_y0 + slot_l/2, tray_h - 2]]);
 // Parts on the PCB rear, up to board_t, except around the header and the run where the lead climbs out.

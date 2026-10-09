@@ -5,9 +5,11 @@
 part = "assembly";
 
 $fn = 48;
-include <board.scad>   // board facts, fit tunables (clr, lip_t, board_flip, ...) and board helpers
+include <board.scad>   // board facts, fit tunables (clr, lip_t, ...) and board helpers
 
 // ---- tunables ---------------------------------------------------------------
+board_flip = true;          // board turned 180 deg in its pocket (the IMU auto-rotates the picture). true: the
+                            // pusher posts land clear of the RST switch and the BAT header (Waveshare STEP)
 tilt = 65;                  // screen angle from the desk
 insert_mode = false;        // true: heat-set insert holes instead of self-tapping pilots
 pilot_d = 1.8;              // M2 self-tapping pilot

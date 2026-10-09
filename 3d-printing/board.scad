@@ -1,31 +1,34 @@
 // board.scad: the Waveshare ESP32-S3-Touch-LCD-1.69 as both stands see it. Units: mm.
 // Board facts, fit tunables and board-local helpers. No geometry and no $fn here: `include` it right
-// after `$fn = 48;`. The includer defines `O` (board origin in world coordinates) and `lean` (screen
-// lean from vertical); the frame helpers read them when called. Assign no variable here and there too.
+// after `$fn = 48;`. The includer defines `O` (board origin in world coordinates), `lean` (screen
+// lean from vertical) and `board_flip`; the frame helpers read them when called. Assign no variable here
+// and there too.
 
 // ---- fit tunables -------------------------------------------------------------
-board_flip = false;         // rotate the board 180 deg in its pocket (no firmware change: the IMU auto-rotates)
 lip_t = 1.0;                // material in front of the glass
 clr = 0.3;                  // glass pocket clearance, per side
 win_cham = 0.6;      // 45 deg break around the window, where a finger meets the screen edge
 
-// Board, from the Waveshare drawing. Drawing coords: a = from its left edge, b = from its top edge.
+// Board, from the Waveshare drawing, corrected from Waveshare's STEP model (ESP32-S3-Touch-LCD-1_69.stp).
+// Drawing coords: a = from its left edge, b = from its top edge.
 // In the firmware's portrait view: portrait x = b, portrait z = a.
-glass_a = 41.13;  glass_b = 33.13;  glass_r = 4;               // VERIFY glass_r
-act_a0 = 2.9;  act_b0 = 2.4;  act_a = 32.634;  act_b = 27.972;  // VERIFY the two offsets
-pcb_a = 37.12;  pcb_b = 29.83;  pcb_a0 = 0.7;  pcb_b0 = 1.65;   // VERIFY the two offsets
-pcb_y0 = 2.0;  pcb_t = 1.2;                                     // VERIFY: PCB front face depth, PCB thickness
-board_t = 7;                                                    // VERIFY: glass front to tallest rear part
-hole_d = 2.2;  hole_ia = 4.16;  hole_ib = 1.75;                 // hole_d is reference only (no screw passes through the board); offsets are from the PCB corner
-btn_a = [10.7, 19.8, 29.1];                                     // VERIFY: RST, BOOT, PWR along portrait z
-usb_a = 20.3;  usb_w = 9.0;  usb_h = 3.3;                       // VERIFY
+glass_a = 41.13;  glass_b = 33.13;  glass_r = 6;               // STEP: corners r ~6.4 and slightly bowed ends; 6 keeps the pocket outside
+act_a0 = 2.97;  act_b0 = 2.585;  act_a = 32.634;  act_b = 27.972; // offsets from the STEP
+pcb_a = 37.14;  pcb_b = 29.85;  pcb_a0 = 1.91;  pcb_b0 = 1.64;  // STEP
+lcd_a = 37.42;  lcd_b = 30.08;  lcd_a0 = 1.81;  lcd_b0 = 1.53;  lcd_y1 = 3.8;  // STEP: LCD module behind the glass
+foam_a = 18;  foam_b = 28;  foam_a0 = 7.29;  foam_b0 = 2.53;   // STEP: 1.5 mm foam pad from the LCD to the PCB
+pcb_y0 = 5.3;  pcb_t = 1.0;                                     // STEP: 3.8 glass + LCD, 1.5 foam pad, then the PCB
+board_t = 10.7;                                                 // STEP: glass front to tallest rear part (a 2-pin 1.0 mm header)
+hole_d = 2.36;  hole_ia = 3.2;  hole_ib = 0.59;                 // STEP: not holes but notches open to the long edges; centres from the PCB corner (ends 3.13 / 3.26, averaged)
+btn_a = [11.23, 20.14, 29.05];                                  // STEP: RST, BOOT, PWR along portrait z (VERIFY which is which)
+usb_a = 20.3;  usb_w = 9.0;  usb_h = 3.3;                       // STEP: centre 20.31, shell 8.34 wide
 usb_plug_w = 13;  usb_plug_h = 7.5;  usb_plug_x0 = 3;           // VERIFY: Type-C plug overmold relief; x0 = start beyond the PCB edge
 win_margin = 1.0;                                               // window = active area + this per side
 
 // ---- derived ------------------------------------------------------------------
 pcb_rear = pcb_y0 + pcb_t;
-usb_y = pcb_rear + usb_h/2;     // Type-C centre depth (VERIFY)
-btn_y = pcb_rear + 0.8;         // side-button centre depth (VERIFY)
+usb_y = pcb_rear + 1.27;        // Type-C centre depth: mid-mount receptacle (STEP)
+btn_y = pcb_rear + 0.7;         // side-button centre depth (STEP: switch body 5.9..8.1)
 pin_d = 2.4;                    // pinhole for RST / BOOT / PWR
 
 // Board-local point to world (reads the includer's O and lean).
@@ -66,7 +69,9 @@ module window() {
 }
 module pcb_slab() translate([pcb_b0, pcb_y0, pcb_a0]) cube([pcb_b, pcb_t, pcb_a]);
 module board_ghost() {   // stand-in for the real board, for assembly renders and tests
-  xz_extrude(1.6) rrect(0, 0, glass_b, glass_a, glass_r);
+  xz_extrude(1.8) rrect(0, 0, glass_b, glass_a, glass_r);
+  translate([lcd_b0, 1.8, lcd_a0]) cube([lcd_b, lcd_y1 - 1.8, lcd_a]);
+  translate([foam_b0, lcd_y1, foam_a0]) cube([foam_b, pcb_y0 - lcd_y1, foam_a]);
   pcb_slab();
 }
 // exactly the touch/display area, in front of the glass

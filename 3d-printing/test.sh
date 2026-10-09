@@ -67,7 +67,7 @@ SCAD=stand.scad
 expect_empty "part=none renders nothing" none
 expect_error "unknown part is rejected" bogus
 
-expect_manifold "front shell body" front_shell --max 48 86 63
+expect_manifold "front shell body" front_shell --max 48 88.5 63
 
 # window never covers the active area
 expect_empty "active area is clear (nominal)"   check_window
@@ -78,9 +78,9 @@ expect_empty "pocket inside outer (nominal)"    check_pocket_inside
 expect_empty "pocket skin >= 0.8 (nominal)"     check_skin
 expect_empty "pocket skin >= 0.8 (tilt 55)"     check_skin -D tilt=55
 expect_empty "pocket skin >= 0.8 (tilt 75)"     check_skin -D tilt=75
-expect_empty "pocket skin >= 0.8 (board 9 mm)"  check_skin -D board_t=9
+expect_empty "pocket skin >= 0.8 (board 12 mm)" check_skin -D board_t=12
 expect_empty "pocket skin >= 0.8 (clr 0.5)"     check_skin -D clr=0.5
-expect_manifold "front shell with pocket" front_shell --max 48 86 63
+expect_manifold "front shell with pocket" front_shell --max 48 88.5 63
 
 # battery bay
 expect_empty "battery pocket inside the void"        check_battery_void
@@ -103,7 +103,7 @@ expect_empty "pushers clear of the bosses"        check_pusher_bosses
 expect_empty "pushers clear of the shell"         check_pusher_shell
 expect_empty "plate ribs clear of the shell"      check_ribs_shell
 expect_empty "plate ribs clear of the battery"    check_ribs_battery
-expect_manifold "base plate" base_plate --max 48 86 30
+expect_manifold "base plate" base_plate --max 48 88.5 30
 # edge rounding: the rounded corners must not thin the wall, and the plate must stay inside the shell
 expect_empty "wall >= 2.3 through the corners"            check_wall
 expect_empty "wall >= 2.3 (edge_r 6, prof_r 5)"           check_wall -D edge_r=6 -D prof_r=5
@@ -129,18 +129,18 @@ expect_solid "control: 60 mm ribs hit the shell"            check_ribs_shell    
 expect_solid "control: bcl=-1 cell hits the ribs"           check_ribs_battery   -D bcl=-1
 
 # Type-C slot and button pinholes
-expect_solid "Type-C slot reaches the right wall"          check_usb_right
-expect_empty "Type-C slot misses the left wall"            check_usb_left
-expect_solid "buttons reach the left wall"                 check_btn_left
-expect_empty "buttons miss the right wall"                 check_btn_right
+expect_solid "Type-C slot reaches the right wall"          check_usb_right -D board_flip=false
+expect_empty "Type-C slot misses the left wall"            check_usb_left -D board_flip=false
+expect_solid "buttons reach the left wall"                 check_btn_left -D board_flip=false
+expect_empty "buttons miss the right wall"                 check_btn_right -D board_flip=false
 # board_flip: the board is turned 180 deg, so the openings swap walls
 expect_solid "flip: Type-C slot reaches the left wall"     check_usb_left  -D board_flip=true
 expect_empty "flip: Type-C slot misses the right wall"     check_usb_right -D board_flip=true
 expect_solid "flip: buttons reach the right wall"          check_btn_right -D board_flip=true
 expect_empty "flip: buttons miss the left wall"           check_btn_left  -D board_flip=true
 # Type-C plug relief (overmold is wider/taller than the slot)
-expect_solid "plug relief reaches the right wall"          check_plug_right
-expect_empty "plug relief misses the left wall"            check_plug_left
+expect_solid "plug relief reaches the right wall"          check_plug_right -D board_flip=false
+expect_empty "plug relief misses the left wall"            check_plug_left -D board_flip=false
 expect_solid "flip: plug relief reaches the left wall"     check_plug_left  -D board_flip=true
 expect_empty "flip: plug relief misses the right wall"     check_plug_right -D board_flip=true
 expect_empty "plug relief keeps the roof/face skin"        check_plug_skin
@@ -156,7 +156,7 @@ expect_solid "control: deep relief hits the glass pocket"  check_plug_pocket -D 
 expect_solid "control: huge relief hits the bosses"        check_plug_bosses -D usb_plug_h=80 -D usb_plug_w=80 -D usb_plug_x0=-30
 expect_solid "control: huge relief hits the bay"           check_plug_bay    -D usb_plug_h=80 -D usb_plug_w=80 -D usb_plug_x0=-30
 expect_solid "control: huge relief hits the window"        check_plug_window -D usb_plug_h=80 -D usb_plug_w=80 -D usb_plug_x0=-30
-expect_manifold "front shell with openings" front_shell --max 48 86 63
+expect_manifold "front shell with openings" front_shell --max 48 88.5 63
 
 # Type-C blanking cap
 expect_empty "cap passes through the opening"            check_cap_fit
@@ -173,8 +173,8 @@ expect_solid "control: 20 mm tongues hit the board"      check_cap_board  -D cap
 expect_manifold "Type-C cap" cap --max 20 11 5
 
 # deliverables
-expect_manifold "printable front shell" front --max 48 86 63
-expect_manifold "printable base plate"  base  --max 48 86 30
+expect_manifold "printable front shell" front --max 48 88.5 63
+expect_manifold "printable base plate"  base  --max 48 88.5 30
 expect_manifold "fit-check coupon"      fit   --max 48 60 70
 expect_solid    "assembly renders"      assembly
 expect_solid    "section renders"       section
@@ -237,16 +237,16 @@ expect_empty "battery lead clear (board_flip)"               check_cord -D board
 expect_empty "battery lead clear (tilt 55)"                  check_cord -D tilt=55
 expect_empty "battery lead clear (tilt 75)"                  check_cord -D tilt=75
 expect_empty "battery lead clear (clr 0.5)"                  check_cord -D clr=0.5
-expect_empty "battery lead clear (board 9 mm)"               check_cord -D board_t=9
+expect_empty "battery lead clear (board 12 mm)"              check_cord -D board_t=12
 expect_solid "control: cord_depth=0.4 drags the lead over the rear parts" check_cord -D cord_depth=0.4
-expect_solid "control: bat_h=4.5 puts the plug into the plate"           check_cord -D bat_h=4.5
+expect_solid "control: bat_h=5 puts the plug into the plate"             check_cord -D bat_h=5
 expect_solid "control: bat_exit=1 leaves no room to climb out"           check_cord -D bat_exit=1
-expect_manifold "carrier"                carrier --max 40 55 10.5
-expect_manifold "carrier (tilt 55)"      carrier --max 40 55.7 10.5 -D tilt=55
-expect_manifold "carrier (tilt 75)"      carrier --max 40 55 10.5 -D tilt=75
-expect_manifold "carrier (board_flip)"   carrier --max 40 55 10.5 -D board_flip=true
-expect_manifold "carrier (clr 0.5)"      carrier --max 40 55 10.7 -D clr=0.5
-expect_manifold "carrier (board 9 mm)"   carrier --max 40 55 12.5 -D board_t=9
+expect_manifold "carrier"                carrier --max 40 55 13.7
+expect_manifold "carrier (tilt 55)"      carrier --max 40 55.7 13.7 -D tilt=55
+expect_manifold "carrier (tilt 75)"      carrier --max 40 55 13.7 -D tilt=75
+expect_manifold "carrier (board_flip)"   carrier --max 40 55 13.7 -D board_flip=true
+expect_manifold "carrier (clr 0.5)"      carrier --max 40 55 13.9 -D clr=0.5
+expect_manifold "carrier (board 12 mm)"  carrier --max 40 55 15.0 -D board_t=12
 
 # bezel and hinge
 expect_empty "active area is clear"                  check_window
@@ -273,17 +273,17 @@ expect_solid "control: chin_top=-0.3 catches a sagged board" check_swing -D swin
 expect_empty "parts and ghosts clear"                check_fit -D preload=-0.05
 expect_empty "parts and ghosts clear (15 mm cell)"   check_fit -D preload=-0.05 -D 'bat=[65,40,15]'
 expect_empty "parts and ghosts clear (clr 0.5)"      check_fit -D preload=-0.05 -D clr=0.5
-expect_empty "parts and ghosts clear (board 9 mm)"   check_fit -D preload=-0.05 -D board_t=9
+expect_empty "parts and ghosts clear (board 12 mm)"  check_fit -D preload=-0.05 -D board_t=12
 expect_empty "parts and ghosts clear (board_flip)"   check_fit -D preload=-0.05 -D board_flip=true
 expect_empty "parts and ghosts clear (tilt 55)"      check_fit -D preload=-0.05 -D tilt=55
 expect_empty "parts and ghosts clear (tilt 75)"      check_fit -D preload=-0.05 -D tilt=75
 expect_solid "control: nudge=0 lets touching faces overlap" check_fit -D preload=-0.05 -D nudge=0
-expect_manifold "bezel"                 bezel --max 40 55.7 8.3
-expect_manifold "bezel (tilt 55)"       bezel --max 40 57.5 8.3 -D tilt=55
-expect_manifold "bezel (tilt 75)"       bezel --max 40 55.7 8.3 -D tilt=75
-expect_manifold "bezel (board_flip)"    bezel --max 40 55.7 8.3 -D board_flip=true
-expect_manifold "bezel (clr 0.5)"       bezel --max 40 55.7 8.5 -D clr=0.5
-expect_manifold "bezel (board 9 mm)"    bezel --max 40 55.7 10.3 -D board_t=9
+expect_manifold "bezel"                 bezel --max 40 55.7 12.0
+expect_manifold "bezel (tilt 55)"       bezel --max 40 57.5 12.0 -D tilt=55
+expect_manifold "bezel (tilt 75)"       bezel --max 40 55.7 12.0 -D tilt=75
+expect_manifold "bezel (board_flip)"    bezel --max 40 55.7 12.0 -D board_flip=true
+expect_manifold "bezel (clr 0.5)"       bezel --max 40 55.7 12.2 -D clr=0.5
+expect_manifold "bezel (board 12 mm)"   bezel --max 40 55.7 13.3 -D board_t=12
 
 # Type-C cap
 expect_empty "cap body clears the relief"            check_cap_relief
@@ -292,7 +292,7 @@ expect_solid "control: cap_clr=-0.1 binds"           check_cap_relief -D cap_clr
 expect_empty "cap flange lands on the side face"     check_cap_seat
 expect_empty "cap flange lands (flip)"               check_cap_seat -D board_flip=true
 expect_empty "cap flange lands (tilt 55)"            check_cap_seat -D tilt=55
-expect_solid "control: cap_flange=3 overhangs"       check_cap_seat -D cap_flange=3
+expect_solid "control: cap_flange=6 overhangs"       check_cap_seat -D cap_flange=6
 expect_solid "cap ribs bite the bezel"               check_cap_ribs
 expect_empty "control: cap_rib=0.1 does not bite"    check_cap_ribs -D cap_rib=0.1
 expect_empty "cap ribs stay off the carrier"         check_cap_rib_carrier

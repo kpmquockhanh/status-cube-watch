@@ -1,24 +1,26 @@
 # Claude status cube: desk stands
 
-Two printed stands, both parametric and both checked by `test.sh`. They share the board facts and fit tunables in `board.scad` (glass, PCB, openings, `clr`, `lip_t`, `board_flip`), so a measurement corrected there fixes both.
+Two printed stands, both parametric and both checked by `test.sh`. They share the board facts and fit tunables in `board.scad` (glass, PCB, openings, `clr`, `lip_t`), so a measurement corrected there fixes both. Each stand sets its own `board_flip` (see [Orientation](#orientation)).
+
+The board facts come from Waveshare's STEP model of the board (`ESP32-S3-Touch-LCD-1_69.stp`, Creo export): glass 33.13 x 41.13 with r ~6.4 corners and a rounded front edge, 3.8 mm of glass and LCD, a 1.5 mm foam pad, a 1.0 mm PCB whose front face is 5.3 mm behind the glass front, and rear parts up to 10.7 mm (a vertical 2-pin 1.0 mm header; the BAT header reaches 9.8, the Type-C 9.65). The PCB has no closed mounting holes: the four "holes" are Ø2.36 notches open to the long edges. The STEP figures are the vendor's CAD, not caliper readings: measure the overall thickness and the glass-to-PCB-rear depth on your board before a full print.
 
 - **Wedge** (`stand.scad`, below): one closed body and a base plate.
 - **Easel** (`easel.scad`, see [Easel stand](#easel-stand)): a slim bezel at 65 deg on a low tray that holds the cell; screws only, every part prints flat without supports.
 
 The wedge is a two-part printed desk stand for the Waveshare ESP32-S3-Touch-LCD-1.69 and a 12 x 40 x 65 mm LiPo. The board sits in a glass pocket in the sloped front face (65 deg screen angle by default), the cell lies flat in a bay behind and below it, and a base plate with two pusher posts closes the bottom and presses the board into the pocket. Everything is parametric in `stand.scad`; `test.sh` checks the geometry with boolean-intersection tests.
 
-> **Biggest unverified risk: board retention.** The board has only two lower rear contacts (the two pusher posts on the base plate); nothing supports the upper board from behind, and the pusher/retention mechanism is NOT in `fit-check.stl`, so the fit-check cannot validate retention. Touch-time rattle or flex can only be judged on the full print. Fallbacks if it rattles: foam on the pusher tips (then set `preload = -0.8`), or add a rear pad at the roof. Also check on the full print (the fit-check has no posts or rear parts) that rear parts near the lower mounting holes (for example the MX1.25 battery connector) clear the pusher posts.
+> **Biggest unverified risk: board retention.** The board has only two lower rear contacts (the two pusher posts on the base plate); nothing supports the upper board from behind, and the pusher/retention mechanism is NOT in `fit-check.stl`, so the fit-check cannot validate retention. Touch-time rattle or flex can only be judged on the full print. Fallbacks if it rattles: foam on the pusher tips (then set `preload = -0.8`), or add a rear pad at the roof. The posts press on the PCB around the edge notches. Against the STEP model's parts they clear everything only with `board_flip = true`, the wedge's default; unflipped, they hit the RST switch and the BAT header.
 
 ![front](preview-front.png)
 ![back](preview-back.png)
 ![section](preview-section.png)
 
-Outer envelope 47.6 x 85.6 x 59.84 mm (front shell). Every dimension marked `VERIFY` in `stand.scad` is an estimate to confirm on a real print.
+Outer envelope 47.6 x 88.44 x 59.89 mm (front shell). Every dimension marked `VERIFY` in `stand.scad` is an estimate to confirm on a real print. The preview images predate the STEP-based board (thinner board, 85.6 mm deep, unflipped) and are illustrative only.
 
 ## Print list
 
-1. `fit-check.stl` first (1628 triangles, print time not measured): a slice of the shell around the glass pocket with both side walls. It tests glass fit, window, Type-C relief and pinholes only, not retention. The slice has no horizontal face: print it lying on its rear cut face (the large flat face opposite the glass; use the slicer's lay-on-face, which is a rotation of `tilt` = 65 deg from the modelled orientation), so the glass face and pocket point up and no supports should be needed. Printing as modelled needs supports.
-2. `stand-front.stl` (3212 triangles) and `stand-base.stl` (3124 triangles).
+1. `fit-check.stl` first (1624 triangles, print time not measured): a slice of the shell around the glass pocket with both side walls. It tests glass fit, window, Type-C relief and pinholes only, not retention. The slice has no horizontal face: print it lying on its rear cut face (the large flat face opposite the glass; use the slicer's lay-on-face, which is a rotation of `tilt` = 65 deg from the modelled orientation), so the glass face and pocket point up and no supports should be needed. Printing as modelled needs supports.
+2. `stand-front.stl` (3204 triangles) and `stand-base.stl` (3124 triangles).
 3. `usb-cap.stl` (320 triangles), optional: the Type-C blanking cap. See below.
 
 Settings: 0.2 mm layers, 3 perimeters, 20% infill, PLA or PETG.
@@ -92,11 +94,18 @@ Print `fit-check.stl` and check:
 - a paper clip reaches RST / BOOT / PWR through the pinholes: `btn_a`, `btn_y`, `pin_d`;
 - the tallest rear part clears: `board_t`.
 
-The opening positions (Type-C slot, buttons) and many board dimensions are `VERIFY` items: measure them on the fit-check print, edit the values, and re-run `./test.sh stand` after every edit. Also check the battery position against the board's chip antenna (see Antenna).
+The opening positions (Type-C slot, buttons) and the board dimensions come from the STEP model; the plug relief and the button order (RST / BOOT / PWR) are still `VERIFY` items: check them on the fit-check print, edit the values, and re-run `./test.sh stand` after every edit. Also check the battery position against the board's chip antenna (see Antenna).
 
 ## Orientation
 
-The orientation is inferred, not measured: Type-C and the battery connector are on the right wall, RST / BOOT / PWR on the left wall. If the board turns out the other way round, or the screen is upside down, set `board_flip = true` in `stand.scad`. That rotates the board 180 deg, and swaps the openings to the opposite walls. No firmware change is needed: the cube reads its IMU and turns the picture the right way up on its own. With `board_flip = true` the pusher posts sit further back, so the front end zone grows automatically to keep them at least 1 mm (`push_gap`) in front of the battery bay; the stand gets slightly deeper (about 86.56 mm instead of 85.6 at tilt 65); a lower tilt also grows it (about 86.3 mm at tilt 55, no flip). Re-export the STLs after changing it.
+In the unflipped board frame (the STEP model, turned 180 deg in-plane so its button positions match `btn_a`), the Type-C and the BAT header are on the right edge and RST / BOOT / PWR on the left. `board_flip = true` rotates the board 180 deg in its pocket and swaps the openings to the opposite walls. No firmware change is needed either way: the cube reads its IMU and turns the picture the right way up on its own.
+
+Each stand sets `board_flip` itself, because the right choice differs:
+
+- **Wedge** (`stand.scad`): `true`, so the Type-C and the battery connector are on the **left** wall and the buttons on the right. Unflipped, the pusher posts land on the RST switch and the BAT header. Flipped, the posts sit further back, so the front end zone grows to keep them at least 1 mm (`push_gap`) in front of the battery bay: 88.44 mm deep at tilt 65 (88.37 unflipped, 89.1 at tilt 55).
+- **Easel** (`easel.scad`): `false`, so the Type-C is on the right. Flipped, the active area sits 2.55 mm higher in the bezel and the centre-press tip force drops to 2.76 N, under the 3.0 N the tests require.
+
+Re-export the STLs after changing either.
 
 ## Battery polarity warning
 
@@ -104,7 +113,7 @@ MX1.25 connector pinouts vary by vendor. Compare the battery lead against the `+
 
 ## Antenna
 
-The battery and its metal pouch must not sit over the board's chip antenna. The model does not include the antenna, so the bay position relative to it is **unverified**: before closing the stand, locate the chip antenna on the board and confirm physically that the battery does not sit over it. The body is plastic only.
+The battery and its metal pouch must not sit over the board's chip antenna. The STEP model has a 6 x 2 x 1 mm part on the PCB rear at the board's short edge, on the buttons' side (unflipped board x 7.6..13.6, z 2.0..4.0), which is probably the antenna; the stands do not model it, so the bay position relative to it is **unverified**: before closing the stand, locate the chip antenna on the board and confirm physically that the battery does not sit over it. The body is plastic only.
 
 ## Tests and regenerating
 
@@ -127,11 +136,11 @@ Previews were rendered headless with `--render` and `xvfb-run` (installed with a
 |---|---|---|
 | `easel-tray.stl` | tray, 46 x 81 x 15.2, battery bay, screw pilasters, Ø8 foot recesses | open side up |
 | `easel-frame.stl` | 2.4 mm lid with a lightened centre fin that backs the carrier | lid down |
-| `easel-carrier.stl` | 3.2 mm back plate with a groove for the battery lead, four posts (shoulders press the PCB, pegs locate it in its holes), two legs with hinge ridges | rear face down |
+| `easel-carrier.stl` | 3.2 mm back plate with a groove for the battery lead, four posts (shoulders press the PCB, pegs locate it in its edge notches), two legs with hinge ridges | rear face down |
 | `easel-bezel.stl` | glass pocket and window, open chin with hinge grooves, Type-C relief, pinholes | front face down |
 | `easel-usb-cap.stl` | optional Type-C blanking cap (crush ribs) | flange down |
 
-**Print the carrier first** and press the real board onto its pegs before printing the rest: the PCB hole positions are assumed (see VERIFY below). If the pegs miss, set `peg_l = 0`; the shoulders still press the PCB.
+**Print the carrier first** and press the real board onto its pegs before printing the rest: the notch positions come from the STEP model, not a measured board. If the pegs miss, set `peg_l = 0`; the shoulders still press the PCB, though only the rim around each notch (about 7 mm² in all).
 
 ### Hardware
 
@@ -142,7 +151,7 @@ Self-tapping M2 into Ø1.8 pilots, no glue: 2 x M2 x 10 (legs), 1 x M2 x 8 (rear
 1. Cell into the tray, tab end forwards; thread the lead up through the lid slot on the board's connector side.
 2. Frame on; fit the rear M2 x 8.
 3. Carrier on the lid; two M2 x 10 down through the legs clamp carrier, lid and tray in one go. These go in **before the board**: once the board and bezel are on, the leg screws are covered.
-4. Plug the lead into the board's BAT header (it sits by the Type-C and opens towards the board centre, so the lead leaves across the PCB rear). Lay the lead in the groove in the carrier's front face: across, down past the lower post, out under the board edge and down beside the leg to the slot. Then press the board onto the pegs, glass outwards, without pinching the lead.
+4. Plug the lead into the board's BAT header (it sits beside the Type-C, nearer the board's bottom end, and is assumed to open towards the board centre, so the lead leaves across the PCB rear). Lay the lead in the groove in the carrier's front face: across, down past the lower post, out under the board edge and down beside the leg to the slot. Then press the board onto the pegs, glass outwards, without pinching the lead.
 5. Hold the bezel tilted forward with its front-bottom edge on the lid and swing it back over the glass: the grooves in its chin pick up the ridges on the legs.
 6. Two M2 x 6 from the carrier's rear into the bezel.
 
@@ -154,15 +163,15 @@ Ridges and grooves are arc bands concentric with the bezel's front-bottom edge (
 
 ### Stability
 
-`tools/stability.py` estimates mass, centre of gravity and the push into the screen that tips the stand backwards, from the parts in place (PLA at 1.24 g/cm³ x 0.9 solidity, 55 g cell, 12 g board, pivot 1 mm inside the rear feet). Nominal: 111.0 g; 3.27 N at the centre of the active area, 1.48 N at its top edge (`test.sh` requires 3.0 and 1.3). Estimates, not measurements.
+`tools/stability.py` estimates mass, centre of gravity and the push into the screen that tips the stand backwards, from the parts in place (PLA at 1.24 g/cm³ x 0.9 solidity, 55 g cell, 12 g board, pivot 1 mm inside the rear feet). Nominal: 112.7 g; 3.28 N at the centre of the active area, 1.49 N at its top edge (`test.sh` requires 3.0 and 1.3). Estimates, not measurements.
 
 ### VERIFY (easel-specific, on top of the board items in `board.scad`)
 
-- PCB mounting-hole positions (the pegs); assumed symmetric.
-- The MX1.25 BAT header and the lead route (`bat_x`, `bat_z`, `bat_h`, `bat_w`, `bat_plug`, `bat_exit`). They are read off Waveshare's rear-view drawing: the header beside the Type-C, opening towards the board centre. `check_cord` runs the plug and a Ø1.6 lead from the header through the groove (`cord_x`, `cord_w`, `cord_depth`) to the lid slot, clear of every part. It treats everything on the PCB rear as reaching `board_t`, except the header and `bat_exit` mm past the plug, where the lead climbs into the groove. If a tall part sits in that run, move `cord_x`.
+- PCB notch positions (the pegs): from the STEP model, averaged end to end (3.13 and 3.26 mm from the PCB ends).
+- The MX1.25 BAT header and the lead route (`bat_x`, `bat_z`, `bat_h`, `bat_w`, `bat_plug`, `bat_exit`). The header's position and height are from the STEP model (`bat_z` = 10.5, beside the Type-C towards the bottom end); which way it opens and how far the mated plug stands out are not, and `bat_w` = 5 is a 2-pin MX1.25 plug, not the header with its solder tabs. `check_cord` runs the plug and a Ø1.6 lead from the header through the groove (`cord_x`, `cord_w`, `cord_depth`) to the lid slot, clear of every part. It treats everything on the PCB rear as reaching `board_t`, except the header and `bat_exit` mm past the plug, where the lead climbs into the groove. If a tall part sits in that run, move `cord_x`.
 - Which end of the cell the tabs leave from (assumed: the front).
 
-`board_flip` works here too and needs no firmware change. Export:
+`board_flip` works here too (but see [Orientation](#orientation)) and needs no firmware change. Export:
 
 ```sh
 tools/openscad --backend=manifold -D 'part="carrier"' -o easel-carrier.stl easel.scad   # also tray, frame, bezel, cap (-> easel-usb-cap.stl)
