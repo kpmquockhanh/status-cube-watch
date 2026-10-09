@@ -55,3 +55,17 @@ Tick an item only when you observed it. Logs: `./install.sh logs` (Mac, from `ma
 - [ ] Mac asleep or out of range when the phase ends: nothing is queued and nothing crashes on either side.
 - [ ] With notifications switched off for Claude Cube Link in System Settings, the menu item reads "(off in System Settings)" and is greyed out.
 - [ ] Dismiss the first permission prompt without answering: the item stays enabled with no hint, and opening the menu asks again.
+
+## Volume card
+
+- [ ] `AudioObjectGetPropertyData` reads `kAudioHardwareServiceDeviceProperty_VirtualMainVolume` on the built-in speakers: `CUBE_TRACE=1` shows `[trace:volume] mac N` matching the menu bar slider.
+- [ ] Paired cube: the Volume card sits before the Pomodoro and shows the output name and level within a second of connecting.
+- [ ] Drag up and down: the fill follows the finger with no lag, the Mac's volume follows within a few hundred ms, and the fill does not jump back after the lift.
+- [ ] Tap-jump: a tap on the pill sets that level; a tap on the speaker mutes, a second unmutes; a drag on a muted output unmutes it.
+- [ ] Keyboard volume keys and mute on the Mac: the card follows within about 300 ms.
+- [ ] Switch the output to AirPods and back: the name and level change to that device's.
+- [ ] An HDMI or other fixed output: `FIXED`, full grey fill, drags do nothing, the speaker mutes if the device allows it.
+- [ ] Turn the Mac's Bluetooth off mid-drag: the card shows `NO MAC` at once and nothing is sent after; back on, the state returns.
+- [ ] Horizontal swipes on the card still change card; a swipe down does not open the display panel there.
+- [ ] An older Mac app (before this change) with this firmware: the card stays `NO MAC`, nothing else changes.
+- [ ] This Mac app with older firmware (fw_rev 4): the log says "cube has no Volume characteristic" once per connection, and nothing else changes.

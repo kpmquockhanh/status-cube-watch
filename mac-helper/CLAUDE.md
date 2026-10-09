@@ -24,12 +24,12 @@ Running unbundled (`swift run`) works for the bridge and the menu, but posts no 
 
 - **`CubeLinkCore`** (library, no AppKit) holds every decision, written as pure functions or value types. Inputs are injected: env dictionaries, `exists:` closures in place of the filesystem, `now` in place of the clock. The tests in `Tests/CubeLinkCoreTests` cover these:
   - `BridgeSupervisor.decide`, `findNode`, `findBridgeDir`, `announcement` and `shouldResetBackoff`
-  - `PushPolicy`, `Backoff`, `encodeFrames` and `ControlMessage.parse`
+  - `PushPolicy`, `Backoff`, `encodeFrames`, `ControlMessage.parse`, `encodeVolume` and `foldVolumeName`
   - `CubeSettings` (`parse`, `patch`, `rebase`, `needsReboot`), `MenuModel` and `PomodoroNotice`
   - `validatePayloadBody`
 
   The stateful halves are not tested: `CubeLink` (CoreBluetooth) and the `Process` side of `BridgeSupervisor`. Put new logic in a testable static or struct, and have those classes call it.
-- **`ClaudeCubeLink`** (executable) is AppKit glue. `main.swift` is a top-level script that builds every object and connects them through `onX` callback closures, so no component holds a reference to another. `StatusMenu` and `MenuRows` render a `MenuModel`, `SettingsWindow` edits a `CubeSettings`, and `Notifier` posts banners.
+- **`ClaudeCubeLink`** (executable) is AppKit glue. `main.swift` is a top-level script that builds every object and connects them through `onX` callback closures, so no component holds a reference to another. `StatusMenu` and `MenuRows` render a `MenuModel`, `SettingsWindow` edits a `CubeSettings`, and `Notifier` posts banners; `SystemVolume` reads and sets the default output through CoreAudio and reports changes (coalesced 30 ms), and `main.swift` writes them to the cube with `CubeLink.writeVolume` (also once on `onReady`) and applies `onVolumeRequest`.
 
 Everything runs on the main queue. `CBCentralManager` is created with `queue: .main`, and `BridgeClient` and `Process` callbacks hop to main before touching state.
 
@@ -55,7 +55,7 @@ Everything runs on the main queue. `CBCentralManager` is created with `queue: .m
 
 ## Keeping the two sides in step
 
-- `Protocol.swift` mirrors `firmware/src/ble_frame.h` and `docs/ble-protocol.md`: UUIDs, header size, 16 chunks, 2048-byte payload limit, and Control opcodes `01` to `04`. `FrameTests` reads `firmware/sim/fixtures/ble-frames.txt` through a path built from `#filePath` (four levels up), so that fixture must stay where it is. A wire change updates the fixture, the firmware, the Swift code and the doc together, and both `make test` (in `firmware/sim/`) and `swift test` must pass.
+- `Protocol.swift` mirrors `firmware/src/ble_frame.h` and `docs/ble-protocol.md`: UUIDs, header size, 16 chunks, 2048-byte payload limit, Control opcodes `01` to `05`, and the optional Volume characteristic (fw_rev 5; a cube without it is logged once per connection). `FrameTests` reads `firmware/sim/fixtures/ble-frames.txt` through a path built from `#filePath` (four levels up), so that fixture must stay where it is. A wire change updates the fixture, the firmware, the Swift code and the doc together, and both `make test` (in `firmware/sim/`) and `swift test` must pass.
 - `CubeSettings` mirrors the keys and ranges in `firmware/src/settings_json.cpp` (`bl sl rt pi sd pf ps pl pn ssid bridge pass otapass`). A read returns only booleans for the passwords (`wifiPass`, `otaPass`). `sound` (`sd`) is `Int?`: nil means the cube's read had none (fw_rev < 4), so `SettingsWindow` hides its row and `patch` never sends it.
   - `patch` sends only the keys that changed, so a stale window can't overwrite edits made on the cube.
   - `rebase` keeps fields the user is editing when a fresh read arrives.
