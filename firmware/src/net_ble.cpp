@@ -30,6 +30,12 @@ volatile uint32_t g_connectAt = 0;
 volatile uint16_t g_connHandle = 0;
 
 portMUX_TYPE g_mux = portMUX_INITIALIZER_UNLOCKED;
+// The latest Volume write, copied out of the NimBLE task; bleTakeVolume() parses it.
+uint8_t g_volPending[VOLUME_FRAME_MAX];
+size_t g_volLen = 0;
+volatile bool g_volReady = false;
+volatile bool g_volDropped = false;  // the link dropped: forget the Mac's state
+MacVolume g_vol{};                   // main loop only
 char g_pending[BLE_MAX_PAYLOAD + 1];
 size_t g_pendingLen = 0;
 volatile bool g_pendingReady = false;
@@ -76,6 +82,10 @@ struct ServerCb : NimBLEServerCallbacks {
     g_sendNow = false;
     g_linkUp = false;
     g_secured = false;
+    portENTER_CRITICAL(&g_mux);
+    g_volReady = false;
+    g_volDropped = true;
+    portEXIT_CRITICAL(&g_mux);
     g_state = BleState::Advertising;
     // Needed: NimBLE 2.x does not re-advertise by itself (advertiseOnDisconnect
     // defaults to off).
@@ -156,6 +166,18 @@ struct SettingsCb : NimBLECharacteristicCallbacks {
   }
 };
 
+struct VolumeCb : NimBLECharacteristicCallbacks {
+  void onWrite(NimBLECharacteristic *chr, NimBLEConnInfo &) override {
+    const NimBLEAttValue v = chr->getValue();
+    if (v.size() == 0 || v.size() > VOLUME_FRAME_MAX) return;
+    portENTER_CRITICAL(&g_mux);
+    memcpy(g_volPending, v.data(), v.size());
+    g_volLen = v.size();
+    g_volReady = true;
+    portEXIT_CRITICAL(&g_mux);
+  }
+};
+
 struct ControlCb : NimBLECharacteristicCallbacks {
   void onSubscribe(NimBLECharacteristic *, NimBLEConnInfo &, uint16_t subValue) override {
     if (subValue & 1) g_sendNow = true;  // sent from bleTake(), on the main loop
@@ -166,6 +188,7 @@ ServerCb g_serverCb;
 PayloadCb g_payloadCb;
 ControlCb g_controlCb;
 SettingsCb g_settingsCb;
+VolumeCb g_volumeCb;
 
 }  // namespace
 
@@ -195,6 +218,10 @@ void bleBegin() {
                              NIMBLE_PROPERTY::WRITE | NIMBLE_PROPERTY::WRITE_ENC | NIMBLE_PROPERTY::WRITE_AUTHEN);
   g_settingsChar->setCallbacks(&g_settingsCb);
   publishSettings();
+
+  NimBLECharacteristic *volume = svc->createCharacteristic(
+      BLE_VOLUME_UUID, NIMBLE_PROPERTY::WRITE | NIMBLE_PROPERTY::WRITE_ENC | NIMBLE_PROPERTY::WRITE_AUTHEN);
+  volume->setCallbacks(&g_volumeCb);
 
   // No svc->start(): NimBLE 2.x starts the GATT server when advertising begins.
   NimBLEAdvertising *adv = NimBLEDevice::getAdvertising();
@@ -283,4 +310,41 @@ void bleNotifyPomodoro(uint8_t ended, uint8_t next) {
   uint8_t m[BLE_POMO_ENDED_LEN];
   const size_t len = bleEncodePomoEnded(ended, next, m);
   notifyControl(m, len);
+}
+
+bool bleTakeVolume(MacVolume &out) {
+  uint8_t buf[VOLUME_FRAME_MAX];
+  size_t len = 0;
+  bool ready, dropped;
+  portENTER_CRITICAL(&g_mux);
+  ready = g_volReady;
+  dropped = g_volDropped;
+  if (ready) {
+    len = g_volLen;
+    memcpy(buf, g_volPending, len);
+  }
+  g_volReady = g_volDropped = false;
+  portEXIT_CRITICAL(&g_mux);
+
+  bool changed = false;
+  if (dropped && g_vol.known) {
+    g_vol = MacVolume{};
+    changed = true;
+  }
+  if (ready) {
+    MacVolume v = g_vol;
+    if (!volumeParse(buf, len, v)) Serial.println("[ble] volume write rejected");
+    else if (!volumeSame(v, g_vol)) {
+      g_vol = v;
+      changed = true;
+    }
+  }
+  out = g_vol;
+  return changed;
+}
+
+void bleSendVolume(uint8_t level, bool muted) {
+  uint8_t m[BLE_VOLUME_REQ_LEN];
+  volumeRequestEncode(level, muted, m);
+  notifyControl(m, sizeof(m));
 }

@@ -5,9 +5,13 @@
 //                 from the bridge over HTTP, the parsing is the real one)
 //   stale         bonded; nothing ever arrives, so WiFi takes over after 15 s
 //   pair          a Mac is pairing: the passkey screen shows
+// CUBE_VOLUME (only while bonded) is what the Mac reports for the Volume card,
+// once: a level 0..100, `muted` (56, muted), `fixed` (an HDMI output), or
+// `none` / unset (no Volume write: the card shows NO MAC).
 
 #include <Arduino.h>
 
+#include <cstdio>
 #include <cstdlib>
 #include <cstring>
 
@@ -73,4 +77,32 @@ void bleSettingsChanged() {}
 
 void bleNotifyPomodoro(uint8_t ended, uint8_t next) {
   Serial.printf("[ble] (sim) pomodoro ended %u, next %u\n", (unsigned)ended, (unsigned)next);
+}
+
+bool bleTakeVolume(MacVolume &out) {
+  static bool sent = false;
+  if (sent || !bleBonded()) return false;
+  const char *e = getenv("CUBE_VOLUME");
+  if (!e || !strcmp(e, "none")) return false;
+  MacVolume v{};
+  v.known = true;
+  v.canSet = v.canMute = true;
+  snprintf(v.name, sizeof(v.name), "MacBook Pro Speakers");
+  if (!strcmp(e, "muted")) {
+    v.level = 56;
+    v.muted = true;
+  } else if (!strcmp(e, "fixed")) {
+    v.level = 100;
+    v.canSet = false;
+    snprintf(v.name, sizeof(v.name), "HDMI");
+  } else {
+    v.level = (uint8_t)constrain(atoi(e), 0, 100);
+  }
+  sent = true;
+  out = v;
+  return true;
+}
+
+void bleSendVolume(uint8_t level, bool muted) {
+  Serial.printf("[ble] (sim) volume %u%s\n", (unsigned)level, muted ? " muted" : "");
 }

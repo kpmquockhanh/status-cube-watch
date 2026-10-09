@@ -3,6 +3,7 @@
 #include <stdint.h>
 
 #include "payload.h"
+#include "volume_frame.h"
 
 // The BLE side of the cube: a NimBLE GATT server the Mac app writes payloads
 // to (see docs/ble-protocol.md). net_ble.cpp is the hardware implementation;
@@ -42,3 +43,10 @@ void bleSettingsChanged();
 // PomoPhase values (0 focus, 1 short, 2 long). Fire and forget; dropped when no
 // Mac is subscribed.
 void bleNotifyPomodoro(uint8_t ended, uint8_t next);
+
+// The Mac's output volume (Volume characteristic, fw_rev 5). True when it
+// changed since the last call, including the change to unknown (known=false)
+// when the link drops. Main loop only.
+bool bleTakeVolume(MacVolume &out);
+// Asks the Mac to set its output: Control `05 <level> <muted>`. Fire and forget.
+void bleSendVolume(uint8_t level, bool muted);

@@ -232,6 +232,12 @@ bool parsePayload(const std::string &json, Payload &out) {
 }
 
 uint32_t g_bleLastPush = 0, g_bleLastGood = 0;
+// The Mac's side of the Volume card: its state once the link is live, then an
+// echo of each request 300 ms later (about how slow the real link is).
+uint32_t g_volEchoAt = 0;
+bool g_volSent = false;
+uint32_t g_volRequests = 0;
+MacVolume g_volEcho{};
 // What a Settings read over BLE would return: net_ble.cpp publishes it at
 // bleBegin() and again whenever it is told the stored settings changed.
 DeviceSettings g_pubDevice{};
@@ -331,6 +337,33 @@ bool bleTakeSettings(char *, size_t) { return false; }
 void bleSettingsReply(uint8_t) { publishSettings(); }
 void bleSettingsChanged() { publishSettings(); }
 void bleNotifyPomodoro(uint8_t, uint8_t) {}
+
+bool bleTakeVolume(MacVolume &out) {
+  if (!S.bleLive || !g_running) return false;
+  if (!g_volSent) {
+    g_volSent = true;
+    g_volEcho = MacVolume{};
+    g_volEcho.known = true;
+    g_volEcho.level = 40;
+    g_volEcho.canSet = g_volEcho.canMute = true;
+    snprintf(g_volEcho.name, sizeof(g_volEcho.name), "MacBook Pro Speakers");
+    out = g_volEcho;
+    return true;
+  }
+  if (g_volEchoAt && millis() - g_volEchoAt >= 300) {
+    g_volEchoAt = 0;
+    out = g_volEcho;
+    return true;
+  }
+  return false;
+}
+
+void bleSendVolume(uint8_t level, bool muted) {
+  g_volRequests++;
+  g_volEcho.level = level;
+  g_volEcho.muted = muted;
+  if (!g_volEchoAt) g_volEchoAt = millis() ? millis() : 1;
+}
 
 // --- stand-ins: WiFi -----------------------------------------------------------
 // Joined, but the bridge does not answer: each fetch is refused after a short
