@@ -16,6 +16,7 @@ NAV=/root/nav
 IMAGE=nav-graphhopper:11.1
 COMPOSE="${COMPOSE:-/root/nav-server/docker-compose.yml}"
 HEALTH_PATH="${HEALTH_PATH:-/health}"   # tests override this to force a rollback
+DC="${DC:-docker compose}"              # tests override this with a wrapper
 WORK=$NAV/work
 LIVE=$NAV/data
 REL=$LIVE/releases
@@ -74,26 +75,31 @@ flip tiles "tiles-$stamp"
 
 healthy() {
   for _ in $(seq 1 60); do
-    if docker compose -f "$COMPOSE" exec -T graphhopper curl -fs "http://localhost:8989$HEALTH_PATH" >/dev/null 2>&1; then return 0; fi
+    if $DC -f "$COMPOSE" exec -T graphhopper curl -fs "http://localhost:8989$HEALTH_PATH" >/dev/null 2>&1; then return 0; fi
     sleep 5
   done
   return 1
 }
 
-if [ -f "$COMPOSE" ] && [ -n "$(docker compose -f "$COMPOSE" ps -aq graphhopper 2>/dev/null)" ]; then
+if [ -f "$COMPOSE" ] && [ -n "$($DC -f "$COMPOSE" ps -aq graphhopper 2>/dev/null)" ]; then
   echo "[refresh] restart graphhopper"
-  docker compose -f "$COMPOSE" restart graphhopper
-  if ! healthy; then
-    echo "[refresh] graphhopper not healthy; rolling back" >&2
-    if [ -n "$prev_graph" ] && [ -n "$prev_tiles" ]; then
-      flip graph "$prev_graph"
-      flip tiles "$prev_tiles"
-      rm -rf "$REL/graph-$stamp" "$REL/tiles-$stamp"
-      docker compose -f "$COMPOSE" restart graphhopper || true
-      HEALTH_PATH=/health healthy && echo "[refresh] previous data restored and healthy" >&2 \
-        || echo "[refresh] previous data restored but still not healthy" >&2
-    else
+  if ! $DC -f "$COMPOSE" restart graphhopper || ! healthy; then
+    echo "[refresh] graphhopper restart/health failed; rolling back" >&2
+    if [ -z "$prev_graph" ] || [ -z "$prev_tiles" ]; then
       echo "[refresh] no previous data to roll back to" >&2
+      exit 1
+    fi
+    flip graph "$prev_graph"
+    flip tiles "$prev_tiles"
+    rm -rf "$REL/graph-$stamp" "$REL/tiles-$stamp"
+    if ! $DC -f "$COMPOSE" restart graphhopper; then
+      echo "[refresh] ROLLBACK RESTART FAILED: previous data is linked but graphhopper is not running" >&2
+      exit 1
+    fi
+    if HEALTH_PATH=/health healthy; then
+      echo "[refresh] previous data restored and healthy" >&2
+    else
+      echo "[refresh] previous data restored but still not healthy" >&2
     fi
     exit 1
   fi
