@@ -1,0 +1,32 @@
+graphhopper:
+  datareader.file: ""
+  # overridden with -Ddw.graphhopper.graph.location=...
+  graph.location: graph-cache
+  custom_models.directory: /app
+  graph.encoded_values: car_access, track_type, road_access, road_class, car_average_speed, surface, max_speed, ferry_speed
+  profiles:
+    - name: moto_vn
+      custom_model_files: [moto_vn.json]
+  profiles_ch:
+    - profile: moto_vn
+  import.osm.ignored_highways: footway,cycleway,path,pedestrian,steps,bridleway
+  graph.dataaccess.default_type: RAM_STORE
+
+server:
+  application_connectors:
+    - type: http
+      port: 8989
+      bind_host: 0.0.0.0
+      max_request_header_size: 50k
+  request_log:
+    appenders: []
+  admin_connectors:
+    - type: http
+      port: 8990
+      bind_host: 127.0.0.1
+
+logging:
+  appenders:
+    - type: console
+      time_zone: UTC
+      log_format: "%d{yyyy-MM-dd HH:mm:ss.SSS} [%thread] %-5level %logger{36} - %msg%n"
