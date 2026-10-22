@@ -38,6 +38,14 @@ test('roadClass', () => {
   assert.equal(roadClass('living_street'), 2);
   assert.equal(roadClass('service'), 3);
   assert.equal(roadClass('footway'), null);
+  assert.equal(roadClass('motorway'), 0);
+  assert.equal(roadClass('primary'), 1);
+  assert.equal(roadClass('primary_link'), 1);
+  assert.equal(roadClass('tertiary'), 2);
+  assert.equal(roadClass('tertiary_link'), 2);
+  assert.equal(roadClass('unclassified'), 2);
+  assert.equal(roadClass('road'), null);
+  assert.equal(roadClass('track'), null);
 });
 
 test('a line across a tile seam appears in both tiles', () => {

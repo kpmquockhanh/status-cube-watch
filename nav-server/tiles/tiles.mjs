@@ -19,10 +19,10 @@ export function tileBounds(x, y, z) {
 
 const CLASSES = new Map([
   ['motorway', 0], ['motorway_link', 0], ['trunk', 0], ['trunk_link', 0],
-  ['primary', 0], ['primary_link', 0],
-  ['secondary', 1], ['secondary_link', 1], ['tertiary', 1], ['tertiary_link', 1],
-  ['unclassified', 2], ['residential', 2], ['living_street', 2], ['road', 2],
-  ['service', 3], ['track', 3],
+  ['primary', 1], ['primary_link', 1], ['secondary', 1], ['secondary_link', 1],
+  ['tertiary', 2], ['tertiary_link', 2], ['unclassified', 2], ['residential', 2],
+  ['living_street', 2],
+  ['service', 3],
 ]);
 
 export function roadClass(highway) {
