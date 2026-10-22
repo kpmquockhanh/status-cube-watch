@@ -1,0 +1,14 @@
+services:
+  graphhopper:
+    image: nav-graphhopper:11.1
+    restart: unless-stopped
+    # The whole data dir is mounted (not the graph symlink) because refresh.sh flips it.
+    command: ["java", "-Xmx3g", "-Ddw.graphhopper.graph.location=/data/graph", "-jar", "graphhopper-web-11.1.jar", "server", "config.yml"]
+    volumes:
+      - /root/nav/data:/data   # rw: GraphHopper needs to create gh.lock in the graph dir
+    networks:
+      - n8n_default
+
+networks:
+  n8n_default:
+    external: true

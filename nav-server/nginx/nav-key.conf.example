@@ -1,0 +1,5 @@
+# Real file lives at /root/nav/nav-key.conf (mode 600, generated on the server).
+map $http_x_nav_key $nav_key_ok {
+  default 0;
+  "CHANGE-ME" 1;
+}
