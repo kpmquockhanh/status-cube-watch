@@ -39,11 +39,6 @@ void bleSettingsReply(uint8_t result);
 // a read of the Settings characteristic returns. Main loop only.
 void bleSettingsChanged();
 
-// Tells the Mac a Pomodoro phase ended: Control `04 <ended> <next>` with the
-// PomoPhase values (0 focus, 1 short, 2 long). Fire and forget; dropped when no
-// Mac is subscribed.
-void bleNotifyPomodoro(uint8_t ended, uint8_t next);
-
 // The Mac's output volume (Volume characteristic, fw_rev 5). True when it
 // changed since the last call, including the change to unknown (known=false)
 // when the link drops. Main loop only.

@@ -71,7 +71,7 @@ void devEditorValue(int row, const DeviceSettings &s, char *buf, size_t cap) {
 EditHit devEditorHit(int16_t x, int16_t y) {
   for (int r = 0; r < DEV_EDIT_ROWS; r++)
     if (devEditorHasSwitch(r) && editorLead(r).contains(x, y)) return EditHit{EditAction::Toggle, (uint8_t)r};
-  return pomoEditorHit(x, y);
+  return editorHit(x, y);
 }
 
 void devEditorApply(DeviceSettings &s, EditHit hit, const DeviceSettings &defaults,

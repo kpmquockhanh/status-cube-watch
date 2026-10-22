@@ -20,9 +20,6 @@
 #include "ota.h"
 #include "payload.h"
 #include "dev_editor.h"
-#include "pomo_editor.h"
-#include "pomo_settings.h"
-#include "pomodoro.h"
 #include "portal.h"
 #include "readings_key.h"
 #include "settings.h"
@@ -33,13 +30,6 @@
 #include "ui.h"
 #include "unlock_prompt.h"
 #include "volume_slider.h"
-
-// Divides every Pomodoro duration. Leave at 1. `make run POMO_FAST=60` in
-// sim/ turns minutes into seconds, so a whole cycle and the phase-end alert
-// can be watched in about two minutes.
-#ifndef POMO_TIME_DIV
-#define POMO_TIME_DIV 1
-#endif
 
 // Keep WiFi up while BLE is live (OTA needs it). A config.h from before this
 // existed still builds.
@@ -58,10 +48,6 @@ constexpr uint32_t FRAME_MS = 16;
 Display lcd;
 Touch touch;
 Payload payload{};
-// Built from the compile-time defaults only so the object exists; setup()
-// applies the stored settings once NVS is read.
-Pomodoro pomo(pomoConfigFrom(pomoDefaults(), POMO_TIME_DIV));
-uint32_t lastPomoSec = 0xFFFFFFFFu;  // the clock value last drawn, to redraw when it changes
 uint8_t lastBatPct = 255;  // battery percent last drawn, to redraw when it changes
 
 uint8_t cardIndex = 0;
@@ -71,9 +57,9 @@ uint32_t lastGood = 0;  // millis() of the last successful fetch
 uint32_t lastReadings = 0;  // readingsKey() of the last payload: only a change keeps the screen awake
 uint32_t lastDraw = 0;
 bool dirty = true;
-// The Volume card: in the deck while a Mac is bonded, between the payload cards
-// and the Pomodoro. `deckVolume` is what the deck was last built with, so a
-// bond coming or going can keep the viewer on their card.
+// The Volume card: in the deck while a Mac is bonded, after the payload cards.
+// `deckVolume` is what the deck was last built with, so a bond coming or going
+// can keep the viewer on their card.
 VolumeSlider volSlider;
 // The media button last tapped on the Volume card (a MediaKey, -1 none), lit for VOLUME_PRESS_MS.
 int8_t mediaPressed = -1;
@@ -83,11 +69,8 @@ bool deckVolume = false;
 UnlockPrompt unlock;
 bool volumeShown() { return bleBonded(); }
 uint8_t deckSize() { return uiDeckSize(payload, deckVolume); }
-uint8_t pomoIndex() { return uiPomodoroIndex(payload, deckVolume); }
 bool onVolumeCard() { return deckVolume && cardIndex == uiVolumeIndex(payload); }
-DeckSpot deckSpot() {
-  return cardIndex == pomoIndex() ? DeckSpot::Pomodoro : onVolumeCard() ? DeckSpot::Volume : DeckSpot::Payload;
-}
+DeckSpot deckSpot() { return onVolumeCard() ? DeckSpot::Volume : DeckSpot::Payload; }
 
 TransportPolicy policy;
 bool wifiUp = false;           // netStart() called and not yet netStop()
@@ -118,16 +101,10 @@ bool waitingToPair() { return pairWaitAtBoot(bleBonded(), settingsHaveWifi()) &&
 // across the CST816S/T/D variants, whose gesture registers disagree.
 GestureTracker gestures;
 
-// The Pomodoro settings editor (swipe up on the idle Pomodoro card). While it
-// is open nothing else moves the deck, and multi-tap is off so a double tap
-// cannot start a session behind it. `editSettings` is the working copy.
+// The display panel (swipe down on any card but Volume). While it is open
+// nothing else moves the deck. `editDevice` is the working copy.
 bool editing = false;
-bool editingDevice = false;  // the display panel, not the Pomodoro editor, is the open one
 DeviceSettings editDevice{};
-PomoSettings editSettings{};
-// The Mac changed the Pomodoro lengths while a phase ran: they reach the timer
-// at the next point where setConfig takes them (pomodoro.h).
-bool pomoConfigPending = false;
 
 constexpr uint32_t SETUP_HOLD_MS = 5000;
 constexpr uint32_t SETUP_WINDOW_MS = 3000;
@@ -163,13 +140,12 @@ bool setupHoldRequested() {
 
 void step(int delta) {
   // Also when there is nowhere to go: otherwise the timer stays expired and the
-  // first payload to arrive is swiped away from the Pomodoro card at once.
+  // first payload to arrive is swiped away from its first card at once.
   lastRotate = millis();
   const uint8_t n = deckSize();
   if (n <= 1) return;
   cardIndex = (cardIndex + n + delta) % n;
-  if (cardIndex == pomoIndex()) uiReplayPomodoro();
-  else if (onVolumeCard()) uiReplayVolume();
+  if (onVolumeCard()) uiReplayVolume();
   else uiReplay(cardIndex);
   dirty = true;
 }
@@ -183,13 +159,9 @@ void handleBleSettings() {
   Serial.printf("[ble] settings write -> %d\n", (int)r);
   bleSettingsReply((uint8_t)r);
   if (r == SettingsResult::Invalid) return;
-  pomoConfigPending = !pomo.setConfig(pomoConfigFrom(pomoSettings(), POMO_TIME_DIV));
   // The Mac's write wins over an open editor: it shows what is now stored,
   // rather than saving its older copy over it on DONE.
-  if (editing) {
-    editDevice = deviceSettings();
-    editSettings = pomoSettings();
-  }
+  if (editing) editDevice = deviceSettings();
   if (screenOn) lcd.setBrightness(deviceSettings().backlight);
   buzzerSetLevel(deviceSettings().sound);
   lastRotate = millis();
@@ -200,17 +172,9 @@ void handleBleSettings() {
   }
 }
 
-void openEditor() {
-  editSettings = pomoSettings();
-  editing = true;
-  uiEditorSlide(true, editSettings);
-  dirty = true;
-}
-
 void openDeviceEditor() {
   editDevice = deviceSettings();
   editing = true;
-  editingDevice = true;
   uiDeviceSlide(true, editDevice);
   dirty = true;
 }
@@ -225,7 +189,6 @@ void closeDeviceEditor() {
   lcd.setBrightness(deviceSettings().backlight);
   buzzerSetLevel(deviceSettings().sound);
   editing = false;
-  editingDevice = false;
   uiDeviceSlide(false, editDevice);
   lastRotate = millis();
   idle.data(millis());  // the sleep timer starts over from the edit
@@ -252,35 +215,6 @@ void deviceEditorGesture(Gesture g) {
   }
 }
 
-// DONE and swipe-down both land here: what is on screen is what is saved.
-void closeEditor() {
-  if (editSettings != pomoSettings()) {  // spare the flash
-    pomoSettingsSave(editSettings);
-    bleSettingsChanged();
-  }
-  pomo.setConfig(pomoConfigFrom(pomoSettings(), POMO_TIME_DIV));
-  editing = false;
-  uiEditorSlide(false, editSettings);
-  uiReplayPomodoro();
-  lastRotate = millis();
-  dirty = true;
-}
-
-void editorGesture(Gesture g) {
-  if (g == Gesture::SwipeDown) {
-    closeEditor();
-  } else if (g == Gesture::Tap) {
-    // Hit-test where the finger went down, not where it came up.
-    const EditHit hit = pomoEditorHit(gestures.startX(), gestures.startY());
-    if (hit.action == EditAction::Done) {
-      closeEditor();
-    } else if (hit.action != EditAction::None) {
-      pomoEditorApply(editSettings, hit, pomoDefaults());
-      dirty = true;
-    }
-  }
-}
-
 void pollTouch() {
   int16_t x = 0, y = 0;
   const bool down = touch.read(x, y);
@@ -300,9 +234,6 @@ void pollTouch() {
   if (down) unlock.touch(now);
   // The unlock prompt covers the deck: a tap there is for it alone.
   const bool onUnlock = !editing && unlock.screen(now) != UnlockScreen::Hidden;
-  // Multi-taps only mean something on the Pomodoro card. Everywhere else a tap
-  // is a plain Tap, delivered at once (the editors hit-test it).
-  const bool onPomodoro = cardIndex == pomoIndex() && !onUnlock;
   // On the Volume card a vertical move is the volume, not a swipe (gesture.h).
   // Whether it is the slider's touch is decided where the finger landed, so a touch that began on
   // another card never reaches it; the latch clears on the lift pass, after the gesture is routed.
@@ -315,9 +246,9 @@ void pollTouch() {
   if (!down) touchOnVolume = touchOnVolumeRow = false;
   // In the button row the tracker stays in tap mode: a press that drifts a few
   // pixels is still a Tap (TAP_MAX_PX), not a drag of the slider.
-  const Gesture gesture = gestures.update(down, x, y, now, onPomodoro && !editing, onVolume && !onVolumeRow);
-  // The deck left the card under a dragging finger (an alert pulled it to the
-  // Pomodoro): let go, so the last level is still sent.
+  const Gesture gesture = gestures.update(down, x, y, now, onVolume && !onVolumeRow);
+  // The deck left the card under a dragging finger (the bond went): let go, so
+  // the last level is still sent.
   if (volSlider.held() && !onVolume) {
     volSlider.release(now);
     dirty = true;
@@ -326,8 +257,7 @@ void pollTouch() {
   // them, so nothing is pressed until it has landed.
   if (editing && uiEditorSliding()) return;
   if (editing) {
-    if (editingDevice) deviceEditorGesture(gesture);
-    else editorGesture(gesture);
+    deviceEditorGesture(gesture);
     return;
   }
   if (onUnlock) {
@@ -385,17 +315,6 @@ void pollTouch() {
     case Gesture::SwipePrev:
       step(-1);
       break;
-    case Gesture::DoubleTap:  // start / pause / resume / next phase
-      pomo.longPress(now);
-      dirty = true;
-      break;
-    case Gesture::TripleTap:  // start over
-      pomo.reset();
-      dirty = true;
-      break;
-    case Gesture::SwipeUp:  // open the Pomodoro editor (idle timer only)
-      if (editorMayOpen(onPomodoro, pomo.view().state)) openEditor();
-      break;
     case Gesture::SwipeDown:  // open the display settings panel, from any card but Volume
       if (!onVolume && devEditorMayOpen(editing)) openDeviceEditor();
       break;
@@ -442,7 +361,6 @@ void setup() {
   if (!buzzOk) Serial.println("[buzz] ledc setup failed");
   settingsLoad();
   buzzerSetLevel(deviceSettings().sound);
-  pomo.setConfig(pomoConfigFrom(pomoSettings(), POMO_TIME_DIV));
 
   lcd.init();
   lcd.setRotation(0);
@@ -482,10 +400,8 @@ void setup() {
   // First poll on the first loop pass rather than a full interval from now.
   lastPoll = millis() - pollMs();
   lastRotate = millis();
-  // A bonded cube's deck has the Volume card before the Pomodoro; boot still
-  // lands on the Pomodoro, as it did when it was the only card.
   deckVolume = volumeShown();
-  cardIndex = pomoIndex();
+  cardIndex = 0;
   dirty = true;
 }
 
@@ -493,25 +409,7 @@ void loop() {
   if (otaUp) otaHandle();
   const uint32_t now = millis();
 
-  pomo.tick(now);
-  if (pomo.takeAlert()) {
-    const PomoView ended = pomo.view();  // DONE: phase = the one that just ended
-    bleNotifyPomodoro(ended.phase, ended.next);
-    buzzerPlay(ended.phase == PHASE_FOCUS ? Sound::FocusDone : Sound::BreakDone);
-    // Phase over: pull the deck to the Pomodoro card wherever you were. A swipe
-    // leaves it again; the DONE state waits for a double tap.
-    cardIndex = pomoIndex();
-    lastRotate = now;
-    unlock.dismiss(now);  // the alert is drawn on the card, so the prompt steps aside
-    uiReplayPomodoro();
-    uiAlertStart();
-    dirty = true;
-  }
   buzzerUpdate(now);  // every pass, before the screen-off return below
-  if (pomoConfigPending && pomo.setConfig(pomoConfigFrom(pomoSettings(), POMO_TIME_DIV))) {
-    pomoConfigPending = false;
-    dirty = true;
-  }
   pollTouch();
   pollOrientation(now);
   batteryUpdate(now);
@@ -582,7 +480,7 @@ void loop() {
       lastReadings = readings;
       idle.data(now);
     }
-    // The deck may have changed size: keep the Pomodoro card under the user.
+    // The deck may have changed size: keep the viewer's card under them.
     cardIndex = deckKeepIndex(was, cardIndex, deckSize(), deckVolume);
     dirty = true;
   }
@@ -591,27 +489,14 @@ void loop() {
     step(1);
   }
 
-  // The Pomodoro clock counts whole seconds, so redraw the moment its number
-  // changes rather than leaving it to the 1 s housekeeping tick below, which
-  // would beat against it and skip or repeat digits.
-  const PomoView pv = pomo.view();
-  const bool clockShown = cardIndex == pomoIndex() || (!editing && unlock.screen(now) != UnlockScreen::Hidden);
-  if (clockShown && pv.displaySec != lastPomoSec) {
-    lastPomoSec = pv.displaySec;
-    dirty = true;
-  }
-
   const BatteryView bv = batteryView();
   if (bv.pct != lastBatPct) {
     lastBatPct = bv.pct;
     dirty = true;
   }
 
-  // Screen sleep: never while a session is running, the editor or a pairing
-  // code is up (see idle_sleep.h).
-  const PomoState ps = pv.state;
-  const bool keepOn = ps == POMO_FOCUS || ps == POMO_BREAK || ps == POMO_PAUSED || editing ||
-                      bleState() == BleState::Pairing || (!pairWaitDismissed && waitingToPair());
+  // Screen sleep: never while the editor or a pairing code is up (see idle_sleep.h).
+  const bool keepOn = editing || bleState() == BleState::Pairing || (!pairWaitDismissed && waitingToPair());
   const bool wantOn = idle.update(now, keepOn, sleepMs());
   if (wantOn != screenOn) {
     screenOn = wantOn;
@@ -642,21 +527,14 @@ void loop() {
     const bool waiting = !pairWaitDismissed && waitingToPair();
     const bool editorUp = editing && !uiEditorSliding();
     const UnlockScreen us = editing ? UnlockScreen::Hidden : unlock.screen(now);
-    // Only the deck pulses the backlight for an alert; another screen ends it
-    // and restores the level (the display panel's preview while it is open).
-    if ((pairing || waiting || editorUp || us != UnlockScreen::Hidden) && uiAlertCancel())
-      lcd.setBrightness(editingDevice ? editDevice.backlight : deviceSettings().backlight);
     if (pairing) uiBlePair(lcd, blePasskey());  // the code must be seen
     else if (waiting) uiBlePair(lcd, 0);
-    else if (editorUp) {
-      if (editingDevice) uiDeviceEditor(lcd, editDevice);
-      else uiPomodoroEditor(lcd, editSettings);
-    }
-    else if (us != UnlockScreen::Hidden) uiUnlock(lcd, us == UnlockScreen::Waiting, pv);
+    else if (editorUp) uiDeviceEditor(lcd, editDevice);
+    else if (us != UnlockScreen::Hidden) uiUnlock(lcd, us == UnlockScreen::Waiting);
     else {
       VolumeView vv = volSlider.view();
       vv.pressed = mediaPressed;
-      uiRender(lcd, payload, cardIndex, td.bleLive || netOnline(), age, pv, bv,
+      uiRender(lcd, payload, cardIndex, td.bleLive || netOnline(), age, bv,
                td.bleLive ? UiLink::Ble : (wifiUp && netOnline() ? UiLink::Wifi : UiLink::None),
                deckVolume ? &vv : nullptr);
     }

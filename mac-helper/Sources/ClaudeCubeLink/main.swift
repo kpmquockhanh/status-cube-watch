@@ -166,17 +166,6 @@ statusMenu.onShowBridgeSettings = {
 }
 
 link.onSendNow = { tick(force: true) }
-let notifier = Notifier()
-notifier.onAuthorizationChange = { statusMenu.authorization = $0 }
-statusMenu.onMenuWillOpen = { notifier.refreshAuthorization(askIfUnanswered: true) }
-link.onPomodoroEnded = { ended, next in
-    guard statusMenu.prefs.enabled else {
-        Trace.log("main", "pomodoro notice muted")
-        return
-    }
-    notifier.post(PomodoroNotice.make(ended: ended, next: next))
-}
-notifier.start()
 let systemVolume = SystemVolume()
 let nowPlaying = NowPlaying(log: log)
 let screenLock = ScreenLock()

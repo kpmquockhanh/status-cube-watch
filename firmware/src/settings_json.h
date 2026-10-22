@@ -3,8 +3,8 @@
 #include <stdint.h>
 
 // The Mac app edits settings over BLE as a small JSON object (see
-// docs/ble-protocol.md). Keys: bl sl rt pi (display), pf ps pl pn (Pomodoro),
-// ssid pass bridge otapass (network). Reads omit the two passwords.
+// docs/ble-protocol.md). Keys: bl sl rt pi sd (display), ssid pass bridge
+// otapass (network); any other key is ignored. Reads omit the two passwords.
 constexpr size_t SETTINGS_JSON_MAX = 512;  // one ATT value
 
 // Wire values of the Control `03 <status>` reply.

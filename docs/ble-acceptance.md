@@ -47,15 +47,6 @@ Tick an item only when you observed it. Logs: `./install.sh logs` (Mac, from `ma
 - [ ] `RunLoop.main.run()` is enough for CoreBluetooth in the LaunchAgent-started `.app`; if no callbacks arrive, `NSApplication` is needed (the Task 1 spike was skipped, so this is unverified).
 - [ ] The Bluetooth permission granted in `install.sh` applies to the LaunchAgent-started `.app`. If launchd-started instances are denied, fall back to a menu-bar app started at login.
 
-## Pomodoro notification
-
-- [ ] With the cube connected over BLE, let a focus phase end (set a 1 minute focus in the Pomodoro editor): a "Focus done" banner appears on the Mac as the cube alerts.
-- [ ] The break ending gives "Break over / Time to focus"; the fourth focus gives "Take a long break".
-- [ ] Unticking "Pomodoro notifications" in the menu silences it; the cube alert still happens.
-- [ ] Mac asleep or out of range when the phase ends: nothing is queued and nothing crashes on either side.
-- [ ] With notifications switched off for Claude Cube Link in System Settings, the menu item reads "(off in System Settings)" and is greyed out.
-- [ ] Dismiss the first permission prompt without answering: the item stays enabled with no hint, and opening the menu asks again.
-
 ## Unlock with cube
 
 - [ ] Menu > Unlock Mac with cube…: a wrong password is refused and asked again; the right one turns the item on, and macOS offers the Accessibility pane.
@@ -65,13 +56,13 @@ Tick an item only when you observed it. Logs: `./install.sh logs` (Mac, from `ma
 - [ ] Two quick taps after the prompt returns: the password is typed once (5 s gap).
 - [ ] Change the login password: a tap types nothing and the log says the stored password no longer works.
 - [ ] Item off: locking the Mac shows no prompt on the cube, and the Keychain item `com.claude-cube.link` / `unlock` is gone.
-- [ ] Swipe on the prompt: the cards show; after 30 s untouched the prompt returns. A Pomodoro phase end while locked shows the alert, not the prompt.
+- [ ] Swipe on the prompt: the cards show; after 30 s untouched the prompt returns.
 - [ ] Lock screens on recent macOS accept the synthetic keystrokes (note the macOS version tested).
 
 ## Volume card
 
 - [ ] `AudioObjectGetPropertyData` reads `kAudioHardwareServiceDeviceProperty_VirtualMainVolume` on the built-in speakers: `CUBE_TRACE=1` shows `[trace:volume] mac N` matching the menu bar slider.
-- [ ] Paired cube: the Volume card sits before the Pomodoro and shows the output name and level within a second of connecting.
+- [ ] Paired cube: the Volume card is the last card and shows the output name and level within a second of connecting.
 - [ ] Drag up and down: the fill follows the finger with no lag, the Mac's volume follows within a few hundred ms, and the fill does not jump back after the lift.
 - [ ] A touch or tap anywhere never changes the level; a drag moves it by the finger's travel. Previous / play-pause / next control the playing app; a tap on the number mutes, a second unmutes; a drag on a muted output unmutes it.
 - [ ] Keyboard volume keys and mute on the Mac: the card follows within about 300 ms.

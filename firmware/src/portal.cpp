@@ -73,12 +73,6 @@ std::string formPage(const Settings &cur, const std::string &error) {
   h += numField("WiFi refresh (seconds)", "pi", d.pollSec, DEV_MIN_POLL_SEC, DEV_MAX_POLL_SEC,
                 "How often the cube polls the bridge over WiFi.");
   h += numField("Sound", "sd", d.sound, 0, DEV_MAX_SOUND, "0 = off, 1 = low, 2 = medium, 3 = high");
-  h += "<h2>Pomodoro</h2>";
-  const PomoSettings &ps = pomoSettings();
-  h += numField("Focus (minutes)", "pf", ps.focusMin, POMO_MIN_MINUTES, POMO_MAX_MINUTES, "");
-  h += numField("Short break (minutes)", "ps", ps.shortMin, POMO_MIN_MINUTES, POMO_MAX_MINUTES, "");
-  h += numField("Long break (minutes)", "pl", ps.longMin, POMO_MIN_MINUTES, POMO_MAX_MINUTES, "");
-  h += numField("Sessions before long break", "pn", ps.sessions, POMO_MIN_SESSIONS, POMO_MAX_SESSIONS, "");
   h += "<button>Save and reboot</button></form>";
   if (bleBonded())
     h += "<form method=post action=/forget>" + token + "<button style='background:#2a3242;color:#e7ecf5'>"
@@ -142,8 +136,7 @@ void handleSave() {
   if (ota.size() > 63) return sendForm(400, "The OTA password can be at most 63 characters.");
 
   const DeviceSettings &dc = deviceSettings();
-  const PomoSettings &pc = pomoSettings();
-  int bl, sl, rt, pi, sd, pf, pshort, pl, pn;
+  int bl, sl, rt, pi, sd;
   if (!portalParseInt(server.arg("bl").c_str(), DEV_MIN_BACKLIGHT, DEV_MAX_BACKLIGHT, dc.backlight, bl))
     return sendForm(400, "Brightness must be a number from 10 to 255.");
   if (!portalParseInt(server.arg("sl").c_str(), 0, DEV_MAX_SLEEP_MIN, dc.sleepMin, sl))
@@ -154,12 +147,6 @@ void handleSave() {
     return sendForm(400, "WiFi refresh must be 2 to 60 seconds.");
   if (!portalParseInt(server.arg("sd").c_str(), 0, DEV_MAX_SOUND, dc.sound, sd))
     return sendForm(400, "Sound must be 0 (off) to 3 (high).");
-  if (!portalParseInt(server.arg("pf").c_str(), POMO_MIN_MINUTES, POMO_MAX_MINUTES, pc.focusMin, pf) ||
-      !portalParseInt(server.arg("ps").c_str(), POMO_MIN_MINUTES, POMO_MAX_MINUTES, pc.shortMin, pshort) ||
-      !portalParseInt(server.arg("pl").c_str(), POMO_MIN_MINUTES, POMO_MAX_MINUTES, pc.longMin, pl))
-    return sendForm(400, "Pomodoro durations must be 1 to 99 minutes.");
-  if (!portalParseInt(server.arg("pn").c_str(), POMO_MIN_SESSIONS, POMO_MAX_SESSIONS, pc.sessions, pn))
-    return sendForm(400, "Pomodoro sessions must be 1 to 9.");
 
   Settings next{};
   strlcpy(next.ssid, ssid.c_str(), sizeof(next.ssid));
@@ -167,8 +154,7 @@ void handleSave() {
   strlcpy(next.bridge, bridge.c_str(), sizeof(next.bridge));
   strlcpy(next.otaPass, ota.c_str(), sizeof(next.otaPass));
   if (!settingsSave(next) ||
-      !deviceSettingsSave(DeviceSettings{(uint8_t)bl, (uint8_t)sl, (uint8_t)rt, (uint8_t)pi, (uint8_t)sd}) ||
-      !pomoSettingsSave(PomoSettings{(uint8_t)pf, (uint8_t)pshort, (uint8_t)pl, (uint8_t)pn}))
+      !deviceSettingsSave(DeviceSettings{(uint8_t)bl, (uint8_t)sl, (uint8_t)rt, (uint8_t)pi, (uint8_t)sd}))
     return sendForm(500, "Could not write the settings to flash.");
 
   const std::string done =

@@ -5,7 +5,6 @@
 
 #include "../src/config.h"
 #include "../src/device_defaults.h"
-#include "../src/pomo_defaults.h"
 #include "../src/settings.h"
 
 #ifndef OTA_PASSWORD
@@ -14,7 +13,6 @@
 
 namespace {
 Settings g_settings;
-PomoSettings g_pomo = POMO_DEFAULTS;
 DeviceSettings g_dev = DEVICE_DEFAULTS;
 }
 
@@ -23,7 +21,6 @@ void settingsLoad() {
   strlcpy(g_settings.pass, WIFI_PASSWORD, sizeof(g_settings.pass));
   strlcpy(g_settings.bridge, BRIDGE_URL, sizeof(g_settings.bridge));
   strlcpy(g_settings.otaPass, OTA_PASSWORD, sizeof(g_settings.otaPass));
-  g_pomo = POMO_DEFAULTS;
   g_dev = DEVICE_DEFAULTS;
 }
 
@@ -36,16 +33,6 @@ bool settingsSave(const Settings &s) {
 }
 
 bool settingsHaveWifi() { return g_settings.ssid[0] != '\0'; }
-
-PomoSettings pomoDefaults() { return POMO_DEFAULTS; }
-
-const PomoSettings &pomoSettings() { return g_pomo; }
-
-bool pomoSettingsSave(const PomoSettings &s) {
-  g_pomo = pomoClamp(s);
-  Serial.println("[settings] (sim) pomodoro not persisted");
-  return true;
-}
 
 DeviceSettings deviceDefaults() { return DEVICE_DEFAULTS; }
 

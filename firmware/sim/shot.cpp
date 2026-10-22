@@ -6,8 +6,8 @@
 //   ./build/cube-shot out card.json # <out>-0.png, <out>-1.png, ...
 //   ./build/cube-shot out @portal   # <out>-portal.png: a screen that is not a
 //                                   # payload card (see renderSpecial):
-//                                   # @portal, @ota, @ble-pair, @ble-wait, @pomo-ready|focus|paused|break|done|long|edit,
-//                                   # @dev-edit, @unlock|unlock-wait|unlock-pomo, @vol-56|muted|full|zero|fixed|noout|long|none|press|playing|paused
+//                                   # @portal, @ota, @ble-pair, @ble-wait, @waiting, @dev-edit,
+//                                   # @unlock|unlock-wait, @vol-56|muted|full|zero|fixed|noout|long|none|press|playing|paused
 //
 // Reads the payload JSON from the file named on the command line, or stdin.
 
@@ -26,7 +26,6 @@
 #include "../src/display.h"
 #include "battery_env.h"
 #include "../src/payload.h"
-#include "../src/pomodoro.h"
 #include "../src/ui.h"
 
 Display *g_simDisplay = nullptr;  // normally lives in touch_sim.cpp
@@ -109,61 +108,18 @@ bool grab(Display &lcd, const char *path) {
   return writePng(path, g_rgb.data(), LCD_WIDTH, LCD_HEIGHT);
 }
 
-// Drives the real state machine to a named state and draws it with an empty
-// payload (the bridge-down case: the Pomodoro is the only card), so the shot
-// shows what the board would draw rather than a hand-built view.
-bool pomodoroShot(Display &lcd, const char *state) {
-  const uint32_t MIN = 60000;
-  Pomodoro p(PomoConfig{25 * MIN, 5 * MIN, 15 * MIN, 4});
-  uint32_t now = 1000;
-  auto run = [&](uint32_t ms) {
-    now += ms;
-    p.tick(now);
-  };
-
-  if (!strcmp(state, "ready")) {
-  } else if (!strcmp(state, "focus")) {
-    p.longPress(now);
-    run(7 * MIN + 3000);
-  } else if (!strcmp(state, "paused")) {
-    p.longPress(now);
-    run(7 * MIN + 3000);
-    p.longPress(now);
-  } else if (!strcmp(state, "break")) {
-    p.longPress(now);
-    run(25 * MIN);
-    p.longPress(now);
-    run(90000);
-  } else if (!strcmp(state, "done")) {
-    p.longPress(now);
-    run(25 * MIN);
-  } else if (!strcmp(state, "long")) {  // three full cycles, a fourth focus, then the long break
-    for (int i = 0; i < 3; i++) {
-      p.longPress(now);
-      run(25 * MIN);
-      p.longPress(now);
-      run(5 * MIN);
-    }
-    p.longPress(now);
-    run(25 * MIN);
-    p.longPress(now);
-    run(60000);
-  } else {
-    return false;
-  }
-
+// The deck with no payload yet (bridge down, no Mac): the waiting card alone.
+void waitingShot(Display &lcd) {
   const Payload none{};
-  const PomoView v = p.view();
   for (int frame = 0; frame < 400; frame++) {
-    uiRender(lcd, none, 0, true, 4000, v, batteryViewFromEnv(), linkFromEnv());
+    uiRender(lcd, none, 0, false, 4000, batteryViewFromEnv(), linkFromEnv());
     if (!uiAnimating()) break;
     delay(8);
   }
-  return true;
 }
 
 // The Volume card in a named state, fed through the real VolumeSlider, with an
-// empty payload (the deck is Volume, Pomodoro), drawn until the fill settles.
+// empty payload (the deck is the waiting card, then Volume), drawn until the fill settles.
 bool volumeShot(Display &lcd, const char *state) {
   MacVolume m{};
   m.known = true;
@@ -207,9 +163,8 @@ bool volumeShot(Display &lcd, const char *state) {
   VolumeView vv = s.view();
   vv.pressed = pressed;
   const Payload none{};
-  const PomoView pv = Pomodoro(PomoConfig{25 * 60000u, 5 * 60000u, 15 * 60000u, 4}).view();
   for (int frame = 0; frame < 400; frame++) {
-    uiRender(lcd, none, uiVolumeIndex(none), true, 4000, pv, batteryViewFromEnv(), linkFromEnv(), &vv);
+    uiRender(lcd, none, uiVolumeIndex(none), true, 4000, batteryViewFromEnv(), linkFromEnv(), &vv);
     if (!uiAnimating()) break;
     delay(8);
   }
@@ -228,22 +183,15 @@ bool renderSpecial(Display &lcd, const char *name) {
   } else if (!strcmp(name, "ble-wait")) {
     uiBlePair(lcd, 0);
   } else if (!strcmp(name, "unlock")) {
-    uiUnlock(lcd, false, Pomodoro(PomoConfig{25 * 60000u, 5 * 60000u, 15 * 60000u, 4}).view());
+    uiUnlock(lcd, false);
   } else if (!strcmp(name, "unlock-wait")) {
-    uiUnlock(lcd, true, Pomodoro(PomoConfig{25 * 60000u, 5 * 60000u, 15 * 60000u, 4}).view());
-  } else if (!strcmp(name, "unlock-pomo")) {
-    Pomodoro p(PomoConfig{25 * 60000u, 5 * 60000u, 15 * 60000u, 4});
-    p.longPress(0);
-    p.tick(6 * 60000u + 18000u);
-    uiUnlock(lcd, false, p.view());
-  } else if (!strcmp(name, "pomo-edit")) {
-    uiPomodoroEditor(lcd, PomoSettings{30, 5, 15, 4});
+    uiUnlock(lcd, true);
+  } else if (!strcmp(name, "waiting")) {
+    waitingShot(lcd);
   } else if (!strcmp(name, "dev-edit")) {
     uiDeviceEditor(lcd, DeviceSettings{160, 15, 0, 5, 2});
   } else if (!strncmp(name, "vol-", 4)) {
     if (!volumeShot(lcd, name + 4)) return false;
-  } else if (!strncmp(name, "pomo-", 5)) {
-    if (!pomodoroShot(lcd, name + 5)) return false;
   } else {
     return false;
   }
@@ -286,12 +234,11 @@ int render(bool *running) {
     return 1;
   }
 
-  const PomoView idle = Pomodoro(PomoConfig{25 * 60000UL, 5 * 60000UL, 15 * 60000UL, 4}).view();
   for (uint8_t i = 0; i < payload.nCards; i++) {
     // Draw until the entry animation has settled, so the grab shows the
     // resting layout rather than a frame part-way through the sweep.
     for (int frame = 0; frame < 400; frame++) {
-      uiRender(lcd, payload, i, true, 4000, idle, batteryViewFromEnv(), linkFromEnv());
+      uiRender(lcd, payload, i, true, 4000, batteryViewFromEnv(), linkFromEnv());
       if (!uiAnimating()) break;
       delay(8);
     }

@@ -13,8 +13,6 @@ struct Note {
 };
 
 enum class Sound : uint8_t {
-  FocusDone,  // a focus phase ended: break time
-  BreakDone,  // a short or long break ended: back to work
   Attention,  // Claude Code is waiting for you (played from sub-project B)
   Preview,    // the SOUND level changed in the display panel
 };
@@ -22,8 +20,6 @@ enum class Sound : uint8_t {
 // Starting pitches, tuned by ear on the board. Every note is >= 60 ms, because
 // the loop times notes to about one pass (15-16 ms), and every tune is under
 // 0.5 s.
-constexpr Note MELODY_FOCUS_DONE[] = {{2093, 110}, {2637, 110}, {3136, 110}};  // rising
-constexpr Note MELODY_BREAK_DONE[] = {{2637, 100}, {2349, 100}, {3136, 220}};  // ends high, held
 constexpr Note MELODY_ATTENTION[] = {{2700, 70}, {0, 70}, {2700, 70}};        // near the loudest pitch
 constexpr Note MELODY_PREVIEW[] = {{2700, 90}};
 
@@ -35,8 +31,6 @@ inline const Note *melodyOf(const Note (&tune)[N], uint8_t &len) {
 
 inline const Note *melodyFor(Sound s, uint8_t &len) {
   switch (s) {
-    case Sound::FocusDone: return melodyOf(MELODY_FOCUS_DONE, len);
-    case Sound::BreakDone: return melodyOf(MELODY_BREAK_DONE, len);
     case Sound::Attention: return melodyOf(MELODY_ATTENTION, len);
     case Sound::Preview: return melodyOf(MELODY_PREVIEW, len);
   }
@@ -47,8 +41,6 @@ inline const Note *melodyFor(Sound s, uint8_t &len) {
 // For the [buzz] log line.
 inline const char *melodyName(Sound s) {
   switch (s) {
-    case Sound::FocusDone: return "focus-done";
-    case Sound::BreakDone: return "break-done";
     case Sound::Attention: return "attention";
     case Sound::Preview: return "preview";
   }

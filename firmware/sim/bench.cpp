@@ -16,7 +16,7 @@
 // backlight LEDs are not in that figure; the backlight is reported on its own
 // as a duty cycle.
 //
-//   ./build/cube-bench <desk|linked|pomodoro|browse|editor|sleep|volume|render> [slowdown]
+//   ./build/cube-bench <desk|linked|browse|editor|sleep|volume|render> [slowdown]
 
 #include <ArduinoJson.h>
 
@@ -37,9 +37,7 @@
 #include "../src/imu.h"
 #include "../src/net.h"
 #include "../src/payload.h"
-#include "../src/pomo_editor.h"
-#include "../src/pomo_settings.h"
-#include "../src/pomodoro.h"
+#include "../src/editor_layout.h"
 #include "../src/settings.h"
 #include "../src/touch.h"
 #include "../src/ui.h"
@@ -156,18 +154,12 @@ Scenario makeScenario(const std::string &name) {
     s.seconds = 600;
     s.sleepMin = 2;
     s.mustSleep = true;
-  } else if (name == "pomodoro") {
-    s.what = "Pomodoro focus running, Mac pushing every 5 s";
-    s.seconds = 600;
-    s.strokes.push_back(swipe(1000, 190, 150, 50, 150));  // to the Pomodoro card
-    s.strokes.push_back(tapAt(3000, 120, 140));           // double tap: start
-    s.strokes.push_back(tapAt(3200, 120, 140));
   } else if (name == "browse") {
     s.what = "a swipe every 4 s (ring sweep on each card)";
     s.seconds = 120;
     for (uint32_t t = 1000; t < 120000; t += 4000) s.strokes.push_back(swipe(t, 190, 150, 50, 150));
   } else if (name == "editor") {
-    s.what = "display panel: open, 8 steps, a toggle, close; then the Pomodoro editor: a step, DONE";
+    s.what = "display panel: open, 8 steps, a toggle, close; open again: a step, DONE";
     s.seconds = 15;
     s.strokes.push_back(swipe(1000, 120, 60, 120, 220));  // swipe down: open
     uint32_t t = 2000;
@@ -179,7 +171,7 @@ Scenario makeScenario(const std::string &name) {
     t += 1000;
     s.strokes.push_back(swipe(t, 120, 220, 120, 60));  // swipe up: close
     t += 1000;
-    s.strokes.push_back(swipe(t, 120, 220, 120, 60));  // still on the Pomodoro card: its editor
+    s.strokes.push_back(swipe(t, 120, 60, 120, 220));  // swipe down: open again
     t += 1000;
     s.strokes.push_back(tapZone(t, editorPlus(0)));
     t += 600;
@@ -187,7 +179,7 @@ Scenario makeScenario(const std::string &name) {
   } else if (name == "volume") {
     s.what = "Volume card: a drag up the card, then a tap on the number (the Mac echoes each)";
     s.seconds = 6;
-    s.strokes.push_back(swipe(1000, 50, 150, 190, 150));       // swipe right: Pomodoro -> Volume
+    s.strokes.push_back(swipe(1000, 190, 150, 50, 150));       // swipe left: usage -> Volume
     s.strokes.push_back(Stroke{2000, 600, 120, 180, 120, 60});  // drag up, above the button row
     s.strokes.push_back(tapAt(3500, VOL_MUTE_CX, VOL_MUTE_CY));  // the number: mute
   } else if (name == "sleep") {
@@ -261,11 +253,9 @@ MacVolume g_volEcho{};
 // What a Settings read over BLE would return: net_ble.cpp publishes it at
 // bleBegin() and again whenever it is told the stored settings changed.
 DeviceSettings g_pubDevice{};
-PomoSettings g_pubPomo{};
 uint64_t g_unpublished = 0;  // loop passes that ended with a read returning stale settings
 void publishSettings() {
   g_pubDevice = deviceSettings();
-  g_pubPomo = pomoSettings();
 }
 uint32_t g_lastImuCost = 0;
 
@@ -356,7 +346,6 @@ void bleForgetBonds() {}
 bool bleTakeSettings(char *, size_t) { return false; }
 void bleSettingsReply(uint8_t) { publishSettings(); }
 void bleSettingsChanged() { publishSettings(); }
-void bleNotifyPomodoro(uint8_t, uint8_t) {}
 
 bool bleTakeVolume(MacVolume &out) {
   if (!S.bleLive || !g_running) return false;
@@ -480,9 +469,9 @@ void runScenario() {
     g_passPx = 0;
     const auto t0 = Clock::now();
     loop();
-    // Both editors save on the cube itself; by the end of that pass the Mac's
-    // next Settings read must see what they saved.
-    if (g_pubDevice != deviceSettings() || g_pubPomo != pomoSettings()) g_unpublished++;
+    // The display panel saves on the cube itself; by the end of that pass the
+    // Mac's next Settings read must see what it saved.
+    if (g_pubDevice != deviceSettings()) g_unpublished++;
     double ns = hostNs(t0, Clock::now()) - (double)g_panelNs;
     if (ns > HOST_PASS_CAP_NS) {
       ns = HOST_PASS_CAP_NS;
@@ -537,8 +526,6 @@ void runRender() {
   uiBegin(lcd);
   Payload p{};
   parsePayload(payloadJson(0), p);
-  Pomodoro pomo(pomoConfigFrom(pomoSettings(), 1));
-  pomo.longPress(millis());
   const BatteryView bv = batteryView();
   VolumeSlider volume;
   MacVolume mv{};
@@ -554,14 +541,9 @@ void runRender() {
     std::function<void()> draw;
   };
   const Case cases[] = {
-      {"usage card", [&] { uiRender(lcd, p, 0, true, 2000, pomo.view(), bv, UiLink::Ble); }},
-      {"pomodoro card", [&] {
-         pomo.tick(millis());
-         uiRender(lcd, p, uiPomodoroIndex(p), true, 2000, pomo.view(), bv, UiLink::Ble);
-       }},
-      {"volume card", [&] { uiRender(lcd, p, uiVolumeIndex(p), true, 2000, pomo.view(), bv, UiLink::Ble, &vv); }},
+      {"usage card", [&] { uiRender(lcd, p, 0, true, 2000, bv, UiLink::Ble); }},
+      {"volume card", [&] { uiRender(lcd, p, uiVolumeIndex(p), true, 2000, bv, UiLink::Ble, &vv); }},
       {"display panel", [&] { uiDeviceEditor(lcd, deviceSettings()); }},
-      {"pomo editor", [&] { uiPomodoroEditor(lcd, pomoSettings()); }},
   };
   // "redraw" is the same screen a second later (only what changed is sent);
   // "whole" is the frame after uiInvalidate(), as after a wake.

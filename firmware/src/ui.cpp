@@ -7,7 +7,7 @@
 #include "config.h"
 #include "fonts_gen.h"
 #include "dev_editor.h"
-#include "pomo_editor.h"
+#include "editor_layout.h"
 #include "settings.h"
 
 namespace {
@@ -27,7 +27,7 @@ constexpr uint32_t RGB888[7] = {
 };
 
 uint16_t g_palette[7];
-uint16_t DIM, FAINT, MUTED, INK, PANEL, ACC_POMO, ACC_DEV;
+uint16_t DIM, FAINT, MUTED, INK, PANEL, ACC_DEV;
 constexpr uint16_t BG = 0x0000;
 
 LGFX_Sprite g_canvas;
@@ -119,7 +119,7 @@ LovyanGFX *target(Display &lcd) {
 // Every screen is composed whole in the sprite, but only the rows that differ
 // from what the panel already shows go over SPI. A full frame is 134 KB, which
 // keeps the CPU waiting on the bus for ~13.4 ms, and most frames change only a
-// line or two of text (the age counter, the Pomodoro clock). Each row is reduced
+// line or two of text (the age counter, a countdown). Each row is reduced
 // to a hash and compared with the hash of the row last sent. A row that changes
 // in a single word always changes its hash. As a backstop against a collision or
 // a glitch on the glass, the whole frame is sent again once a minute.
@@ -445,25 +445,6 @@ void drawRing(LovyanGFX *g, const RingTable &ring, float pct, uint32_t rgb, bool
   }
 }
 
-// How one ring card is dressed. Payload cards take their colour from the
-// payload and show everything; the Pomodoro card picks its own colour, has no
-// percentage (the ring is time left, not a limit) and no thresholds.
-struct RingStyle {
-  uint32_t rgb;   // arc colour
-  bool pct;       // "NN%" and its label in the gap at the bottom; off = the label alone
-  bool notches;   // cuts at the amber/red thresholds
-  float flash;    // 0..1 blend of the arc towards white (the Pomodoro phase-end pulse)
-};
-
-RingStyle ringStyle(uint32_t rgb) {
-  RingStyle s;
-  s.rgb = rgb;
-  s.pct = true;
-  s.notches = true;
-  s.flash = 0.0f;
-  return s;
-}
-
 // Advances one ring's sweep / retarget / colour crossfade to `now` and returns
 // the arc to draw; `shownRgb` gets the colour to draw it in. Marks the frame as
 // animating while either is still moving.
@@ -504,18 +485,16 @@ float stepGauge(GaugeAnim &a, float want, uint32_t rgb, uint32_t now, uint32_t &
 // A gauge card: the ring is the number, the middle of the ring is the one
 // thing a ring cannot show (time left), and the exact percentage drops to a
 // single line in the gap at the bottom.
-void drawGaugeCard(LovyanGFX *g, const Card &card, const RingStyle &style,
+void drawGaugeCard(LovyanGFX *g, const Card &card, uint32_t rgb,
                    ValueFont valueFont, GaugeAnim &a, uint32_t now,
                    bool online, uint32_t ageMs, const BatteryView &bat) {
   const bool hasReading = card.gauge >= 0;
-  const uint32_t rgb = style.rgb;
 
   uint32_t shownRgb;
   stepGauge(a, hasReading ? card.gauge : 0.0f, rgb, now, shownRgb);
 
   drawTopBar(g, online, ageMs, bat);
-  const uint32_t ringRgb = style.flash > 0.0f ? lerpRgb(shownRgb, 0xFFFFFF, style.flash) : shownRgb;
-  drawRing(g, g_ringOuter, a.shown, ringRgb, hasReading, style.notches);
+  drawRing(g, g_ringOuter, a.shown, shownRgb, hasReading, true);
 
   // Inside the ring, in the size the whole deck agreed on.
   drawIn(g, valueFont, card.value, RING_CX, VALUE_CY, hasReading ? INK : FAINT);
@@ -523,7 +502,7 @@ void drawGaugeCard(LovyanGFX *g, const Card &card, const RingStyle &style,
 
   // In the gap at the bottom: "14%  OF 5H LIMIT", laid out as one centred run
   // so the two type sizes stay optically joined.
-  if (hasReading && style.pct) {
+  if (hasReading) {
     char pct[8];
     snprintf(pct, sizeof(pct), "%d%%", (int)lroundf(a.shown));
     g->setFont(&V_B18.font);
@@ -623,75 +602,16 @@ void drawTextCard(LovyanGFX *g, const Payload &p, const Card &card, uint16_t col
   drawCaps(g, card.sub2, LCD_WIDTH / 2, 230, DIM, top_center);
 }
 
-// --- the Pomodoro card ---------------------------------------------------
-// The timer lives on the device, so this is the one card whose text the
-// firmware formats itself (MM:SS). It reuses the gauge layout: the ring is the
-// time left in the phase, the middle is the clock, and the line in the gap at
-// the bottom is "sessions done  +  what a double tap does".
-constexpr uint32_t POMO_MUTED = 0x7C8598;  // idle / paused: the ring waits, so it is grey
-
-GaugeAnim g_pomoAnim;
-
-const char *phaseName(PomoPhase p) {
-  return p == PHASE_FOCUS ? "Focus" : (p == PHASE_SHORT ? "Break" : "Long break");
-}
-
-uint32_t phaseRgb(PomoPhase p) { return p == PHASE_FOCUS ? RGB888[ACC_AMBER] : RGB888[ACC_GREEN]; }
-
-void pomodoroCard(const PomoView &v, Card &card, RingStyle &style) {
-  char time[8];
-  pomoFormatTime(v.displaySec, time, sizeof(time));
-  char count[8];
-  snprintf(count, sizeof(count), "%u/%u", (unsigned)v.completed, (unsigned)v.sessions);
-
-  strlcpy(card.title, "Pomodoro", sizeof(card.title));
-  strlcpy(card.value, time, sizeof(card.value));
-  card.gauge = (int8_t)v.fraction;
-
-  const char *hint = "";
-  switch (v.state) {
-    case POMO_IDLE:
-      strlcpy(card.sub1, "Ready", sizeof(card.sub1));
-      hint = "2 taps: start";
-      style.rgb = POMO_MUTED;
-      break;
-    case POMO_FOCUS:
-      strlcpy(card.sub1, "Focus", sizeof(card.sub1));
-      hint = "2 taps: pause";
-      style.rgb = phaseRgb(PHASE_FOCUS);
-      break;
-    case POMO_BREAK:
-      strlcpy(card.sub1, phaseName(v.phase), sizeof(card.sub1));
-      hint = "2 taps: pause";
-      style.rgb = phaseRgb(v.phase);
-      break;
-    case POMO_PAUSED:
-      strlcpy(card.sub1, "Paused", sizeof(card.sub1));
-      hint = "2 taps: resume";
-      style.rgb = POMO_MUTED;
-      break;
-    case POMO_DONE:
-      strlcpy(card.value, "Done", sizeof(card.value));
-      card.gauge = 100;  // a finished ring: it is what the alert flash pulses
-      snprintf(card.sub1, sizeof(card.sub1), "%s done", phaseName(v.phase));
-      hint = v.next == PHASE_FOCUS ? "2 taps: focus"
-                                   : (v.next == PHASE_SHORT ? "2 taps: break" : "2 taps: long break");
-      style.rgb = phaseRgb(v.phase);
-      break;
-  }
-  snprintf(card.sub2, sizeof(card.sub2), "%s  %s", count, hint);
-  style.pct = false;      // the ring is time left, not a share of a limit
-  style.notches = false;  // and has no thresholds
-}
-
-void drawPomodoroCard(LovyanGFX *g, const PomoView &v, float flash, bool online, uint32_t ageMs,
-                       const BatteryView &bat) {
-  Card card{};
-  RingStyle style = ringStyle(POMO_MUTED);
-  pomodoroCard(v, card, style);
-  style.flash = flash;
-  // Sized on its own: it never nudges the font the payload cards agreed on.
-  drawGaugeCard(g, card, style, fitFont(g, "88:88", VALUE_MAX_W, VALUE_MAX_H), g_pomoAnim, millis(), online, ageMs, bat);
+// --- the waiting card -------------------------------------------------------
+// Stands in for the payload cards until the first payload arrives (bridge down,
+// no Mac yet), so the deck is never empty.
+void drawWaitingCard(LovyanGFX *g, bool online, uint32_t ageMs, const BatteryView &bat) {
+  drawTopBar(g, online, ageMs, bat);
+  g->setFont(&V_B24.font);
+  g->setTextDatum(middle_center);
+  g->setTextColor(INK, BG);
+  g->drawString("No data yet", LCD_WIDTH / 2, LCD_HEIGHT / 2 - 10);
+  drawCaps(g, "Waiting for the bridge", LCD_WIDTH / 2, LCD_HEIGHT / 2 + 22, DIM, middle_center);
 }
 
 // --- the Volume card ---------------------------------------------------------
@@ -860,11 +780,10 @@ void drawVolumeCard(LovyanGFX *g, const VolumeView &v, bool online, uint32_t age
 }
 
 // --- the settings sheets -----------------------------------------------------
-// Both the Pomodoro editor (rises from the bottom) and the display panel (drops
-// from the top) are sheets: a lifted background with rounded corners on the edge
-// facing the card, a grab handle on that edge, an icon + title, hairline-divided
-// rows of  LABEL over value ... ( - ) ( + ),  and a RESET / DONE bar. Each has its
-// own accent. Geometry comes from pomo_editor.cpp so drawing and hit-testing agree.
+// The display panel drops from the top as a sheet: a lifted background with
+// rounded corners on its bottom edge, a grab handle there, an icon + title,
+// hairline-divided rows of  LABEL over value ... ( - ) ( + ),  and a RESET / DONE
+// bar. Geometry comes from editor_layout.cpp so drawing and hit-testing agree.
 constexpr int STEP_R = 17;      // stepper circle radius, centred in its touch zone
 constexpr int ROW_PAD = 14;     // side inset of the labels and dividers
 constexpr int SW_W = 36;        // a row's on/off switch, right-aligned in the row's lead
@@ -958,38 +877,25 @@ void drawSheetBar(LovyanGFX *g, uint16_t accent, int yOff) {
   g->drawString("DONE", done.x + done.w / 2, done.y + done.h / 2 + yOff);
 }
 
-// The sheet body, `yOff` px down from its resting place so it can slide. `atTop`
-// marks the panel that drops in from the top: its rounded edge and handle are at
-// the bottom. The outline is only drawn while sliding: at rest the sheet is the
-// whole screen and the glass supplies the corners, so an arc of our own radius
-// could only disagree with the bezel.
-void drawSheetFrame(LovyanGFX *g, int yOff, bool atTop, uint16_t accent) {
-  if (atTop) {
-    g->fillRoundRect(0, yOff - SHEET_R - 2, LCD_WIDTH, LCD_HEIGHT + SHEET_R + 2, SHEET_R, PANEL);
-    if (yOff) g->drawRoundRect(0, yOff - SHEET_R - 2, LCD_WIDTH, LCD_HEIGHT + SHEET_R + 2, SHEET_R, FAINT);
-    g->fillRoundRect(LCD_WIDTH / 2 - 16, yOff + LCD_HEIGHT - 8, 32, 4, 2, FAINT);
-  } else {
-    g->fillRoundRect(0, yOff, LCD_WIDTH, LCD_HEIGHT + SHEET_R + 2, SHEET_R, PANEL);
-    if (yOff) g->drawRoundRect(0, yOff, LCD_WIDTH, LCD_HEIGHT + SHEET_R + 2, SHEET_R, FAINT);
-    g->fillRoundRect(LCD_WIDTH / 2 - 16, yOff + 7, 32, 4, 2, FAINT);
-  }
-  (void)accent;
+// The sheet body, `yOff` px from its resting place so it can slide (negative:
+// still partly above the screen). The outline is only drawn while sliding: at
+// rest the sheet is the whole screen and the glass supplies the corners, so an
+// arc of our own radius could only disagree with the bezel.
+void drawSheetFrame(LovyanGFX *g, int yOff) {
+  g->fillRoundRect(0, yOff - SHEET_R - 2, LCD_WIDTH, LCD_HEIGHT + SHEET_R + 2, SHEET_R, PANEL);
+  if (yOff) g->drawRoundRect(0, yOff - SHEET_R - 2, LCD_WIDTH, LCD_HEIGHT + SHEET_R + 2, SHEET_R, FAINT);
+  g->fillRoundRect(LCD_WIDTH / 2 - 16, yOff + LCD_HEIGHT - 8, 32, 4, 2, FAINT);
 }
 
-void drawSheetTitle(LovyanGFX *g, const char *title, bool sun, uint16_t accent, int yOff) {
-  const int cy = (sun ? 22 : 26) + yOff;
+// The title with a sun icon in front.
+void drawSheetTitle(LovyanGFX *g, const char *title, uint16_t accent, int yOff) {
+  const int cy = 22 + yOff;
   constexpr int IX = ROW_PAD + 7;
-  if (sun) {
-    g->fillCircle(IX, cy, 4, accent);
-    for (int i = 0; i < 8; i++) {
-      const float a = i * 0.7853982f;
-      g->drawLine(IX + (int)lroundf(cosf(a) * 6.5f), cy + (int)lroundf(sinf(a) * 6.5f),
-                  IX + (int)lroundf(cosf(a) * 8.5f), cy + (int)lroundf(sinf(a) * 8.5f), accent);
-    }
-  } else {
-    g->fillCircle(IX, cy + 1, 7, accent);
-    g->drawLine(IX, cy - 6, IX + 3, cy - 9, g_palette[ACC_GREEN]);
-    g->drawLine(IX + 1, cy - 6, IX + 4, cy - 9, g_palette[ACC_GREEN]);
+  g->fillCircle(IX, cy, 4, accent);
+  for (int i = 0; i < 8; i++) {
+    const float a = i * 0.7853982f;
+    g->drawLine(IX + (int)lroundf(cosf(a) * 6.5f), cy + (int)lroundf(sinf(a) * 6.5f),
+                IX + (int)lroundf(cosf(a) * 8.5f), cy + (int)lroundf(sinf(a) * 8.5f), accent);
   }
   g->setFont(&V_B18.font);
   g->setTextDatum(middle_left);
@@ -1001,26 +907,9 @@ void drawSheetTitle(LovyanGFX *g, const char *title, bool sun, uint16_t accent, 
   g->drawString(buf, IX + 16, cy);
 }
 
-void drawEditorPanel(LovyanGFX *g, const PomoSettings &s, int yOff) {
-  drawSheetFrame(g, yOff, false, ACC_POMO);
-  drawSheetTitle(g, "Pomodoro", false, ACC_POMO, yOff + 4);
-  const uint8_t vals[EDIT_ROWS] = {s.focusMin, s.shortMin, s.longMin, s.sessions};
-  for (int r = 0; r < EDIT_ROWS; r++) {
-    char buf[12];
-    if (r == EDIT_ROWS - 1) snprintf(buf, sizeof(buf), "%u", (unsigned)vals[r]);
-    else snprintf(buf, sizeof(buf), "%u min", (unsigned)vals[r]);
-    // A stepper is live when pressing it would change something.
-    PomoSettings dec = s, inc = s;
-    pomoEditorApply(dec, EditHit{EditAction::Dec, (uint8_t)r}, s);
-    pomoEditorApply(inc, EditHit{EditAction::Inc, (uint8_t)r}, s);
-    drawSheetRow(g, r, SheetRow{editorLabel(r), buf, -1, -1, dec != s, inc != s}, ACC_POMO, yOff);
-  }
-  drawSheetBar(g, ACC_POMO, yOff);
-}
-
 void drawDevicePanel(LovyanGFX *g, const DeviceSettings &s, int yOff) {
-  drawSheetFrame(g, yOff, true, ACC_DEV);
-  drawSheetTitle(g, "Display", true, ACC_DEV, yOff + 4);
+  drawSheetFrame(g, yOff);
+  drawSheetTitle(g, "Display", ACC_DEV, yOff + 4);
   for (int r = 0; r < DEV_EDIT_ROWS; r++) {
     char buf[12];
     devEditorValue(r, s, buf, sizeof(buf));
@@ -1044,15 +933,13 @@ void dimCard(LovyanGFX *g, int y0, int y1, float pos) {
     if (y >= y0) g->drawFastHLine(0, y, LCD_WIDTH, BG);
 }
 
-// Slide of the editor over the Pomodoro card: 0 = hidden below the screen,
-// 1 = fully open. Ease-out going up, ease-in coming back down.
+// Slide of the display panel over the card: 0 = hidden above the screen,
+// 1 = fully open. Ease-out coming in, ease-in going back.
 constexpr uint32_t EDITOR_SLIDE_MS = 260;
 bool g_edSliding = false;
 bool g_edOpening = false;
-bool g_edFromTop = false;  // the display panel drops in from the top; the Pomodoro one rises from the bottom
 DeviceSettings g_edDevice{};
 uint32_t g_edStart = 0;
-PomoSettings g_edSettings{};
 
 // Position in 0..1 of the panel now, ending the slide when it is over.
 float editorSlidePos(uint32_t now) {
@@ -1067,21 +954,6 @@ float editorSlidePos(uint32_t now) {
   return g_edOpening ? out : 1.0f - in;
 }
 
-// --- phase-end alert -----------------------------------------------------
-// The board has no speaker, so the end of a phase is a few pulses of the ring
-// colour towards white and of the backlight, then back to normal.
-constexpr uint32_t ALERT_MS = 2000;
-constexpr int ALERT_PULSES = 3;
-constexpr float ALERT_RING_MIX = 0.85f;  // how far the ring goes towards white at a peak
-uint32_t g_alertStart = 0;
-bool g_alertOn = false;
-
-// 0 at the start and end, 1 at each of ALERT_PULSES peaks in between.
-float alertPulse(uint32_t now) {
-  const float t = (float)(now - g_alertStart) / (float)ALERT_MS;
-  return 0.5f - 0.5f * cosf(6.2831853f * ALERT_PULSES * t);
-}
-
 }  // namespace
 
 void uiBegin(Display &) {
@@ -1091,7 +963,6 @@ void uiBegin(Display &) {
   FAINT = to565(0x2A3242);
   MUTED = to565(0x4A5366);  // a disabled glyph on FAINT
   PANEL = BG;  // drawCaps paints text on BG, so the sheet shares it
-  ACC_POMO = to565(0xFF6A4D);  // tomato
   ACC_DEV = to565(0x4DA3FF);   // sky
 
   // 240x280x16bpp is 134 KB. It fits in internal RAM on an S3 and is much
@@ -1124,45 +995,20 @@ void uiReplay(uint8_t index) {
   }
 }
 
-void uiReplayPomodoro() { g_pomoAnim.seen = false; }
-
 void uiReplayVolume() { g_volAnim.seen = false; }
 
-void uiAlertStart() {
-  g_alertStart = millis();
-  g_alertOn = true;
-}
+namespace {
+bool hasCards(const Payload &p) { return p.valid && p.nCards > 0; }
+}  // namespace
 
-bool uiAlertCancel() {
-  const bool was = g_alertOn;
-  g_alertOn = false;
-  return was;
-}
+uint8_t uiDeckSize(const Payload &p, bool volume) { return uiVolumeIndex(p) + (volume ? 1 : 0); }
 
-uint8_t uiDeckSize(const Payload &p, bool volume) { return (p.valid ? p.nCards : 0) + (volume ? 2 : 1); }
-
-uint8_t uiVolumeIndex(const Payload &p) { return p.valid ? p.nCards : 0; }
-
-uint8_t uiPomodoroIndex(const Payload &p, bool volume) { return uiVolumeIndex(p) + (volume ? 1 : 0); }
+uint8_t uiVolumeIndex(const Payload &p) { return hasCards(p) ? p.nCards : 1; }
 
 void uiRender(Display &lcd, const Payload &p, uint8_t index, bool online, uint32_t ageMs,
-              const PomoView &pomo, const BatteryView &bat, UiLink link, const VolumeView *vol) {
+              const BatteryView &bat, UiLink link, const VolumeView *vol) {
   g_animating = false;
   g_link = link;
-
-  float flash = 0.0f;
-  if (g_alertOn) {
-    const uint32_t now = millis();
-    if (now - g_alertStart >= ALERT_MS) {
-      g_alertOn = false;
-      lcd.setBrightness(deviceSettings().backlight);
-    } else {
-      flash = alertPulse(now);
-      const uint8_t base = deviceSettings().backlight;
-      lcd.setBrightness((uint8_t)(base + (255 - base) * flash));
-      g_animating = true;
-    }
-  }
 
   const bool hasVol = vol != nullptr;
   const uint8_t deck = uiDeckSize(p, hasVol);
@@ -1170,10 +1016,10 @@ void uiRender(Display &lcd, const Payload &p, uint8_t index, bool online, uint32
   LovyanGFX *g = target(lcd);
   g->fillScreen(BG);
 
-  if (i == uiPomodoroIndex(p, hasVol)) {
-    drawPomodoroCard(g, pomo, flash * ALERT_RING_MIX, online, ageMs, bat);
-  } else if (hasVol && i == uiVolumeIndex(p)) {
+  if (hasVol && i == uiVolumeIndex(p)) {
     drawVolumeCard(g, *vol, online, ageMs, bat);
+  } else if (!hasCards(p)) {
+    drawWaitingCard(g, online, ageMs, bat);
   } else {
     const Card &card = p.cards[i];
     if (card.gauge >= GAUGE_BLANK && card.gauge2 >= GAUGE_BLANK) {
@@ -1182,7 +1028,7 @@ void uiRender(Display &lcd, const Payload &p, uint8_t index, bool online, uint32
       // VALUE_MAX_W is what fits between the ring's inner edges at the value's
       // height; the size is settled across the deck, not per card.
       const ValueFont valueFont = fitDeck(g, p, VALUE_MAX_W, VALUE_MAX_H);
-      drawGaugeCard(g, card, ringStyle(RGB888[card.color % 7]), valueFont, g_anim[i],
+      drawGaugeCard(g, card, RGB888[card.color % 7], valueFont, g_anim[i],
                     millis(), online, ageMs, bat);
     } else {
       drawTextCard(g, p, card, g_palette[card.color % 7], online, ageMs, bat);
@@ -1195,13 +1041,8 @@ void uiRender(Display &lcd, const Payload &p, uint8_t index, bool online, uint32
     const float pos = editorSlidePos(millis());
     if (pos > 0.0f) {
       const int off = (int)((1.0f - pos) * LCD_HEIGHT);
-      if (g_edFromTop) {
-        dimCard(g, LCD_HEIGHT - off, LCD_HEIGHT, pos);
-        drawDevicePanel(g, g_edDevice, -off);
-      } else {
-        dimCard(g, 0, off, pos);
-        drawEditorPanel(g, g_edSettings, off);
-      }
+      dimCard(g, LCD_HEIGHT - off, LCD_HEIGHT, pos);
+      drawDevicePanel(g, g_edDevice, -off);
     }
     // The last frame of the slide stays animating so it is pushed before the
     // static editor (or the plain card) takes over.
@@ -1213,7 +1054,6 @@ void uiRender(Display &lcd, const Payload &p, uint8_t index, bool online, uint32
 
 void uiDeviceSlide(bool open, const DeviceSettings &s) {
   g_edDevice = s;
-  g_edFromTop = true;
   g_edOpening = open;
   g_edSliding = true;
   g_edStart = millis();
@@ -1225,14 +1065,6 @@ void uiDeviceEditor(Display &lcd, const DeviceSettings &s) {
   g->fillScreen(BG);
   drawDevicePanel(g, s, 0);
   present(lcd);
-}
-
-void uiEditorSlide(bool open, const PomoSettings &s) {
-  g_edFromTop = false;
-  g_edSettings = s;
-  g_edOpening = open;
-  g_edSliding = true;
-  g_edStart = millis();
 }
 
 bool uiEditorSliding() { return g_edSliding; }
@@ -1247,14 +1079,6 @@ void uiMessage(Display &lcd, const char *title, const char *body) {
   g->setFont(&V_S12.font);
   g->setTextColor(DIM, BG);
   g->drawString(body, LCD_WIDTH / 2, LCD_HEIGHT / 2 + 12);
-  present(lcd);
-}
-
-void uiPomodoroEditor(Display &lcd, const PomoSettings &s) {
-  g_animating = false;
-  LovyanGFX *g = target(lcd);
-  g->fillScreen(BG);
-  drawEditorPanel(g, s, 0);
   present(lcd);
 }
 
@@ -1322,7 +1146,7 @@ void uiBlePair(Display &lcd, uint32_t passkey) {
   present(lcd);
 }
 
-void uiUnlock(Display &lcd, bool waiting, const PomoView &pomo) {
+void uiUnlock(Display &lcd, bool waiting) {
   g_animating = false;
   LovyanGFX *g = target(lcd);
   g->fillScreen(BG);
@@ -1347,16 +1171,7 @@ void uiUnlock(Display &lcd, bool waiting, const PomoView &pomo) {
   g->drawString(waiting ? "Unlocking" : "Tap to unlock", CX, 186);
   drawCaps(g, waiting ? "Check your Mac" : "Your Mac is locked", CX, 214, DIM, middle_center);
 
-  const bool session = pomo.state == POMO_FOCUS || pomo.state == POMO_BREAK || pomo.state == POMO_PAUSED;
-  if (session) {
-    char clock[8], line[24];
-    pomoFormatTime(pomo.displaySec, clock, sizeof(clock));
-    snprintf(line, sizeof(line), "%s %s%s", pomo.phase == PHASE_FOCUS ? "Focus" : "Break", clock,
-             pomo.state == POMO_PAUSED ? " paused" : "");
-    drawCaps(g, line, CX, 256, ACC_POMO, middle_center);
-  } else {
-    drawCaps(g, "Swipe for the cards", CX, 256, MUTED, middle_center);
-  }
+  drawCaps(g, "Swipe for the cards", CX, 256, MUTED, middle_center);
   present(lcd);
 }
 

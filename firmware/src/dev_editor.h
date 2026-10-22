@@ -2,10 +2,10 @@
 #include <stddef.h>
 
 #include "device_settings.h"
-#include "pomo_editor.h"
+#include "editor_layout.h"
 
 // The on-device display settings panel that slides down from the top, minus
-// the drawing. It shares the Pomodoro editor's geometry (four rows of
+// the drawing. Its geometry is editor_layout.h (four rows of
 // LABEL / value ... ( - ) ( + ) and a RESET / DONE bar); only the rows' meaning
 // differs, and SLEEP, ADVANCE and SOUND, which can be off, carry a switch in
 // their lead. WiFi refresh has no row: the portal and the Mac edit it. Pure: no
@@ -24,7 +24,7 @@ void devEditorValue(int row, const DeviceSettings &s, char *buf, size_t cap);
 bool devEditorHasSwitch(int row);
 bool devEditorRowOn(int row, const DeviceSettings &s);  // false only for a switch row that is off
 
-// pomoEditorHit, plus Toggle for a tap on a switch row's lead.
+// editorHit, plus Toggle for a tap on a switch row's lead.
 EditHit devEditorHit(int16_t x, int16_t y);
 
 // Dec / Inc move to the neighbouring preset (a stored value between presets,

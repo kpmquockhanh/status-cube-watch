@@ -7,7 +7,7 @@
 // radio still wakes for every connection event. A longer interval plus some
 // peripheral latency lets it skip most of them while it has nothing to send.
 // A write from the Mac then waits at most maxItvl x (latency + 1) to start,
-// 315 ms here. The cube's own notifications (acks, send-now, Pomodoro) go out
+// 315 ms here. The cube's own notifications (acks, send-now, volume) go out
 // at the next event either way.
 //
 // Units are the Bluetooth spec's: intervals in 1.25 ms, the supervision

@@ -5,7 +5,7 @@
 
 namespace {
 
-const Sound ALL[] = {Sound::FocusDone, Sound::BreakDone, Sound::Attention, Sound::Preview};
+const Sound ALL[] = {Sound::Attention, Sound::Preview};
 
 // Plays `s` from t0, checking the first and the last millisecond of every note,
 // then that it ends exactly when its notes add up to.
@@ -67,19 +67,19 @@ void testTimingStartsAtFirstUpdate() {
 // ends on time instead of running late.
 void testLatePassSkipsAhead() {
   MelodyPlayer p;
-  p.play(Sound::FocusDone);
-  CHECK(p.update(0) == MELODY_FOCUS_DONE[0].hz);
-  const uint32_t third = MELODY_FOCUS_DONE[0].ms + MELODY_FOCUS_DONE[1].ms;
-  CHECK(p.update(third + 5) == MELODY_FOCUS_DONE[2].hz);
-  CHECK(p.update(third + MELODY_FOCUS_DONE[2].ms) == 0 && !p.playing());
+  p.play(Sound::Attention);
+  CHECK(p.update(0) == MELODY_ATTENTION[0].hz);
+  const uint32_t third = MELODY_ATTENTION[0].ms + MELODY_ATTENTION[1].ms;
+  CHECK(p.update(third + 5) == MELODY_ATTENTION[2].hz);
+  CHECK(p.update(third + MELODY_ATTENTION[2].ms) == 0 && !p.playing());
 }
 
 void testPlayReplaces() {
   MelodyPlayer p;
-  p.play(Sound::FocusDone);
+  p.play(Sound::Attention);
   p.update(0);
-  CHECK(p.update(MELODY_FOCUS_DONE[0].ms) == MELODY_FOCUS_DONE[1].hz);  // mid-tune
-  const uint32_t t = MELODY_FOCUS_DONE[0].ms + 10;
+  CHECK(p.update(MELODY_ATTENTION[0].ms) == MELODY_ATTENTION[1].hz && p.playing());  // mid-tune
+  const uint32_t t = MELODY_ATTENTION[0].ms + 10;
   p.play(Sound::Preview);
   CHECK(p.update(t) == MELODY_PREVIEW[0].hz);
   CHECK(p.update(t + MELODY_PREVIEW[0].ms) == 0 && !p.playing());
@@ -87,11 +87,11 @@ void testPlayReplaces() {
 
 void testStop() {
   MelodyPlayer p;
-  p.play(Sound::BreakDone);
+  p.play(Sound::Attention);
   CHECK(p.update(0) != 0);
   p.stop();
   CHECK(!p.playing() && p.update(1) == 0);
-  p.play(Sound::BreakDone);  // stopped before it ever sounded
+  p.play(Sound::Attention);  // stopped before it ever sounded
   p.stop();
   CHECK(!p.playing() && p.update(2) == 0);
   p.stop();  // stopping nothing is fine
@@ -122,9 +122,7 @@ void testTables() {
     CHECK(total < 500);
     CHECK(tune[0].hz != 0 && tune[n - 1].hz != 0);  // no dead air at either end
   }
-  CHECK(!sameTune(Sound::FocusDone, Sound::BreakDone));  // you can tell break from work by ear
-  CHECK(!strcmp(melodyName(Sound::FocusDone), "focus-done"));
-  CHECK(!strcmp(melodyName(Sound::BreakDone), "break-done"));
+  CHECK(!sameTune(Sound::Attention, Sound::Preview));
   CHECK(!strcmp(melodyName(Sound::Attention), "attention"));
   CHECK(!strcmp(melodyName(Sound::Preview), "preview"));
 }

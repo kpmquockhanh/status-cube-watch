@@ -2,15 +2,20 @@ import Foundation
 import Testing
 @testable import CubeLinkCore
 
-private let sample = Data(#"{"v":1,"bl":100,"sl":0,"rt":30,"pi":10,"pf":50,"ps":10,"pl":20,"pn":3,"ssid":"home","bridge":"http://h:8787/api/status","wifiPass":true,"otaPass":false}"#.utf8)
+private let sample = Data(#"{"v":1,"bl":100,"sl":0,"rt":30,"pi":10,"ssid":"home","bridge":"http://h:8787/api/status","wifiPass":true,"otaPass":false}"#.utf8)
 
 @Test func parsesWhatTheCubeReports() throws {
     let s = try #require(CubeSettings.parse(sample))
     #expect(s.backlight == 100 && s.sleepMin == 0 && s.rotateSec == 30 && s.pollSec == 10)
-    #expect(s.focusMin == 50 && s.shortMin == 10 && s.longMin == 20 && s.sessions == 3)
     #expect(s.ssid == "home" && s.bridge == "http://h:8787/api/status")
     #expect(s.wifiPassSet && !s.otaPassSet)
     #expect(CubeSettings.parse(Data("nope".utf8)) == nil)
+}
+
+@Test func ignoresKeysItDoesNotKnow() throws {
+    // Firmware from before the Pomodoro was removed still reports pf/ps/pl/pn.
+    let old = Data(#"{"v":1,"bl":100,"sl":0,"rt":30,"pi":10,"pf":50,"ps":10,"pl":20,"pn":3,"ssid":"home","bridge":"http://h:8787/api/status","wifiPass":true,"otaPass":false}"#.utf8)
+    #expect(try #require(CubeSettings.parse(old)) == CubeSettings.parse(sample))
 }
 
 @Test func patchHoldsOnlyWhatChanged() throws {
@@ -18,9 +23,9 @@ private let sample = Data(#"{"v":1,"bl":100,"sl":0,"rt":30,"pi":10,"pf":50,"ps":
     var new = old
     #expect(new.patch(from: old) == nil)
     new.backlight = 200
-    new.focusMin = 45
+    new.rotateSec = 45
     let json = try #require(new.patch(from: old))
-    #expect(String(decoding: json, as: UTF8.self) == #"{"bl":200,"pf":45}"#)
+    #expect(String(decoding: json, as: UTF8.self) == #"{"bl":200,"rt":45}"#)
     #expect(!CubeSettings.needsReboot(json))
 }
 
@@ -41,7 +46,7 @@ private let sample = Data(#"{"v":1,"bl":100,"sl":0,"rt":30,"pi":10,"pf":50,"ps":
     #expect(!s.isValid)
     s = CubeSettings(); s.pollSec = 61
     #expect(!s.isValid)
-    s = CubeSettings(); s.sessions = 0
+    s = CubeSettings(); s.sleepMin = 241
     #expect(!s.isValid)
 }
 
@@ -60,14 +65,14 @@ private let sample = Data(#"{"v":1,"bl":100,"sl":0,"rt":30,"pi":10,"pf":50,"ps":
 @Test func rebaseKeepsEditsAndFollowsTheCubeElsewhere() throws {
     let shown = try #require(CubeSettings.parse(sample))
     var form = shown
-    form.focusMin = 45          // being edited
+    form.rotateSec = 45         // being edited
     form.ssid = "office"        // being edited
     var fresh = shown
     fresh.backlight = 200       // changed on the cube's own screen
-    fresh.focusMin = 30         // also changed there, but the user's edit wins
+    fresh.rotateSec = 10        // also changed there, but the user's edit wins
     fresh.wifiPassSet = false
     let out = CubeSettings.rebase(form: form, shown: shown, onto: fresh)
-    #expect(out.backlight == 200 && out.focusMin == 45 && out.ssid == "office")
+    #expect(out.backlight == 200 && out.rotateSec == 45 && out.ssid == "office")
     #expect(out.sleepMin == fresh.sleepMin && out.bridge == fresh.bridge)
     #expect(!out.wifiPassSet)   // flags always come from the cube
     #expect(CubeSettings.rebase(form: form, shown: nil, onto: fresh) == fresh)  // nothing shown yet

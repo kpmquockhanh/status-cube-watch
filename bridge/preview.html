@@ -92,10 +92,6 @@
     text-transform: uppercase;
   }
   .device.text .name { top: 60px; }
-  /* The Pomodoro card: a ring that is time left, so no percentage and no
-     threshold notches (see drawPomodoroCard in firmware/src/ui.cpp). */
-  .device.nopct .read .pct { display: none; }
-  .device.nonotch .notch { display: none; }
 
   /* The combined usage card (a card with `g2`): a second, inner ring for the 7d
      window, the session countdown in the middle, the unread-mail badge in the
@@ -176,20 +172,11 @@ const COLORS = { accent:'--accent', blue:'--blue', green:'--green', amber:'--amb
 let data = null, idx = 0, lastFetch = 0;
 let online = null; // unknown until the first poll settles
 
-// The Pomodoro card is local to the device (firmware/src/pomodoro.cpp), so it
-// is not in /api/status. The mock shows fixed fake timer data; pick the state
-// with ?pomo=ready|focus|paused|break|done.
-// Strings are pomodoroCard's in firmware/src/ui.cpp, word for word.
-const POMO = {
-  ready:  { v:'25:00', s1:'Ready',      s2:'0/4  2 taps: start',  c:'muted', g:100 },
-  focus:  { v:'17:57', s1:'Focus',      s2:'0/4  2 taps: pause',  c:'amber', g:72 },
-  paused: { v:'17:57', s1:'Paused',     s2:'0/4  2 taps: resume', c:'muted', g:72 },
-  break:  { v:'03:30', s1:'Break',      s2:'1/4  2 taps: pause',  c:'green', g:70 },
-  done:   { v:'Done',  s1:'Focus done', s2:'1/4  2 taps: break',  c:'amber', g:100 },
-};
-const pomoState = new URLSearchParams(location.search).get('pomo');
-const pomoCard = { t:'Pomodoro', local:true, ...(POMO[pomoState] || POMO.ready) };
-const cards = () => data.cards.concat([pomoCard]);
+// With no cards the cube shows one "no data yet" card (drawWaitingCard in
+// firmware/src/ui.cpp), so the deck is never empty. Approximated here as a
+// text card with the same strings.
+const WAITING = { t:'', v:'No data yet', s1:'', s2:'Waiting for the bridge', c:'ink' };
+const cards = () => (data.cards.length ? data.cards : [WAITING]);
 
 function paint() {
   if (!data) return;
@@ -201,8 +188,6 @@ function paint() {
   const dual = gauge && typeof card.g2 === 'number';
   device.classList.toggle('text', !gauge);
   device.classList.toggle('dual', dual);
-  device.classList.toggle('nopct', !!card.local);
-  device.classList.toggle('nonotch', !!card.local);
 
   // The top bar carries no name (drawTopBar: battery left, age right; the
   // battery is not mocked). The name is drawn below the bar on a text card

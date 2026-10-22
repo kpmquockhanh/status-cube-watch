@@ -25,10 +25,6 @@ final class SettingsWindow: NSObject, NSWindowDelegate {
     private let sound = NSPopUpButton(frame: .zero, pullsDown: false)
     /// Hidden until a cube reports `sd` (fw_rev 4): an older one would ignore it.
     private var soundRow: NSGridRow?
-    private let focus = SettingsWindow.number(CubeSettings.minutesRange)
-    private let short = SettingsWindow.number(CubeSettings.minutesRange)
-    private let long = SettingsWindow.number(CubeSettings.minutesRange)
-    private let sessions = SettingsWindow.number(CubeSettings.sessionsRange)
     private let ssid = NSTextField()
     private let wifiPass = NSSecureTextField()
     private let bridge = NSTextField()
@@ -51,11 +47,6 @@ final class SettingsWindow: NSObject, NSWindowDelegate {
             [label("Auto-advance cards (s, 0 = off)"), rotate],
             [label("WiFi refresh (s)"), poll],
             [label("Sound"), sound],
-            [header("Pomodoro")],
-            [label("Focus (min)"), focus],
-            [label("Short break (min)"), short],
-            [label("Long break (min)"), long],
-            [label("Sessions before long break"), sessions],
             [header("Network (the cube reboots when these change)")],
             [label("WiFi network"), ssid],
             [label("WiFi password"), wifiPass],
@@ -65,7 +56,7 @@ final class SettingsWindow: NSObject, NSWindowDelegate {
         grid.rowSpacing = 8
         grid.columnSpacing = 12
         grid.column(at: 0).xPlacement = .trailing
-        for r in [0, 6, 11] {
+        for r in [0, 6] {
             grid.row(at: r).mergeCells(in: NSRange(location: 0, length: 2))
             grid.row(at: r).topPadding = r == 0 ? 0 : 10
         }
@@ -158,7 +149,7 @@ final class SettingsWindow: NSObject, NSWindowDelegate {
     // MARK: private
 
     private var controls: [NSControl] {
-        [backlight, sleep, rotate, poll, sound, focus, short, long, sessions, ssid, wifiPass, bridge, otaPass]
+        [backlight, sleep, rotate, poll, sound, ssid, wifiPass, bridge, otaPass]
     }
 
     /// `base` with the field values on top (the passwords are not part of CubeSettings).
@@ -169,10 +160,6 @@ final class SettingsWindow: NSObject, NSWindowDelegate {
         s.rotateSec = rotate.integerValue
         s.pollSec = poll.integerValue
         if base.sound != nil { s.sound = sound.indexOfSelectedItem }
-        s.focusMin = focus.integerValue
-        s.shortMin = short.integerValue
-        s.longMin = long.integerValue
-        s.sessions = sessions.integerValue
         s.ssid = ssid.stringValue
         s.bridge = bridge.stringValue.trimmingCharacters(in: .whitespaces)
         return s
@@ -192,10 +179,6 @@ final class SettingsWindow: NSObject, NSWindowDelegate {
             row.isHidden = hide
             if let v = window.contentView { window.setContentSize(v.fittingSize) }
         }
-        setInt(focus, s.focusMin)
-        setInt(short, s.shortMin)
-        setInt(long, s.longMin)
-        setInt(sessions, s.sessions)
         setText(ssid, s.ssid)
         setText(bridge, s.bridge)
     }

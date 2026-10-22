@@ -45,7 +45,7 @@ negotiated write length (`maximumWriteValueLength(for: .withResponse)`, about 50
 | `01`         | send now: sent when the Mac subscribes, so the screen fills at once |
 | `02 <seq>`   | the payload with that seq was reassembled (not necessarily valid JSON) |
 | `03 <result>`| a Settings write was handled: `00` saved, `01` rejected (nothing changed), `02` saved and the cube is rebooting |
-| `04 <ended> <next>` | a Pomodoro phase just ended (added in fw_rev 3, protocol still 1). `<ended>` is the phase that finished and `<next>` the one a double tap would start: `00` focus, `01` short break, `02` long break. Fire and forget: no ack, and it is dropped if no Mac is subscribed |
+| `04` | retired: it was the Pomodoro phase-end notice (fw_rev 3 to 7), and the Pomodoro is gone. Current firmware never sends it and the Mac parses it as unknown. Do not reuse it |
 | `05 <level> <muted>` | set the Mac's output to `<level>` (0..100) and mute it when `<muted>` is `01` (added in fw_rev 5, protocol still 1). An absolute target, so a lost or repeated message cannot drift the volume. Fire and forget: no ack, and it is dropped if no Mac is subscribed. A Mac that does not know `05` ignores it |
 | `06 <key>` | press a media key on the Mac: `00` play/pause, `01` next, `02` previous (added in fw_rev 6, protocol still 1). The Volume card's buttons send it. Fire and forget: no ack, and it is dropped if no Mac is subscribed. A Mac that does not know `06` ignores it |
 | `07` | unlock the Mac's screen: a tap on the cube's unlock prompt (added in fw_rev 7, protocol still 1). The Mac types the stored login password only while its screen is locked, "Unlock Mac with cube" is on and it holds the Accessibility permission, and at most once per 5 s; otherwise it logs why and does nothing. Fire and forget: no ack, and it is dropped if no Mac is subscribed. A Mac that does not know `07` ignores it |
@@ -80,21 +80,20 @@ the setup portal edits, as one JSON object of at most 512 bytes (a single ATT va
 | `rt` | auto-advance cards, seconds (0 = off) | 0..255 |
 | `pi` | WiFi poll interval, seconds | 2..60 |
 | `sd` | buzzer level: 0 off, 1 low, 2 medium, 3 high (added in fw_rev 4) | 0..3 |
-| `pf` `ps` `pl` | Pomodoro focus / short / long break, minutes | 1..99 |
-| `pn` | Pomodoro sessions before the long break | 1..9 |
 | `ssid` `bridge` | WiFi network, bridge URL | portal rules |
 | `pass` `otapass` | WiFi / OTA password (write only) | portal rules |
 
 **Read** returns every key above except `pass` / `otapass`, plus `v` and booleans `wifiPass` /
 `otaPass` (whether one is set). **Write** is a partial object: only the keys present change, and one
-bad value rejects the whole write. A new `ssid` without a `pass` means an open network, as in the
+bad value rejects the whole write. Keys the cube does not know are ignored, so the retired Pomodoro
+keys `pf` `ps` `pl` `pn` that an older Mac may still send change nothing. A new `ssid` without a `pass` means an open network, as in the
 portal. The cube answers with Control `03 <result>`; it saves on its main loop, and reboots (after
 the reply) when a network key changed, since those are only read at boot. Only the groups the write
-actually changes are stored (display, Pomodoro, then network last). If a later group fails to
+actually changes are stored (display, then network last). If a later group fails to
 store after an earlier one did, the result is `00` (Ok) rather than an error, so after a non-reboot
 result the Mac reads Settings again to see what was stored. A rejected write is never what a read
 returns: the cube republishes the stored values. Settings saved on the cube itself (the display
-panel or the Pomodoro editor) are republished as the editor closes, so the next read returns them;
+panel) are republished as the panel closes, so the next read returns them;
 nothing is notified.
 
 ## Volume (added in fw_rev 5, protocol still 1)
@@ -141,7 +140,7 @@ cube" (the menu item stores the login password in the Mac's Keychain after check
 OpenDirectory). It rewrites the Volume frame when either changes. The cube covers its deck with a
 "Tap to unlock" screen while the bit is set; a tap sends Control `07` and the screen says UNLOCKING
 until the bit clears, or for 6 s, then asks again. A swipe shows the deck; the prompt returns after
-30 s without a touch, or on the next lock. A Pomodoro phase end also puts it aside, so the alert shows.
+30 s without a touch, or on the next lock.
 
 The password never crosses the link: `07` carries nothing, and the Mac decides on its own state
 (locked, feature on, Accessibility granted, 5 s since the last attempt) before it wakes the display

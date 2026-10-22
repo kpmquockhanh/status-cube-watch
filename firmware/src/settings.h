@@ -3,7 +3,6 @@
 #include <stdint.h>
 
 #include "device_settings.h"
-#include "pomo_settings.h"
 
 // Everything the setup portal can change. Stored in NVS; any key that was
 // never stored falls back to config.h, so a freshly flashed cube behaves
@@ -22,17 +21,11 @@ bool settingsSave(const Settings &s);
 // True when there is any SSID to join, from NVS or from config.h.
 bool settingsHaveWifi();
 
-// Pomodoro durations, edited on the cube itself. Stored apart from the WiFi
-// settings so saving one never rewrites the other; a never-stored key falls
-// back to the config.h default (pomoDefaults()).
-PomoSettings pomoDefaults();         // the compile-time values (RESET target)
-const PomoSettings &pomoSettings();  // current, always within range
+// Backlight, screen sleep, card rotation, poll interval and sound. Stored apart
+// from the WiFi settings so saving one never rewrites the other; a never-stored
+// key falls back to the config.h default (deviceDefaults()), always in range.
+DeviceSettings deviceDefaults();  // the compile-time values (RESET target)
+const DeviceSettings &deviceSettings();
 // Clamps and makes `s` current at once; returns whether it reached flash. If
 // NVS is unavailable the new values still apply until the next reboot.
-bool pomoSettingsSave(const PomoSettings &s);
-
-// Backlight, screen sleep, card rotation and poll interval. Same contract as
-// the Pomodoro pair: never-stored keys fall back to config.h, always in range.
-DeviceSettings deviceDefaults();
-const DeviceSettings &deviceSettings();
 bool deviceSettingsSave(const DeviceSettings &s);

@@ -45,13 +45,6 @@ public func encodeFrames(payload: Data, seq: UInt8, maxWrite: Int) throws -> [Da
     return frames
 }
 
-/// A Pomodoro phase as the cube numbers it (firmware `PomoPhase`).
-public enum PomodoroPhase: UInt8, Equatable {
-    case focus = 0
-    case shortBreak = 1
-    case longBreak = 2
-}
-
 /// A media key the cube's Volume card asks the Mac to press (Control `06 <key>`, fw_rev 6).
 public enum MediaKey: UInt8, Equatable {
     case playPause = 0
@@ -64,7 +57,6 @@ public enum ControlMessage: Equatable {
     case sendNow
     case ack(seq: UInt8)
     case settings(SettingsResult)
-    case pomodoroEnded(ended: PomodoroPhase, next: PomodoroPhase)
     /// Set the Mac's output: an absolute level 0...100 and mute (fw_rev 5).
     case volumeRequest(level: UInt8, muted: Bool)
     /// Press a media key on the Mac (fw_rev 6).
@@ -81,9 +73,7 @@ public enum ControlMessage: Equatable {
         case 0x03:
             guard b.count >= 2, let r = SettingsResult(rawValue: b[1]) else { return nil }
             return .settings(r)
-        case 0x04:
-            guard b.count >= 3, let e = PomodoroPhase(rawValue: b[1]), let n = PomodoroPhase(rawValue: b[2]) else { return nil }
-            return .pomodoroEnded(ended: e, next: n)
+        // 0x04 was the Pomodoro phase-end notice; retired, do not reuse. It parses as unknown.
         case 0x05:
             guard b.count >= 3, b[1] <= 100, b[2] <= 1 else { return nil }
             return .volumeRequest(level: b[1], muted: b[2] == 1)

@@ -9,11 +9,6 @@ public struct CubeSettings: Equatable {
     public var rotateSec = 0     // 0...255, 0 = off
     public var pollSec = 5       // 2...60
     public var sound: Int? = nil  // 0...3 (off, low, medium, high); nil = the cube has no buzzer setting (fw_rev < 4)
-    // Pomodoro
-    public var focusMin = 25     // 1...99
-    public var shortMin = 5
-    public var longMin = 15
-    public var sessions = 4      // 1...9
     // Network. The cube never sends its passwords back, only whether they are set.
     public var ssid = ""
     public var bridge = ""
@@ -27,8 +22,6 @@ public struct CubeSettings: Equatable {
     public static let rotateRange = 0...255
     public static let pollRange = 2...60
     public static let soundRange = 0...3
-    public static let minutesRange = 1...99
-    public static let sessionsRange = 1...9
 
     /// Parses what the cube returns when the Settings characteristic is read. Unknown keys are ignored.
     public static func parse(_ data: Data) -> CubeSettings? {
@@ -42,10 +35,6 @@ public struct CubeSettings: Equatable {
         int("rt", rotateRange, &s.rotateSec)
         int("pi", pollRange, &s.pollSec)
         if let v = (o["sd"] as? NSNumber)?.intValue, soundRange.contains(v) { s.sound = v }
-        int("pf", minutesRange, &s.focusMin)
-        int("ps", minutesRange, &s.shortMin)
-        int("pl", minutesRange, &s.longMin)
-        int("pn", sessionsRange, &s.sessions)
         s.ssid = o["ssid"] as? String ?? ""
         s.bridge = o["bridge"] as? String ?? ""
         s.wifiPassSet = o["wifiPass"] as? Bool ?? false
@@ -58,8 +47,6 @@ public struct CubeSettings: Equatable {
         CubeSettings.backlightRange.contains(backlight) && CubeSettings.sleepRange.contains(sleepMin)
             && CubeSettings.rotateRange.contains(rotateSec) && CubeSettings.pollRange.contains(pollSec)
             && (sound.map { CubeSettings.soundRange.contains($0) } ?? true)
-            && CubeSettings.minutesRange.contains(focusMin) && CubeSettings.minutesRange.contains(shortMin)
-            && CubeSettings.minutesRange.contains(longMin) && CubeSettings.sessionsRange.contains(sessions)
     }
 
     /// The JSON to write to change `old` into `self`: only the keys that differ, so a stale window
@@ -72,10 +59,6 @@ public struct CubeSettings: Equatable {
         if rotateSec != old.rotateSec { o["rt"] = rotateSec }
         if pollSec != old.pollSec { o["pi"] = pollSec }
         if sound != old.sound, let sound { o["sd"] = sound }
-        if focusMin != old.focusMin { o["pf"] = focusMin }
-        if shortMin != old.shortMin { o["ps"] = shortMin }
-        if longMin != old.longMin { o["pl"] = longMin }
-        if sessions != old.sessions { o["pn"] = sessions }
         if ssid != old.ssid { o["ssid"] = ssid }
         if bridge != old.bridge { o["bridge"] = bridge }
         if let wifiPass { o["pass"] = wifiPass }
@@ -110,10 +93,6 @@ public struct CubeSettings: Equatable {
         keepEdit(\.rotateSec)
         keepEdit(\.pollSec)
         keepEdit(\.sound)
-        keepEdit(\.focusMin)
-        keepEdit(\.shortMin)
-        keepEdit(\.longMin)
-        keepEdit(\.sessions)
         keepEdit(\.ssid)
         keepEdit(\.bridge)
         return out  // wifiPassSet / otaPassSet always come from the cube

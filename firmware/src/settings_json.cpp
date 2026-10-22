@@ -35,7 +35,6 @@ bool readStr(JsonObject o, const char *key, std::string &out, bool &present) {
 size_t settingsToJson(char *buf, size_t cap) {
   const Settings &n = settings();
   const DeviceSettings &d = deviceSettings();
-  const PomoSettings &p = pomoSettings();
   JsonDocument doc;
   doc["v"] = 1;
   doc["bl"] = d.backlight;
@@ -43,10 +42,6 @@ size_t settingsToJson(char *buf, size_t cap) {
   doc["rt"] = d.rotateSec;
   doc["pi"] = d.pollSec;
   doc["sd"] = d.sound;
-  doc["pf"] = p.focusMin;
-  doc["ps"] = p.shortMin;
-  doc["pl"] = p.longMin;
-  doc["pn"] = p.sessions;
   doc["ssid"] = n.ssid;
   doc["bridge"] = n.bridge;
   doc["wifiPass"] = n.pass[0] != '\0';  // whether one is set, never the value
@@ -62,15 +57,10 @@ SettingsResult settingsApplyJson(const char *json) {
   JsonObject o = doc.as<JsonObject>();
 
   DeviceSettings d = deviceSettings();
-  PomoSettings p = pomoSettings();
   if (!readInt(o, "bl", DEV_MIN_BACKLIGHT, DEV_MAX_BACKLIGHT, d.backlight) ||
       !readInt(o, "sl", 0, DEV_MAX_SLEEP_MIN, d.sleepMin) || !readInt(o, "rt", 0, DEV_MAX_ROTATE_SEC, d.rotateSec) ||
       !readInt(o, "pi", DEV_MIN_POLL_SEC, DEV_MAX_POLL_SEC, d.pollSec) ||
-      !readInt(o, "sd", 0, DEV_MAX_SOUND, d.sound) ||
-      !readInt(o, "pf", POMO_MIN_MINUTES, POMO_MAX_MINUTES, p.focusMin) ||
-      !readInt(o, "ps", POMO_MIN_MINUTES, POMO_MAX_MINUTES, p.shortMin) ||
-      !readInt(o, "pl", POMO_MIN_MINUTES, POMO_MAX_MINUTES, p.longMin) ||
-      !readInt(o, "pn", POMO_MIN_SESSIONS, POMO_MAX_SESSIONS, p.sessions))
+      !readInt(o, "sd", 0, DEV_MAX_SOUND, d.sound))
     return SettingsResult::Invalid;
 
   Settings n = settings();
@@ -97,10 +87,6 @@ SettingsResult settingsApplyJson(const char *json) {
   bool saved = false;
   if (d != deviceSettings()) {
     if (!deviceSettingsSave(d)) return SettingsResult::Invalid;
-    saved = true;
-  }
-  if (p != pomoSettings()) {
-    if (!pomoSettingsSave(p)) return saved ? SettingsResult::Ok : SettingsResult::Invalid;
     saved = true;
   }
   const bool netChanged = ssid != n.ssid || pass != n.pass || bridge != n.bridge || ota != n.otaPass;

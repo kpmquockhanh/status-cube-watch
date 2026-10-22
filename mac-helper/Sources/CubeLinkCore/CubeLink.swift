@@ -9,8 +9,6 @@ import Foundation
 /// ready. The cube sends "send now" on subscribe and an ACK per payload.
 public final class CubeLink: NSObject, CBCentralManagerDelegate, CBPeripheralDelegate {
     public var onSendNow: (() -> Void)?
-    /// The cube reports a finished Pomodoro phase: (ended, next).
-    public var onPomodoroEnded: ((PomodoroPhase, PomodoroPhase) -> Void)?
     /// The cube asks for the Mac's output to be set: (level 0...100, muted).
     public var onVolumeRequest: ((UInt8, Bool) -> Void)?
     /// The cube asks for a media key to be pressed (play/pause, next, previous).
@@ -329,8 +327,6 @@ public final class CubeLink: NSObject, CBCentralManagerDelegate, CBPeripheralDel
             switch msg {
             case .sendNow:
                 onSendNow?()
-            case .pomodoroEnded(let ended, let next):
-                onPomodoroEnded?(ended, next)
             case .volumeRequest(let level, let muted):
                 onVolumeRequest?(level, muted)
             case .media(let key):

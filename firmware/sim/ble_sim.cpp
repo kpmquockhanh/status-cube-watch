@@ -76,10 +76,6 @@ void bleSettingsReply(uint8_t) {}
 
 void bleSettingsChanged() {}
 
-void bleNotifyPomodoro(uint8_t ended, uint8_t next) {
-  Serial.printf("[ble] (sim) pomodoro ended %u, next %u\n", (unsigned)ended, (unsigned)next);
-}
-
 bool bleTakeVolume(MacVolume &out) {
   static bool sent = false;
   if (sent || !bleBonded()) return false;

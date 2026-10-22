@@ -5,9 +5,8 @@
 // not for every payload, or the Mac's 5 s resend would keep it on forever. New
 // readings while awake count as activity, but they never wake a sleeping
 // screen. A touch wakes it and is reported as consumed so it does not also
-// change the card. `blocked` (Pomodoro running, alert, editor, pairing
-// code...) forces the screen on and restarts the timer. timeoutMs == 0
-// disables sleeping.
+// change the card. `blocked` (editor open, pairing code...) forces the screen
+// on and restarts the timer. timeoutMs == 0 disables sleeping.
 
 #include <stdint.h>
 

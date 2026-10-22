@@ -2,7 +2,7 @@
 
 This file provides guidance to Claude Code (claude.ai/code) when working with code in this repository.
 
-Scope: `firmware/`. The repo-root `CLAUDE.md` already describes each feature (payload contract, Pomodoro, editors, BLE, portal, auto-rotate, sleep, the three renderers). This file covers how the firmware tree is built, tested and split, so that a change reaches every file it has to.
+Scope: `firmware/`. The repo-root `CLAUDE.md` already describes each feature (payload contract, display panel, BLE, portal, auto-rotate, sleep, the three renderers). This file covers how the firmware tree is built, tested and split, so that a change reaches every file it has to.
 
 ## Commands
 
@@ -18,11 +18,11 @@ Run these from `sim/`:
 
 ```sh
 make test                                          # every host test; stops at the first failing binary
-make build/pomodoro_test && ./build/pomodoro_test  # one test
+make build/gesture_test && ./build/gesture_test    # one test
 ./build/cube-shot build/ring fixtures/ring.json    # render a saved payload (fixtures/: every ring level, the usage card)
 make bench                                         # frames, pixels sent, CPU clock and modelled mA per scenario, then per-screen compose cost
 ./build/cube-bench browse 20                       # one scenario at another host slowdown (default 40 = ESP32 at 240 MHz vs this host)
-make clean                                         # required after changing SCALE or POMO_FAST: the Makefile tracks headers, not flags
+make clean                                         # required after changing SCALE: the Makefile tracks headers, not flags
 ```
 
 Run tests from `sim/`, because `ble_frame_test` opens `fixtures/ble-frames.txt` relative to the working directory. `settings_json_test` needs ArduinoJson from `../.pio/libdeps`, so run `pio run` once first, or set `LIBDEPS=`. A test prints `<name>: N checks, M failed` and exits non-zero when anything failed.
@@ -31,7 +31,7 @@ Run tests from `sim/`, because `ble_frame_test` opens `fixtures/ble-frames.txt` 
 
 The sources fall into three kinds. This split is what makes host tests and the simulator possible, so keep new code in the right kind.
 
-- **Pure logic.** Header-only (`transport_policy.h`, `idle_sleep.h`, `readings_key.h`, `cpu_policy.h`, `touch_gate.h`, `ble_conn.h`, `orientation.h`, `ble_auth.h`, `ble_frame.h`, `age_label.h`, `touch_map.h`, `melody.h`, `deck_util.h`, `volume_frame.h`, `volume_slider.h`, `unlock_prompt.h`, `battery_util.h`, `portal_util.h`, `*_settings.h`) or a small `.cpp` (`pomodoro`, `gesture`, `pomo_editor`, `dev_editor`, `settings_json`). These files make no Arduino or hardware calls and never read `millis()`. The caller passes `now`, and elapsed time is computed by unsigned subtraction so a `millis()` wrap is harmless. Each one has a `sim/tests/<name>_test.cpp`.
+- **Pure logic.** Header-only (`transport_policy.h`, `idle_sleep.h`, `readings_key.h`, `cpu_policy.h`, `touch_gate.h`, `ble_conn.h`, `orientation.h`, `ble_auth.h`, `ble_frame.h`, `age_label.h`, `touch_map.h`, `melody.h`, `deck_util.h`, `volume_frame.h`, `volume_slider.h`, `unlock_prompt.h`, `battery_util.h`, `portal_util.h`, `*_settings.h`) or a small `.cpp` (`gesture`, `editor_layout`, `dev_editor`, `settings_json`). These files make no Arduino or hardware calls and never read `millis()`. The caller passes `now`, and elapsed time is computed by unsigned subtraction so a `millis()` wrap is harmless. Each one has a `sim/tests/<name>_test.cpp`.
 - **Hardware layers.** `net.cpp`, `net_ble.cpp`, `touch.cpp`, `imu.cpp`, `battery.cpp`, `buzzer.cpp`, `settings.cpp` (NVS), `portal.cpp`, `ota.cpp`. Each one implements a header (`net.h`, `ble.h`, `settings.h`, ...) that `sim/` implements again as a `*_sim.cpp` stand-in, and `sim/bench.cpp` once more for the bench. When you change one of these headers, update both. `net_sim.cpp` also exports the blocking `simFetch()`, which `ble_sim.cpp` uses for its payload.
 - **Shared app code.** `main.cpp`, `ui.cpp` and `payload.cpp` compile unchanged for both the board and the SDL simulator. They may only use what `sim/Arduino.h` provides: `millis`, `delay`, `Serial.print/println/printf`, `min/max/constrain`, `ESP.restart` and `setCpuFrequencyMhz`. `display.h` picks the panel with `#ifdef LGFX_SDL`.
 
@@ -44,7 +44,7 @@ PlatformIO compiles everything in `src/`, but the simulator compiles only the fi
 
 The firmware runs as one cooperative loop. Its one task of its own is the WiFi fetch in `net.cpp`: `netRequest()` starts a GET there and returns at once, and `netTake()` hands the result to the loop on a later pass. NimBLE runs its callbacks on its own task, and `bleTake()` / `bleTakeSettings()` hand those results to the loop. `netTake()`, `bleTake()` and `bleTakeSettings()` must all be called on every pass. Each pass runs these steps in order:
 
-1. Pomodoro tick and phase-end alert (with its tune), then `buzzerUpdate`
+1. `buzzerUpdate`
 2. Touch and gestures
 3. IMU
 4. Battery
@@ -66,7 +66,7 @@ Boot order matters:
 
 ## Settings and `config.h`
 
-`config.h` only holds compile-time defaults. At runtime, code reads `settings()`, `deviceSettings()` and `pomoSettings()`. These come from NVS, falling back per key to the defaults in `device_defaults.h` / `pomo_defaults.h`. When you add a `config.h` macro, give it an `#ifndef` fallback where it is read. Users keep their own gitignored `config.h`, and an older copy must still build.
+`config.h` only holds compile-time defaults. At runtime, code reads `settings()` and `deviceSettings()`. These come from NVS, falling back per key to `config.h` (via `device_defaults.h` for the latter). When you add a `config.h` macro, give it an `#ifndef` fallback where it is read. Users keep their own gitignored `config.h`, and an older copy must still build.
 
 Adding a persisted setting touches all of these:
 - the struct and its clamp in `*_settings.h`
