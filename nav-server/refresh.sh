@@ -1,26 +1,54 @@
 #!/usr/bin/env bash
 # Rebuild the routing graph and street tiles from a fresh Vietnam extract.
-# Live data is only replaced when every phase succeeded. Safe for cron.
+# Safe for cron. Live data is flipped atomically and rolled back if GraphHopper
+# does not come up healthy.
+#
+# Layout under /root/nav/data (mount this whole directory, e.g. at /data):
+#   graph -> releases/graph-<stamp>     symlink, relative, flipped with mv -T
+#   tiles -> releases/tiles-<stamp>     symlink, relative
+#   releases/                           real directories
+# GraphHopper must use graph.location=<mount>/graph and nginx must serve
+# <mount>/tiles; both resolve the symlinks inside the same mount.
 set -euo pipefail
 
 PBF_URL="${PBF_URL:-https://download.geofabrik.de/asia/vietnam-latest.osm.pbf}"
 NAV=/root/nav
 IMAGE=nav-graphhopper:11.1
-COMPOSE=/root/nav-server/docker-compose.yml
+COMPOSE="${COMPOSE:-/root/nav-server/docker-compose.yml}"
+HEALTH_PATH="${HEALTH_PATH:-/health}"   # tests override this to force a rollback
 WORK=$NAV/work
 LIVE=$NAV/data
+REL=$LIVE/releases
 
-mkdir -p "$WORK" "$LIVE"
-rm -rf "$WORK/graph" "$WORK/tiles" "$WORK/vietnam.osm.pbf.part" "$WORK/highways.osm.pbf"
+mkdir -p "$NAV" "$WORK" "$LIVE" "$REL"
+exec 9>"$NAV/refresh.lock"
+flock -n 9 || { echo "[refresh] another refresh is running (lock $NAV/refresh.lock)" >&2; exit 1; }
+
+# point <name> at releases/<target> atomically
+flip() { ln -sfn "releases/$2" "$LIVE/.$1.tmp" && mv -T "$LIVE/.$1.tmp" "$LIVE/$1"; }
+
+# --- recover from an interrupted earlier run / migrate the old layout ---------
+for n in graph tiles; do
+  if [ -d "$LIVE/$n" ] && [ ! -L "$LIVE/$n" ]; then
+    mv "$LIVE/$n" "$REL/$n-legacy"
+    flip "$n" "$n-legacy"
+  fi
+  if [ ! -e "$LIVE/$n" ]; then
+    last=$(ls -1 "$REL" 2>/dev/null | grep "^$n-" | sort | tail -1 || true)
+    if [ -n "$last" ]; then echo "[refresh] restoring $n -> $last"; flip "$n" "$last"; fi
+  fi
+done
 
 run() { docker run --rm -v "$NAV:$NAV" "$@"; }
+
+rm -rf "$WORK/graph" "$WORK/tiles" "$WORK/vietnam.osm.pbf.part" "$WORK/highways.osm.pbf"
 
 echo "[refresh] download $PBF_URL"
 curl -fL --retry 3 -o "$WORK/vietnam.osm.pbf.part" "$PBF_URL"
 mv "$WORK/vietnam.osm.pbf.part" "$WORK/vietnam.osm.pbf"
 
 echo "[refresh] graphhopper import"
-run -w /app "$IMAGE" java -Xmx5g \
+run --memory=4g -w /app "$IMAGE" java -Xmx3g \
   -Ddw.graphhopper.datareader.file="$WORK/vietnam.osm.pbf" \
   -Ddw.graphhopper.graph.location="$WORK/graph" \
   -jar graphhopper-web-11.1.jar import config.yml
@@ -33,28 +61,49 @@ run "$IMAGE" bash -euo pipefail -c "
 "
 [ -d "$WORK/graph" ] && [ -d "$WORK/tiles/15" ] || { echo "[refresh] build incomplete" >&2; exit 1; }
 
-echo "[refresh] swap live data"
-rm -rf "$LIVE/graph.old" "$LIVE/tiles.old"
-[ -e "$LIVE/graph" ] && mv "$LIVE/graph" "$LIVE/graph.old"
-[ -e "$LIVE/tiles" ] && mv "$LIVE/tiles" "$LIVE/tiles.old"
-mv "$WORK/graph" "$LIVE/graph"
-mv "$WORK/tiles" "$LIVE/tiles"
+stamp=$(date +%Y%m%d%H%M%S)
+prev_graph=$(readlink "$LIVE/graph" 2>/dev/null | sed 's|^releases/||' || true)
+prev_tiles=$(readlink "$LIVE/tiles" 2>/dev/null | sed 's|^releases/||' || true)
+
+echo "[refresh] swap live data ($stamp)"
+mv "$WORK/graph" "$REL/graph-$stamp"
+mv "$WORK/tiles" "$REL/tiles-$stamp"
 rm -f "$WORK/vietnam.osm.pbf" "$WORK/highways.osm.pbf"
+flip graph "graph-$stamp"
+flip tiles "tiles-$stamp"
+
+healthy() {
+  for _ in $(seq 1 60); do
+    if docker compose -f "$COMPOSE" exec -T graphhopper curl -fs "http://localhost:8989$HEALTH_PATH" >/dev/null 2>&1; then return 0; fi
+    sleep 5
+  done
+  return 1
+}
 
 if [ -f "$COMPOSE" ] && [ -n "$(docker compose -f "$COMPOSE" ps -aq graphhopper 2>/dev/null)" ]; then
   echo "[refresh] restart graphhopper"
   docker compose -f "$COMPOSE" restart graphhopper
-  ok=0
-  for _ in $(seq 1 60); do
-    if docker compose -f "$COMPOSE" exec -T graphhopper curl -fs http://localhost:8989/health >/dev/null 2>&1; then ok=1; break; fi
-    sleep 5
-  done
-  if [ "$ok" != 1 ]; then
-    echo "[refresh] graphhopper not healthy; old data kept in $LIVE/*.old" >&2
+  if ! healthy; then
+    echo "[refresh] graphhopper not healthy; rolling back" >&2
+    if [ -n "$prev_graph" ] && [ -n "$prev_tiles" ]; then
+      flip graph "$prev_graph"
+      flip tiles "$prev_tiles"
+      rm -rf "$REL/graph-$stamp" "$REL/tiles-$stamp"
+      docker compose -f "$COMPOSE" restart graphhopper || true
+      HEALTH_PATH=/health healthy && echo "[refresh] previous data restored and healthy" >&2 \
+        || echo "[refresh] previous data restored but still not healthy" >&2
+    else
+      echo "[refresh] no previous data to roll back to" >&2
+    fi
     exit 1
   fi
 else
   echo "[refresh] no graphhopper service yet; data installed only"
 fi
-rm -rf "$LIVE/graph.old" "$LIVE/tiles.old"
+
+# success: drop every release that is not live
+for n in graph tiles; do
+  cur=$(readlink "$LIVE/$n" | sed 's|^releases/||')
+  for d in "$REL/$n-"*; do [ "$(basename "$d")" = "$cur" ] || rm -rf "$d"; done
+done
 echo "[refresh] done"

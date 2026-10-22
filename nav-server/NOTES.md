@@ -7,3 +7,11 @@
 - Serving: `-Xmx2g` loads the graph; container RSS about 1.3 GB. `/route?profile=moto_vn` works
   (Saigon centre to Tan Binh, 219 ms cold).
 - Image CMD uses `-Xmx2g` and `graph.location=/data/graph`; mount `/root/nav/data` at `/data`.
+
+## Data layout (refresh.sh)
+`/root/nav/data/graph` and `/root/nav/data/tiles` are relative symlinks into `/root/nav/data/releases/`,
+flipped atomically with `mv -T`. Task 3 must mount the whole `/root/nav/data` directory (not the
+symlinks), e.g. `/root/nav/data:/data`, and use `/data/graph` and `/data/tiles`.
+Rollback: an unhealthy restart flips the links back and restarts. Import is capped at -Xmx3g / 4 GB.
+GraphHopper 11 has no MOTORLINK road class: `highway=motorway_link` is stored as MOTORWAY, so the
+MOTORWAY rule in moto_vn.json already bans ramps.
