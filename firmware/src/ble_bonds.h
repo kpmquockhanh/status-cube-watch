@@ -80,10 +80,28 @@ inline bool blePairWindowOpen(bool requestedAtBoot, uint32_t openedAt, uint32_t 
   return requestedAtBoot && now - openedAt < BLE_PAIR_WINDOW_MS;
 }
 
-// Advertise while there is room for the Mac and the phone; during the window,
-// for one link more, so a replacement can pair while the old device is still
-// connected (it is dropped once the new one's kind is known).
-inline bool bleShouldAdvertise(int links, bool pairingOpen) { return links < (pairingOpen ? 3 : 2); }
+// Whether to advertise. `links`: connections up (secured or not); `bonds`:
+// bonds stored; `securedLinks`: links that finished pairing or re-encryption
+// (each one a bonded device). During the window: while there is room for one
+// link more than the Mac and the phone, so a replacement can pair while the old
+// device is still connected (it is dropped once the new one's kind is known).
+// With no bond: while there is room, so the first device can come. Otherwise
+// only while a bonded device is not connected: a new device could not pair
+// anyway (bleAuthVerdict), so advertising would only invite it to try.
+inline bool bleShouldAdvertise(int links, int bonds, int securedLinks, bool pairingOpen) {
+  if (pairingOpen) return links < 3;
+  if (bonds == 0) return links < 2;
+  return links < 2 && securedLinks < bonds;
+}
+
+// Whether a passkey pairing may show its code (and take the screen): only when
+// bleAuthVerdict could accept it: the first device, one in the window, or a
+// bonded device pairing again (`knownPeer`: its resolved address is a stored
+// bond). Any other pairing is refused when it completes, so its code would
+// only cover the map.
+inline bool bleShowPasskey(int bondsBefore, bool knownPeer, bool pairingOpen) {
+  return bondsBefore == 0 || knownPeer || pairingOpen;
+}
 
 // A link must be secured (onAuthenticationComplete accepted it) this soon after
 // it comes up, or it is dropped: an unsecured central would hold one of the

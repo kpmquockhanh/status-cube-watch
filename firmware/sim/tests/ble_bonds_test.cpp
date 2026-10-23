@@ -109,14 +109,43 @@ void testPairWindow() {
   CHECK(blePairWindowOpen(true, 0xFFFFF000u, 0xFFFFF000u + 60000));  // millis() wrap
 }
 
-// Advertising goes on while there is room for the Mac and the phone, and during
-// the window for one more (the replacement pairs before the old one is dropped).
+// Advertising: with no bond while there is room; with bonds only while one of
+// them is not connected; during the window for one link more (the replacement
+// pairs before the old one is dropped).
 void testAdvertise() {
-  CHECK(bleShouldAdvertise(0, false));
-  CHECK(bleShouldAdvertise(1, false));
-  CHECK(!bleShouldAdvertise(2, false));
-  CHECK(bleShouldAdvertise(2, true));
-  CHECK(!bleShouldAdvertise(3, true));
+  // No bond: the first device may come; a stranger holding a link does not shut it out.
+  CHECK(bleShouldAdvertise(0, 0, 0, false));
+  CHECK(bleShouldAdvertise(1, 0, 0, false));
+  CHECK(!bleShouldAdvertise(2, 0, 0, false));
+  // A Mac bonded and connected, no phone ever paired: nobody else can pair, so quiet.
+  CHECK(!bleShouldAdvertise(1, 1, 1, false));
+  CHECK(bleShouldAdvertise(0, 1, 0, false));  // the Mac is away: advertise for it
+  // Mac and phone bonded.
+  CHECK(bleShouldAdvertise(0, 2, 0, false));
+  CHECK(bleShouldAdvertise(1, 2, 1, false));   // one of them is away
+  CHECK(!bleShouldAdvertise(2, 2, 2, false));  // both up: stop
+  CHECK(!bleShouldAdvertise(2, 2, 1, false));  // one up, one stranger pairing: no room
+  CHECK(bleShouldAdvertise(1, 2, 0, false));   // a link still securing itself
+  // The window: one more link, whatever the bonds.
+  CHECK(bleShouldAdvertise(2, 2, 2, true));
+  CHECK(bleShouldAdvertise(0, 0, 0, true));
+  CHECK(!bleShouldAdvertise(3, 2, 2, true));
+  // The window expires with both links up: advertising stops.
+  CHECK(!bleShouldAdvertise(2, 2, 2, false));
+}
+
+// A passkey is shown only for a pairing that can be accepted.
+void testShowPasskey() {
+  CHECK(bleShowPasskey(0, false, false));   // the first device
+  CHECK(!bleShowPasskey(1, false, false));  // a further device outside the window: refused, no code
+  CHECK(!bleShowPasskey(2, false, false));
+  CHECK(bleShowPasskey(2, false, true));    // in the window
+  CHECK(bleShowPasskey(1, false, true));
+  CHECK(bleShowPasskey(2, true, false));    // the bonded Mac pairing again (it forgot the cube)
+  // Each code shown matches a pairing the verdict can accept.
+  CHECK(bleAuthVerdict(true, true, true, true, 0, false) == BleAuthVerdict::Accept);
+  CHECK(bleAuthVerdict(true, true, true, false, 2, false) == BleAuthVerdict::Accept);
+  CHECK(bleAuthVerdict(true, true, true, true, 2, false) != BleAuthVerdict::Accept);
 }
 
 // A central that connects and never secures the link would hold one of the
@@ -146,6 +175,7 @@ int main() {
   testStoreOverflowVictim();
   testPairWindow();
   testAdvertise();
+  testShowPasskey();
   testUnsecuredLinkExpires();
   return checksDone("ble_bonds_test");
 }

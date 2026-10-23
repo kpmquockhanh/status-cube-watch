@@ -35,6 +35,10 @@ NimBLECharacteristic *g_control = nullptr;
 
 volatile BleState g_state = BleState::Off;
 volatile uint32_t g_passkey = 0;
+// The link whose code is on screen (0xFFFF none): only its own auth or
+// disconnect clears the code, never another link's.
+constexpr uint16_t NO_HANDLE = 0xFFFF;
+volatile uint16_t g_pairHandle = NO_HANDLE;
 volatile uint32_t g_lastGood = 0;
 volatile bool g_sendNow = false;
 
@@ -52,6 +56,7 @@ struct Link {
   bool kindDirty;  // learned on this link: the main loop stores it and evicts
   bool newBond;    // pairing on this link stored a bond that was not there before
   NimBLEAddress id;
+  NimBLEAddress peer;  // the peer's identity address at connect (resolved if it is bonded)
   int nBefore;  // bonds stored when the link came up, and which
   NimBLEAddress before[MAX_BONDS];
 };
@@ -151,6 +156,26 @@ Link *linkFor(uint16_t handle) {
   return nullptr;
 }
 
+// Links up, and links secured (bonded devices). Takes g_mux.
+void countLinks(int &links, int &secured) {
+  links = secured = 0;
+  portENTER_CRITICAL(&g_mux);
+  for (const Link &l : g_links) {
+    if (!l.used) continue;
+    links++;
+    if (l.secured) secured++;
+  }
+  portEXIT_CRITICAL(&g_mux);
+}
+
+// No code on screen: the state follows the links. NimBLE task or main loop.
+void settleState() {
+  if (g_passkey != 0) return;
+  int links, secured;
+  countLinks(links, secured);
+  g_state = links ? BleState::Connected : BleState::Advertising;
+}
+
 void requestParams(uint16_t handle, const BleConnParams &p) {
   NimBLEDevice::getServer()->updateConnParams(handle, p.minItvl, p.maxItvl, p.latency, p.timeout);
 }
@@ -165,12 +190,18 @@ void learnKind(const NimBLEConnInfo &info, BondKind kind) {
   portEXIT_CRITICAL(&g_mux);
   kindSet(l->id, kind);
   Serial.printf("[ble] link %u is the %s\n", (unsigned)l->handle, kindName(kind));
-  if (kind == BondKind::Phone) requestParams(l->handle, BLE_NAV_PARAMS);
+  // Asked for now, not at encryption, when the kind was still unknown (ble_conn.h).
+  requestParams(l->handle, kind == BondKind::Phone ? BLE_NAV_PARAMS : BLE_IDLE_PARAMS);
+}
+
+bool shouldAdvertise() {
+  int links, secured;
+  countLinks(links, secured);
+  return bleShouldAdvertise(links, NimBLEDevice::getNumBonds(), secured, pairingOpen());
 }
 
 void advertiseIfRoom() {
-  if (bleShouldAdvertise(NimBLEDevice::getServer()->getConnectedCount(), pairingOpen()))
-    NimBLEDevice::startAdvertising();
+  if (shouldAdvertise()) NimBLEDevice::startAdvertising();
 }
 
 void notifyControl(const uint8_t *data, size_t len) {
@@ -202,6 +233,7 @@ struct ServerCb : NimBLEServerCallbacks {
     fresh.handle = info.getConnHandle();
     fresh.connectAt = millis();
     fresh.kind = BondKind::Unknown;
+    fresh.peer = info.getIdAddress();
     const int n = NimBLEDevice::getNumBonds();
     for (int i = 0; i < n && i < MAX_BONDS; i++) fresh.before[fresh.nBefore++] = NimBLEDevice::getBondedAddress(i);
     fresh.used = true;
@@ -209,18 +241,18 @@ struct ServerCb : NimBLEServerCallbacks {
     *l = fresh;
     portEXIT_CRITICAL(&g_mux);
     if (g_state != BleState::Pairing) g_state = BleState::Connected;
-    const int links = server->getConnectedCount();
+    int links, secured;
+    countLinks(links, secured);
     Serial.printf("[ble] connect %u (links %d, bonds %d, interval %u ms)\n", (unsigned)fresh.handle, links, n,
                   (unsigned)(info.getConnInterval() * 5 / 4));
-    // A connection stops advertising; keep it going while the other device may
-    // still come (bleShouldAdvertise).
+    // A connection stops advertising; keep it going while a bonded device is
+    // still away (bleShouldAdvertise).
     advertiseIfRoom();
   }
 
   void onDisconnect(NimBLEServer *server, NimBLEConnInfo &info, int reason) override {
     Link *l = linkFor(info.getConnHandle());
     const BondKind kind = l ? l->kind : BondKind::Unknown;
-    const bool wasSecured = l && l->secured;
     if (l) {
       const bool drop = bleDropBondOnDisconnect(l->secured, l->newBond, l->kind);
       portENTER_CRITICAL(&g_mux);
@@ -230,7 +262,10 @@ struct ServerCb : NimBLEServerCallbacks {
       if (drop) Serial.printf("[ble] new bond %s left before saying what it is: deleting it\n", l->id.toString().c_str());
     }
     Serial.printf("[ble] disconnect %u (%s) %d\n", (unsigned)info.getConnHandle(), kindName(kind), reason);
-    if (!wasSecured) g_passkey = 0;  // the link that was pairing
+    if (info.getConnHandle() == g_pairHandle) {  // the link whose code was on screen
+      g_passkey = 0;
+      g_pairHandle = NO_HANDLE;
+    }
     if (kind == BondKind::Mac) {
       g_sendNow = false;
       g_asm.clear();  // a restarted helper may reuse a seq
@@ -241,26 +276,49 @@ struct ServerCb : NimBLEServerCallbacks {
     } else if (kind == BondKind::Phone) {
       g_navAsm.clear();
     }
-    const int links = server->getConnectedCount();
-    if (g_passkey == 0) g_state = links ? BleState::Connected : BleState::Advertising;
+    settleState();
     // Needed: NimBLE 2.x does not re-advertise by itself (advertiseOnDisconnect
     // defaults to off).
     advertiseIfRoom();
   }
 
-  // Display-only IO capability: the stack asks us for the code to show.
+  // Display-only IO capability: the stack asks us for the code to show. It does
+  // not say for which link: that is the newest one still pairing. The code goes
+  // on screen only if the pairing could be accepted (bleShowPasskey); otherwise
+  // it is refused when it completes, and a code over the map would only get in
+  // the way.
   uint32_t onPassKeyDisplay() override {
-    g_passkey = 100000 + esp_random() % 900000;  // never 0: main.cpp reads 0 as "no code"
+    const uint32_t code = 100000 + esp_random() % 900000;  // never 0: main.cpp reads 0 as "no code"
+    const Link *pairing = nullptr;
+    for (const Link &l : g_links)
+      if (l.used && !l.secured && !l.dropping && (!pairing || (int32_t)(l.connectAt - pairing->connectAt) >= 0))
+        pairing = &l;
+    bool known = false;
+    int before = 0;
+    if (pairing) {
+      before = pairing->nBefore;
+      for (int i = 0; i < pairing->nBefore; i++)
+        if (pairing->before[i] == pairing->peer) known = true;
+    }
+    if (!pairing || !bleShowPasskey(before, known, pairingOpen())) {
+      Serial.printf("[ble] pairing on link %u would be refused: no code shown\n",
+                    pairing ? (unsigned)pairing->handle : 0xFFFFu);
+      return code;
+    }
+    g_pairHandle = pairing->handle;
+    g_passkey = code;
     g_state = BleState::Pairing;
-    Serial.printf("[ble] pairing passkey %06u\n", (unsigned)g_passkey);
-    return g_passkey;
+    Serial.printf("[ble] pairing passkey %06u (link %u)\n", (unsigned)code, (unsigned)pairing->handle);
+    return code;
   }
 
   void onConfirmPassKey(NimBLEConnInfo &info, uint32_t) override { NimBLEDevice::injectConfirmPasskey(info, true); }
 
   void onAuthenticationComplete(NimBLEConnInfo &info) override {
-    g_passkey = 0;
-    g_state = BleState::Connected;
+    if (info.getConnHandle() == g_pairHandle) {  // another link's re-encryption leaves the code alone
+      g_passkey = 0;
+      g_pairHandle = NO_HANDLE;
+    }
     Link *l = linkFor(info.getConnHandle());
     const NimBLEAddress id = info.getIdAddress();
     bool known = false;
@@ -285,11 +343,16 @@ struct ServerCb : NimBLEServerCallbacks {
       // One device per window: it closes once a new bond beside others is in.
       if (newBond && before > 0) g_pairRequested = false;
       Serial.printf("[ble] encrypted %u: %s%s\n", (unsigned)l->handle, kindName(kind), newBond ? " (new bond)" : "");
+      settleState();
       // The phone streams frames; the Mac's link mostly idles (ble_conn.h). The
-      // peer answers in onConnParamsUpdate, or keeps its own if it declines.
-      requestParams(l->handle, kind == BondKind::Phone ? BLE_NAV_PARAMS : BLE_IDLE_PARAMS);
+      // peer answers in onConnParamsUpdate, or keeps its own if it declines. A
+      // new device's kind is not known yet: learnKind asks once its first write says.
+      if (kind != BondKind::Unknown) requestParams(l->handle, kind == BondKind::Phone ? BLE_NAV_PARAMS : BLE_IDLE_PARAMS);
+      // A bonded device is back: advertising stops if nobody else is away.
+      if (!shouldAdvertise()) NimBLEDevice::stopAdvertising();
       return;
     }
+    settleState();
     Serial.printf("[ble] link refused (encrypted %d, passkey %d, bonded %d, new %d, bonds %d, window %d)\n",
                   info.isEncrypted(), info.isAuthenticated(), info.isBonded(), newBond, before, open);
     if (v == BleAuthVerdict::RefuseDropBond) NimBLEDevice::deleteBond(id);
@@ -676,6 +739,19 @@ bool bleTake(Payload &out) {
   }
   storeLearnedKinds();
   dropUnidentifiedBonds();
+  // Advertising follows bleShouldAdvertise also when nothing connects or drops:
+  // the pairing window expiring with both links up stops it.
+  static uint32_t advCheckAt = 0;
+  if (t - advCheckAt >= 1000) {
+    advCheckAt = t;
+    NimBLEAdvertising *adv = NimBLEDevice::getAdvertising();
+    const bool want = shouldAdvertise();
+    if (want != adv->isAdvertising()) {
+      if (want) NimBLEDevice::startAdvertising();
+      else NimBLEDevice::stopAdvertising();
+      Serial.printf("[ble] advertising %s\n", want ? "on" : "off");
+    }
+  }
   if (g_sendNow) {
     g_sendNow = false;
     const uint8_t m = BLE_CTRL_SEND_NOW;

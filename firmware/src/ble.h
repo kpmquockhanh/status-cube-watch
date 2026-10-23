@@ -15,7 +15,7 @@
 enum class BleState : uint8_t {
   Off,
   Advertising,  // no link up
-  Pairing,      // a device is pairing: blePasskey() is the code to type
+  Pairing,      // a device that may be accepted is pairing: blePasskey() is the code to type
   Connected,    // at least one link up
 };
 
