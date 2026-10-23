@@ -3,12 +3,25 @@ graphhopper:
   # overridden with -Ddw.graphhopper.graph.location=...
   graph.location: graph-cache
   custom_models.directory: /app
-  graph.encoded_values: car_access, track_type, road_access, road_class, car_average_speed, surface, max_speed, ferry_speed
+  graph.encoded_values: car_access, track_type, road_access, road_class, car_average_speed, surface, max_speed, ferry_speed, crossing, orientation
   profiles:
     - name: moto_vn
-      custom_model_files: [moto_vn.json]
+      turn_costs: {vehicle_types: [motorcycle, motor_vehicle], u_turn_costs: 60}
+      custom_model_files: [moto_base.json, style_fast.json]
+    - name: moto_calm
+      turn_costs: {vehicle_types: [motorcycle, motor_vehicle], u_turn_costs: 60}
+      custom_model_files: [moto_base.json, style_calm.json]
+    - name: moto_calm_rush
+      turn_costs: {vehicle_types: [motorcycle, motor_vehicle], u_turn_costs: 60}
+      custom_model_files: [moto_base.json, style_calm_rush.json]
+    - name: moto_turns
+      turn_costs: {vehicle_types: [motorcycle, motor_vehicle], u_turn_costs: 60}
+      custom_model_files: [moto_base.json, style_turns.json]
   profiles_ch:
     - profile: moto_vn
+    - profile: moto_calm
+    - profile: moto_calm_rush
+    - profile: moto_turns
   import.osm.ignored_highways: footway,cycleway,path,pedestrian,steps,bridleway
   graph.dataaccess.default_type: RAM_STORE
 

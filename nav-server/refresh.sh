@@ -42,7 +42,7 @@ done
 
 run() { docker run --rm -v "$NAV:$NAV" "$@"; }
 
-rm -rf "$WORK/graph" "$WORK/tiles" "$WORK/vietnam.osm.pbf.part" "$WORK/highways.osm.pbf" "$WORK/import.osm.pbf"
+rm -rf "$WORK/graph" "$WORK/tiles" "$WORK/vietnam.osm.pbf.part" "$WORK/highways.osm.pbf" "$WORK/import.osm.pbf" "$WORK/import-signals.osm.pbf"
 
 echo "[refresh] download $PBF_URL"
 curl -fL --retry 3 --speed-limit 10000 --speed-time 120 --max-time 3600 -o "$WORK/vietnam.osm.pbf.part" "$PBF_URL"
@@ -51,6 +51,19 @@ mv "$WORK/vietnam.osm.pbf.part" "$WORK/vietnam.osm.pbf"
 echo "[refresh] expressway pre-filter"
 # Drop motorroad=yes / motorcycle=no ways (e.g. trunk expressways) from the routing input only; tiles keep them.
 run --memory=4g "$IMAGE" osmium tags-filter -i --overwrite -o "$WORK/import.osm.pbf" "$WORK/vietnam.osm.pbf" w/motorroad=yes w/motorcycle=no
+
+echo "[refresh] mark traffic signals"
+# GraphHopper's crossing value is only set from crossing:signals / crossing=traffic_signals, not from
+# highway=traffic_signals (how most junction lights here are mapped), so add crossing:signals=yes to
+# those nodes (version bumped so apply-changes takes the tagged copy). See NOTES.md "Route styles".
+run --memory=4g "$IMAGE" bash -euo pipefail -c "
+  osmium tags-filter -R --overwrite -f opl -o '$WORK/signals.opl' '$WORK/import.osm.pbf' n/highway=traffic_signals
+  awk '!/[ ,]Tcrossing:signals=|,crossing:signals=/ { \$2 = \"v\" (substr(\$2, 2) + 1); for (i = 3; i <= NF; i++) if (substr(\$i, 1, 1) == \"T\") \$i = \$i \",crossing:signals=yes\"; print }' '$WORK/signals.opl' > '$WORK/signals-tagged.opl'
+  osmium cat --overwrite -F opl '$WORK/signals-tagged.opl' -o '$WORK/signals.osc'
+  osmium apply-changes --overwrite '$WORK/import.osm.pbf' '$WORK/signals.osc' -o '$WORK/import-signals.osm.pbf'
+  mv '$WORK/import-signals.osm.pbf' '$WORK/import.osm.pbf'
+  rm -f '$WORK/signals.opl' '$WORK/signals-tagged.opl' '$WORK/signals.osc'
+"
 
 echo "[refresh] graphhopper import"
 run --memory=4g -w /app "$IMAGE" java -Xmx3g \

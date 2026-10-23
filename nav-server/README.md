@@ -4,7 +4,7 @@ Routing + street tiles for the motorbike nav app, on the `contabo` host, served 
 `https://nav.devxdev.site` (Cloudflare proxied). Everything runs from this `docker-compose.yml`; nothing else is on the host.
 
 ## What runs where
-- `graphhopper` (image `nav-graphhopper:11.1`, `-Xmx3g`, no published ports). Data: `/root/nav/data` mounted at `/data`
+- `graphhopper` (image `nav-graphhopper:11.1`, `-Xmx4500m` in 5500m, no published ports). Data: `/root/nav/data` mounted at `/data`
   (graph is a symlink flipped by `refresh.sh`, so the whole directory is mounted; rw because GraphHopper writes `gh.lock`).
 - `nginx` (ports 80/443), mounts, directories except one static file:
   `nginx/include/00-nav-include.conf` -> `conf.d/default.conf` (static, `include /etc/nginx/nav/*.conf;`, replaces the image's default server),

@@ -1,0 +1,7 @@
+{
+  "distance_influence": 40,
+  "turn_penalty": [
+    { "if": "change_angle >= 25 && change_angle <= 180", "add": "45" },
+    { "else_if": "change_angle <= -25 && change_angle >= -180", "add": "60" }
+  ]
+}

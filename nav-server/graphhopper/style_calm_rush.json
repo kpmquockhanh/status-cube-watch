@@ -1,0 +1,12 @@
+{
+  "distance_influence": 50,
+  "priority": [
+    { "if": "road_class == PRIMARY || road_class == TRUNK", "multiply_by": "0.2" },
+    { "if": "road_class == RESIDENTIAL || road_class == SERVICE || road_class == LIVING_STREET || road_class == UNCLASSIFIED", "multiply_by": "0.6" }
+  ],
+  "turn_penalty": [
+    { "if": "crossing == TRAFFIC_SIGNALS && prev_crossing != TRAFFIC_SIGNALS", "add": "80" },
+    { "if": "change_angle >= 25 && change_angle <= 180", "add": "8" },
+    { "else_if": "change_angle <= -25 && change_angle >= -180", "add": "15" }
+  ]
+}
