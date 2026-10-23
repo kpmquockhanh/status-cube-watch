@@ -116,7 +116,7 @@ TESTS := build/portal_util_test build/gesture_test build/deck_test \
          build/ble_auth_test build/age_label_test build/cpu_policy_test build/readings_key_test \
          build/ble_conn_test build/touch_gate_test build/melody_test \
          build/volume_frame_test build/volume_slider_test build/unlock_prompt_test \
-         build/nav_frame_test
+         build/nav_frame_test build/nav_session_test
 
 build/gesture_test: ../src/gesture.cpp
 build/editor_layout_test: ../src/editor_layout.cpp
