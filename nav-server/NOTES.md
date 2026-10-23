@@ -36,11 +36,16 @@ MOTORWAY rule in moto_vn.json already bans ramps.
   (two lights with no unlit edge between them count once: an undercount, acceptable).
 - App contract: signals detail key `crossing`, light value `traffic_signals`.
 
-## Four route profiles (measured locally in Docker, 2026-10-23; not yet on contabo)
+## Four route profiles (measured locally in Docker, then on contabo, 2026-10-23)
 - Import of the four turn-cost CH profiles (`-Xmx3g` in 4 GB): 4078 s, heap peak about 2.9 GB of 3 GB
   (tight), graph 1.6 GB on disk.
 - Serving the four: `-Xmx3g` dies with `OutOfMemoryError` while loading; `-Xmx4500m` in a 5500m
   container works, RSS about 2.1 GB. Compose and the image CMD use that.
+- On contabo (first refresh with the four, 2026-10-23): 2 h 24 min end to end; the import alone 132 min
+  (CH about 30–35 min per profile), heap near its 3 GB cap, no OOM; tiles 6 min. Serving RSS about 2.5 GB.
+  The live `styles-check` gives the same numbers as local, only the two accepted misses below fail.
+  Rider's commute (`trips.json` `commute`): Fastest 4.9 min / 27% main roads, Calm in rush hour
+  5.3 min / 11%, one light fewer.
 - Lights: OSM puts most signals on approach nodes in the middle of an edge, so a rule needing
   `prev_crossing == TRAFFIC_SIGNALS && crossing == TRAFFIC_SIGNALS` rarely fires. The styles add the
   penalty on entering a lit edge (`crossing == TRAFFIC_SIGNALS && prev_crossing != TRAFFIC_SIGNALS`).
