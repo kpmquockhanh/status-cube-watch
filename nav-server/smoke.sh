@@ -25,7 +25,7 @@ route() { # name lon1 lat1 lon2 lat2
   node -e '
     const p=JSON.parse(require("fs").readFileSync(process.argv[1],"utf8")).paths[0];
     if(!(p.instructions.length>1)) { console.error("too few instructions"); process.exit(1); }
-    if(p.details.road_class.some(d=>d[2]==="MOTORWAY")) { console.error("MOTORWAY in route"); process.exit(1); }
+    if(p.details.road_class.some(d=>String(d[2]).toLowerCase()==="motorway")) { console.error("MOTORWAY in route"); process.exit(1); }
   ' "$out" || { rm -f "$out"; fail "$1 route content"; }
   [ -n "${SAVE:-}" ] && [ "$1" = hcmc ] && cp "$out" "$SAVE"
   rm -f "$out"
