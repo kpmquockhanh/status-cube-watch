@@ -63,7 +63,7 @@ Boot order matters:
 - `settingsLoad()` runs before anything reads settings.
 - `touch.begin()` starts the shared I2C bus, so `imuBegin()` comes after it.
 - `bleBegin()` runs before any call to `bleBonded()`.
-- WiFi is joined at boot only when no Mac is bonded.
+- WiFi is joined at boot only when neither a Mac nor an iPhone is bonded, and a failed join opens the portal only with no bond at all (`bootWifiPlan` in `transport_policy.h`). Otherwise the transport policy brings WiFi up from the loop, never while a ride runs unless `WIFI_ALWAYS_ON`.
 
 ## Settings and `config.h`
 
