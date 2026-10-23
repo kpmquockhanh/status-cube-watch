@@ -33,13 +33,15 @@ colours anywhere on screen.
 ## How it fits together
 
 ```
-~/.claude/projects/*.jsonl  ─┐
-                             ├─→  bridge (Node)  ──HTTP──→  ESP32-S3
-Anthropic Usage & Cost API  ─┘     aggregates,              draws cards
-                                   formats strings
+Claude Code login (OAuth)   ─┐                       ┌─HTTP (WiFi)──────────────→┐
+~/.claude/projects/*.jsonl  ─┼─→  bridge (Node)  ────┤                           ├─→ ESP32-S3
+Anthropic Usage & Cost API  ─┤     aggregates,       └─→ ClaudeCubeLink.app ─BLE─→┘   draws cards
+Gmail (IMAP, optional)      ─┘     formats strings       (Mac menu bar)
 ```
 
-The device never talks to Anthropic. A host-side bridge does the aggregation
+The cube takes the same payload either way: it polls the bridge over WiFi, or
+the Mac helper app pushes it over Bluetooth (preferred; then the cube needs no
+WiFi at all). The device never talks to Anthropic. A host-side bridge does the aggregation
 and serves one small, pre-formatted JSON document over the LAN. That keeps
 credentials off the microcontroller, keeps TLS and pagination off the
 microcontroller, and — most usefully — means **you redesign the dashboard by
@@ -47,8 +49,10 @@ editing `bridge/cards.mjs` and reloading, with no reflash.**
 
 ## The gauges
 
-The whole deck is two cards, because the only numbers that change what you do
-next are the two rate-limit windows.
+The bridge sends one card, because the only numbers that change what you do
+next are the two rate-limit windows. The cube adds its own Volume card after it
+while a Mac is paired. Until the first payload arrives, a "No data yet" card
+stands in for the bridge's.
 
 Both come from the same place Claude Code's own status line gets them:
 `GET https://api.anthropic.com/api/oauth/usage`, which returns each window's
@@ -235,13 +239,18 @@ working directory (`swift run`). Node: `CUBE_NODE`, the recorded path, the Homeb
 The app talks to the bridge on `127.0.0.1`; a bridge whose `host` is pinned to a LAN address
 listens on `127.0.0.1` as well, so any `host` works.
 
-**Menu bar.** The item shows the 5-hour percentage. **Cube settings…** edits what the setup portal
+**Menu bar.** The item shows the 5-hour percentage, tinted amber at 60% and red at 85%; the dropdown
+repeats the cards and shows whether the bridge and the cube are up. **Send now** pushes the payload
+at once, **Restart bridge** restarts the bridge the app runs, and **Show log** opens the log.
+**Bridge settings…** edits the bridge's own settings (above), and **Unlock Mac with cube…** is
+described [below](#unlocking-the-mac-from-the-cube).
+**Cube settings…** edits what the setup portal
 can; changing the WiFi network with the password left blank asks first, because the cube then joins
 it as an open network and forgets the stored password. **Forget cube** drops the stored cube and
 scans again, for when you replace it (also remove the old "Claude Cube" in System Settings >
 Bluetooth). **Quit** also stops the bridge the app started.
 For verbose diagnostics (BLE state changes, frames and ACKs, bridge health checks and child exits,
-HTTP timings, push decisions) set `CUBE_TRACE=1` or pass `--trace`; lines tagged `[trace:...]`
+HTTP timings, push decisions) set `CUBE_TRACE=1`, pass `--trace`, or tick **Verbose trace** in the menu (until the app quits); lines tagged `[trace:...]`
 go to stderr, i.e. `./install.sh logs`.
 
 While a Mac is paired and data arrives over Bluetooth (a payload every 5 s) the cube turns WiFi off
@@ -253,15 +262,17 @@ cards stay on screen and the freshness counter keeps counting; the setup portal 
 itself unless the cube has no paired Mac.
 
 **Pairing again.** Hold the screen at boot, join the cube's `claude-cube-XXXX` network, press
-**Forget paired Mac**, then also remove "Claude Cube" in System Settings > Bluetooth. If the cube's
-flash was erased the Mac keeps the old bond and the log says so (`./install.sh logs`).
+**Forget Mac** (or **Forget iPhone**), then also remove "Claude Cube" in the device's Bluetooth
+settings. If the cube's flash was erased the Mac keeps the old bond and the log says so
+(`./install.sh logs`). The cube keeps one Mac and one iPhone; see
+[Motorbike navigation](#motorbike-navigation-iphone) for pairing the phone.
 
 The protocol is in `docs/ble-protocol.md`. The manual hardware checklist (nothing in it has been run
 on a real cube yet) is `docs/ble-acceptance.md`.
 
 ### Changing WiFi without reflashing (setup portal)
 
-The cube shows a setup screen when it cannot join the stored network within ~20 s and has no paired Mac (a cube with no WiFi and no Mac shows "Waiting for a Mac" instead, see Pairing over Bluetooth), or when you touch the screen while the boot screen says "HOLD SCREEN FOR SETUP" (the first 3 s after power-up) and keep holding for 5 s. Join the open `claude-cube-XXXX` network (scan the QR on the screen); the setup page opens by itself, or browse to `192.168.71.1`. Enter the WiFi name and password, the bridge URL and, optionally, an OTA password. A WiFi password must be 8 to 63 characters (or empty for an open network). A blank password keeps the saved one unless you change the network; a blank OTA password keeps the saved one too, and **Remove the OTA password** clears it. While nobody is on the setup network the cube keeps trying the stored network (a 10 s attempt every 30 s). Once it joins, the screen also shows the cube's address on that network, where the same page works from any computer on your LAN. If the setup screen came up because WiFi was down (not because you held the screen), the cube goes back to normal by itself the moment the stored network answers, so a router that was slow to come back after a power cut does not strand it. The setup network is open by design: while it is up (setup screen showing), anyone in radio range, and once it has joined, anyone on your LAN, can change the cube's settings, including the OTA password. (The page refuses requests that do not name the cube by address or that do not come from the form it served, so another web page cannot submit it for you.) Only reconfigure when you are at the cube, and set an OTA password. The page also has a **Forget paired Mac** button.
+The cube shows a setup screen when it cannot join the stored network within ~20 s and has no paired Mac (a cube with no WiFi and no Mac shows "Waiting for a Mac" instead, see Pairing over Bluetooth), or when you touch the screen while the boot screen says "HOLD SCREEN FOR SETUP" (the first 3 s after power-up) and keep holding for 5 s. Join the open `claude-cube-XXXX` network (scan the QR on the screen); the setup page opens by itself, or browse to `192.168.71.1`. Enter the WiFi name and password, the bridge URL and, optionally, an OTA password. A WiFi password must be 8 to 63 characters (or empty for an open network). A blank password keeps the saved one unless you change the network; a blank OTA password keeps the saved one too, and **Remove the OTA password** clears it. While nobody is on the setup network the cube keeps trying the stored network (a 10 s attempt every 30 s). Once it joins, the screen also shows the cube's address on that network, where the same page works from any computer on your LAN. If the setup screen came up because WiFi was down (not because you held the screen), the cube goes back to normal by itself the moment the stored network answers, so a router that was slow to come back after a power cut does not strand it. The setup network is open by design: while it is up (setup screen showing), anyone in radio range, and once it has joined, anyone on your LAN, can change the cube's settings, including the OTA password. (The page refuses requests that do not name the cube by address or that do not come from the form it served, so another web page cannot submit it for you.) Only reconfigure when you are at the cube, and set an OTA password. The page also has **Pair new device**, **Forget Mac**, **Forget iPhone** and, when a pairing was left half-done, **Forget unknown devices**.
 
 ### Updating over WiFi (OTA)
 
@@ -269,26 +280,81 @@ After the first USB flash the cube is reachable as `claude-cube.local`. In `firm
 
 ### Volume card
 
-While a Mac is paired, the deck has a Volume card just before the Pomodoro: the output's name and its volume as a large number on the left, a slim bar on the right that fills from the bottom. **Drag** up or down anywhere on the card to raise or lower the volume by how far your finger moves; touching or tapping never changes it. **Tap the number** to mute or unmute (any volume change also unmutes). The row of buttons at the bottom is **previous**, **play/pause** and **next**: they act on whichever app is playing (as Control Center's buttons do; no permission needed), and the middle button shows ▶ while paused and ❙❙ while playing. Left and right swipes still change card; swipe down does not open the display panel on this card. Changes made on the Mac (keyboard, menu bar, switching to AirPods) show on the cube within about a third of a second. An output whose volume the Mac cannot set (HDMI, some USB devices) shows `FIXED`, and only mute works there; with the Mac's app not connected the card shows `NO MAC`. It needs the Mac app and firmware from the same release: an older app leaves the card on `NO MAC`, and an older cube has no Volume card. After a firmware update the cube tells the paired Mac its services changed (Service Changed, sent once per new firmware revision), and the Mac app rediscovers them on the next connection. If the card still stays on `NO MAC` while the top bar says `BLE`, remove the cube in System Settings > Bluetooth and pair again (macOS kept the old services).
+While a Mac is paired, the deck ends with a Volume card: the output's name and its volume as a large number on the left, a slim bar on the right that fills from the bottom. **Drag** up or down anywhere on the card to raise or lower the volume by how far your finger moves; touching or tapping never changes it. **Tap the number** to mute or unmute (any volume change also unmutes). The row of buttons at the bottom is **previous**, **play/pause** and **next**: they act on whichever app is playing (as Control Center's buttons do; no permission needed), and the middle button shows ▶ while paused and ❙❙ while playing. Left and right swipes still change card; swipe down does not open the display panel on this card. Changes made on the Mac (keyboard, menu bar, switching to AirPods) show on the cube within about a third of a second. An output whose volume the Mac cannot set (HDMI, some USB devices) shows `FIXED`, and only mute works there; with the Mac's app not connected the card shows `NO MAC`. It needs the Mac app and firmware from the same release: an older app leaves the card on `NO MAC`, and an older cube has no Volume card. After a firmware update the cube tells the paired Mac its services changed (Service Changed, sent once per new firmware revision), and the Mac app rediscovers them on the next connection. If the card still stays on `NO MAC` while the top bar says `BLE`, remove the cube in System Settings > Bluetooth and pair again (macOS kept the old services).
 
 ### Unlocking the Mac from the cube
 
-Turn on **Unlock Mac with cube…** in the menu. It asks for your login password once, checks it, and keeps it in the Mac's Keychain; macOS also asks you to allow Claude Cube Link under Privacy & Security > Accessibility, which it needs to type. From then on, when the Mac locks, the cube shows **Tap to unlock**. Tap it, and the Mac wakes the display and types the password into the lock screen. The cube only asks; the password never leaves the Mac. A swipe puts the prompt away to show the cards, and it comes back after 30 s without a touch. A running Pomodoro shows its clock under the prompt.
+Turn on **Unlock Mac with cube…** in the menu. It asks for your login password once, checks it, and keeps it in the Mac's Keychain; macOS also asks you to allow Claude Cube Link under Privacy & Security > Accessibility, which it needs to type. From then on, when the Mac locks, the cube shows **Tap to unlock**. Tap it, and the Mac wakes the display and types the password into the lock screen. The cube only asks; the password never leaves the Mac. A swipe puts the prompt away to show the cards, and it comes back after 30 s without a touch.
 
 It works on a locked session only. After a restart, the FileVault login comes before the app runs, so type the password there as usual. Anyone holding your paired cube can unlock the Mac while it is in Bluetooth range, so leave this off if the cube sits where others can reach it. `build-app.sh` signs with your Apple Development certificate when the keychain has one (a free Apple ID in Xcode > Settings > Accounts creates it), so macOS keeps the Accessibility permission and Keychain access across rebuilds. Without one the app is signed ad-hoc, and macOS forgets both after every rebuild; until you allow them again, the log says why a tap did nothing. Turning the item off deletes the stored password.
 
-### Pomodoro card
+### Motorbike navigation (iPhone)
 
-The last card in the deck is a Pomodoro timer that runs on the cube itself (so it works with the bridge down). **Double-tap** the screen to start, pause or resume (it acts a third of a second after the second tap, once it is clear no third is coming); **triple-tap** to reset. It runs 25 min focus, 5 min break, and a 15 min break after four focus sessions, each phase started by you. When a phase ends the cube jumps to this card and pulses the ring and backlight for about two seconds and plays a short tune (rising for a break, ending high for back to work); the next phase waits for your double tap. To change the lengths without reflashing, **swipe up** on the Pomodoro card while the timer is idle. A settings screen opens with a `-` and `+` for FOCUS (steps of 5 min), SHORT BREAK (1 min), LONG BREAK (5 min) and SESSIONS (1). RESET returns to the defaults; DONE (or a swipe down) saves them, and they survive power cycles. A running or paused phase is never resized: new lengths apply from the next one you start. Lengths changed from the Mac (**Cube settings…**) work the same way, and arrive even mid-set. The defaults are `POMO_FOCUS_MIN`, `POMO_BREAK_MIN`, `POMO_LONG_MIN` and `POMO_SESSIONS` in `config.h`.
+Mounted upright on the handlebar, the cube can show a heading-up map while you ride: your route as a
+thick blue line, the streets around it in grey, you as a white arrow, the next turn and its distance
+on top, and the street you turn onto with the time left at the bottom (Vietnamese accents kept). An
+iPhone app, `ios-nav/`, does all the work and streams ready-to-draw frames to the cube over
+Bluetooth; routes are motorbike routes for Vietnam (no expressways) from your own GraphHopper server,
+`nav-server/`. The Mac is not involved: the cube keeps one Mac and one iPhone paired at the same
+time, and the Mac's cards come back when the ride ends.
+
+**Set up once.**
+1. Server: `nav-server/README.md` (deploy, the key, the monthly map refresh).
+2. Cube: flash this firmware (fw_rev 8 or later).
+3. Phone: build and install the app from Xcode as `ios-nav/README.md` says (free Apple ID: rebuild
+   once a week), then enter the server URL and key in the app's Settings.
+4. Pair the phone. With a Mac already paired the cube refuses new devices, so first hold the
+   screen at boot, open the setup page and press **Pair new device**: the cube restarts with pairing
+   open for 2 minutes (the screen says PAIRING OPEN; a tap hides the message). Open the app; iOS
+   asks for the 6-digit code the cube shows. A cube with nothing paired yet accepts the first device
+   without this step.
+
+**Riding.** Search a place, check the route, tap Start, allow location "Always", lock the phone and
+go. Start downloads the route and the streets along it first, so losing mobile signal later costs
+nothing but rerouting: off the route without signal the cube shows OFF ROUTE · NO SIGNAL with an
+arrow back to the route, and the phone reroutes when the signal returns. During a ride the map owns
+the screen: full brightness, no sleep, no auto-advance or auto-rotate, touch ignored, WiFi off (it
+shares the radio with Bluetooth). If the phone goes quiet the cube shows NO PHONE after 3 s and
+returns to its cards after 20 s. On arrival it shows Arrived for 8 s, then the cards come back
+where you left them. The battery percent appears in the banner when it drops under 15%.
+
+A cube paired only with the iPhone no longer joins WiFi at boot or opens the setup page by itself,
+so it starts straight away on the road.
+
+Nothing here has been tried on a real bike yet: `docs/nav-acceptance.md` is the checklist. In the
+simulator, `CUBE_BLE=live CUBE_NAV=turn make run` shows the map (`CUBE_NAV_STOP_MS=5000` to watch
+NO PHONE), and `./build/cube-shot build/shot @nav-turn` renders it (also `vn`, `long`, `reroute`,
+`offroute`, `arrived`, `lost`, `busy`).
 
 ### Sound
 
-The cube's buzzer plays a short tune when a Pomodoro phase ends. Its level is OFF, LOW, MED (the default) or HIGH, and you can set it in three places:
+The cube has a passive buzzer. For now it only beeps when you change its level; it is there for alerts to come. The level is OFF, LOW, MED (the default) or HIGH, and you can set it in three places:
 - **On the cube:** swipe down on any card and use the SOUND row. A tap on its label switches it off or back on, and each change plays a beep at the new level.
 - **From the Mac:** **Cube settings…** > Sound.
 - **In the setup portal:** Sound, from 0 to 3.
 
 The default is `BUZZER_LEVEL` in `config.h`. SOUND took the place of WiFi refresh in the on-device panel. WiFi refresh is still in the portal and on the Mac.
+
+### On the cube
+
+| Gesture | Where | What it does |
+|---|---|---|
+| Swipe left / right | any card | next / previous card |
+| Swipe down | any card but Volume | display panel: BRIGHTNESS, SLEEP, ADVANCE, SOUND |
+| Vertical drag, tap | Volume | set the level, mute, media keys |
+| Tap | lock prompt | unlock the Mac |
+
+**Display panel.** Each row has a `-` and `+`; SLEEP (screen off after N minutes), ADVANCE (auto-advance every N seconds) and SOUND also switch off and back on with a tap on their label. Brightness changes as you step it. DONE or a swipe up saves; RESET returns to the `config.h` defaults (`BACKLIGHT`, `SCREEN_SLEEP_MS`, `CARD_ROTATE_MS`, `BUZZER_LEVEL`). The same settings are in the portal and in the Mac's **Cube settings…**.
+
+**Top bar.** Battery level on the left (measured on the board; a cube with no cell is on USB and shows 100%), the transport that delivered the data in the middle (`BLE`, `WIFI`, blank when offline), and the age of the data on the right (`4s`, `2m`, … `OLD`, or `OFF` when nothing has arrived).
+
+**Screen sleep.** After the SLEEP time (default 15 min) with no touch and no new readings, the backlight and panel turn off. A touch wakes it and is otherwise ignored; new data alone does not wake it. The Mac's 5-second resend and the ticking countdown are not new readings, so a cube on a live Bluetooth link still sleeps. It never sleeps while a settings screen is open or a pairing screen is up.
+
+**Auto-rotate.** Stand the cube on its other end and the display flips 180° after about a second (touch follows). Flat or tilted, it keeps its orientation. The sign of the accelerometer axis is not yet confirmed on hardware; `docs/imu-acceptance.md` is the checklist, and `IMU_UP_SIGN` in `board_pins.h` is the one value to flip if it turns the wrong way.
+
+### Stand
+
+`3d-printing/` has two parametric OpenSCAD desk stands that hold the board and a LiPo (a wedge and an easel), with STLs and a geometry test; see `3d-printing/README.md`.
 
 ## Layout
 
@@ -304,6 +370,9 @@ bridge/
   sources/admin.mjs   Usage & Cost Admin API client
 mac-helper/           Swift app: runs the bridge, pushes /api/status to the cube over BLE
   install.sh          install/remove the LaunchAgent
+  build-app.sh        builds ClaudeCubeLink.app with the bridge inside
+  Sources/CubeLinkCore    pure logic (framing, push policy, menu model), unit-tested
+  Sources/ClaudeCubeLink  the app: menu bar, settings windows, volume, unlock
 firmware/
   src/board_pins.h    all board-specific pins — check this first
   src/config.h        your WiFi + bridge URL (gitignored)
@@ -316,8 +385,13 @@ firmware/
   src/ble_frame.h     chunk reassembly for the BLE wire format
   src/transport_policy.h  when WiFi runs versus BLE (pure, host-tested)
   src/main.cpp        poll loop and swipe handling
+  src/*.h             most logic is pure headers, tested on the host
   sim/                desktop simulator — runs the UI without hardware
   sim/shot.cpp        headless frame grab: one PNG per card
+  sim/tests/          host-side unit tests (make test)
+  sim/bench.cpp       performance/energy model (make bench)
+docs/                 BLE protocol, hardware checklists, board reference
+3d-printing/          OpenSCAD desk stands + STLs
 ```
 
 ## Testing without the board
@@ -329,8 +403,6 @@ the same 240×280 layout and polls the same endpoint the device will. Good for
 iterating on `cards.mjs` — edit, reload, see it. It is a JavaScript
 reimplementation of the layout, so it tells you whether the *data* reads well,
 not whether the firmware draws it correctly.
-
-**Battery indicator.** Every card's top bar shows the battery level, measured on the board's ADC and drawn on-device (it is not part of the bridge payload). With no battery connected the cube is running from USB and shows a full 100%. In the simulator, `CUBE_BATTERY=30 make run` (or `none` for the no-battery case) picks the level.
 
 **Desktop simulator.** `firmware/sim/` compiles the actual firmware sources —
 `main.cpp`, `ui.cpp`, `payload.cpp` — against LovyanGFX's SDL backend and opens
@@ -348,7 +420,10 @@ cd sim && make run
 
 Drag across the window to swipe, click to tap, `SCALE=3 make run` for a bigger
 window, and `CUBE_BRIDGE_URL=http://localhost:8787/api/status make run` to point
-it somewhere other than the `BRIDGE_URL` in `config.h`.
+it somewhere other than the `BRIDGE_URL` in `config.h`. Other knobs:
+`CUBE_BATTERY=30` (or `none`), `CUBE_ORIENT=2` (the cube is upside down),
+`CUBE_BLE=live CUBE_VOLUME=40|muted|fixed` (Volume card),
+and `CUBE_BLE=live CUBE_LOCKED=1` (unlock prompt).
 
 **Bluetooth in the simulator.** There is no BLE radio on the desktop, so `CUBE_BLE` picks what the
 cube believes: `none` (default, WiFi-only as before), `live` (bonded, a payload arrives every 5 s),
@@ -367,7 +442,24 @@ empty track, a card that does not exist yet:
 cd firmware/sim
 make shot                                  # the live bridge
 ./build/cube-shot build/state states.json  # build/state-0.png, -1.png, ...
+./build/cube-shot build/shot @dev-edit     # a local screen: @portal, @ota, @waiting, @vol-56, @unlock, ...
 ```
+
+The full list of `@` screens is in `CLAUDE.md`.
+
+**Unit tests and the bench.** The firmware's logic (gestures,
+transport policy, BLE framing, sleep, orientation, volume, unlock…) lives in
+pure headers tested on the host, and the Mac app's in `CubeLinkCore`:
+
+```sh
+cd firmware/sim && make test     # host-side unit tests, no SDL or board
+cd firmware/sim && make bench    # real setup()/loop() on a virtual clock; fails on a stale panel,
+                                 # a screen left on, or a stale Settings read
+cd mac-helper && swift test      # frame encoding, push policy, supervisor, shared BLE fixture
+```
+
+`firmware/sim/fixtures/ble-frames.txt` is read by both `make test` and
+`swift test`, so the two ends of the BLE protocol cannot drift apart.
 
 What it still cannot tell you: whether the pins in `board_pins.h` match your
 revision, how the ST7789 renders these colours, and how the panel behaves at its
@@ -473,10 +565,11 @@ in the PlatformIO Python environment.
 
 ## Ideas from here
 
-The board also has a QMI8658 IMU, a PCF85063 RTC, a buzzer, and battery
-charging, none of which this scaffold uses yet:
+The IMU drives auto-rotate; the buzzer only beeps on a SOUND change so far, and the
+PCF85063 RTC is still unused:
 
-- Wrist-raise or tilt to wake, via the IMU
+- Tilt or pick-up to wake, via the IMU
+- An `Attention` tune (already defined in `melody.h`) when Claude is waiting for you
 - Buzzer when the daily spend crosses a threshold
 - Deep sleep between polls, with the RTC as the wake source, for battery use
 - A "burn rate" card: tokens per minute over the last 10 minutes
