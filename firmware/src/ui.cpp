@@ -1292,19 +1292,29 @@ void drawNavTurn(LovyanGFX *g, NavTurn turn, uint8_t exitNo, uint8_t dir, uint16
 }
 
 // The bottom line: street (INK) then the ETA (DIM), the street cut with "..."
-// so the pair fits NAV_BOTTOM_MAX_W pixels.
+// so the pair fits NAV_BOTTOM_MAX_W pixels. An ETA too long to leave the street
+// its "..." is cut first, so the line never starts left of the margin.
 void drawNavBottom(LovyanGFX *g, const NavScene &s) {
   g->setFont(&V_B18V.font);
   g->setTextDatum(middle_left);
-  char eta[28];
+  const int dotsW = g->textWidth("...");
+  char eta[32];
   eta[0] = '\0';
   if (s.eta[0]) snprintf(eta, sizeof(eta), "  %s", s.eta);
+  size_t en = strlen(eta);
+  if (en && dotsW + g->textWidth(eta) > NAV_BOTTOM_MAX_W) {
+    while (en > 2) {  // never into the two leading spaces
+      en = utf8FitBytes(eta, en - 1);
+      eta[en] = '\0';
+      if (dotsW + g->textWidth(eta) + dotsW <= NAV_BOTTOM_MAX_W) break;
+    }
+    memcpy(eta + en, "...", 4);
+  }
   const int etaW = eta[0] ? g->textWidth(eta) : 0;
   char street[72];
   snprintf(street, sizeof(street), "%s", s.street);
   size_t n = strlen(street);
   if (g->textWidth(street) + etaW > NAV_BOTTOM_MAX_W) {
-    const int dotsW = g->textWidth("...");
     while (n > 0) {
       n = utf8FitBytes(street, n - 1);
       street[n] = '\0';
@@ -1314,6 +1324,7 @@ void drawNavBottom(LovyanGFX *g, const NavScene &s) {
   }
   const int streetW = g->textWidth(street);
   int x = (LCD_WIDTH - (streetW + etaW)) / 2;
+  if (x < (LCD_WIDTH - NAV_BOTTOM_MAX_W) / 2) x = (LCD_WIDTH - NAV_BOTTOM_MAX_W) / 2;
   g->setTextColor(INK, BG);
   g->drawString(street, x, NAV_BOTTOM_Y);
   if (eta[0]) {
@@ -1419,13 +1430,15 @@ void uiNav(Display &lcd, const NavScene &s, bool phoneLost, const BatteryView &b
     drawNavBottom(g, s);
   }
 
+  // Low battery: top right, in the banner's slot; just below NO PHONE when that is up.
   if (lowBat) {
     char txt[8];
     snprintf(txt, sizeof(txt), "%u%%", (unsigned)bat.pct);
-    g->setFont(&V_S12.font);
+    const bool arrived = s.state == NavState::Arrived;
+    g->setFont(&V_S12V.font);
     g->setTextDatum(middle_right);
-    g->setTextColor(g_palette[ACC_RED], BG);
-    g->drawString(txt, 232, 276);
+    g->setTextColor(g_palette[ACC_RED], arrived ? BG : to565(0x0B0D12));
+    g->drawString(txt, 232, phoneLost && !arrived ? 28 : 12);
   }
   present(lcd);
 }
