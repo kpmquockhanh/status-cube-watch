@@ -14,6 +14,7 @@
 #include "display.h"
 #include "gesture.h"
 #include "idle_sleep.h"
+#include "nav_session.h"
 #include "imu.h"
 #include "net.h"
 #include "orientation.h"
@@ -67,7 +68,7 @@ uint32_t mediaPressedAt = 0;
 bool deckVolume = false;
 // The Mac is locked and unlocks for a tap (unlock_prompt.h): a screen over the deck.
 UnlockPrompt unlock;
-bool volumeShown() { return bleBonded(); }
+bool volumeShown() { return bleMacBonded(); }
 uint8_t deckSize() { return uiDeckSize(payload, deckVolume); }
 bool onVolumeCard() { return deckVolume && cardIndex == uiVolumeIndex(payload); }
 DeckSpot deckSpot() { return onVolumeCard() ? DeckSpot::Volume : DeckSpot::Payload; }
@@ -76,6 +77,10 @@ TransportPolicy policy;
 bool wifiUp = false;           // netStart() called and not yet netStop()
 bool otaUp = false;            // otaBegin() called and not yet otaEnd()
 IdleSleep idle;
+// Navigation (nav_session.h): while a ride runs its map owns the screen. The scene is ~4 KB, so it
+// lives here and not on the loop's stack.
+NavSession navSession;
+NavScene navScene;
 bool screenOn = true;
 CpuPolicy cpuPolicy;  // fast clock for touch and animation, slow otherwise (cpu_policy.h)
 uint32_t cpuMhz = CPU_MHZ_FAST;  // the clock last set; the board boots at board_build.f_cpu
@@ -93,6 +98,9 @@ bool touchOnVolume = false;  // the finger now down landed on the Volume card (l
 bool touchDown = false;  // a finger was on the glass at the last poll: do not flip under it
 uint32_t lastImu = 0;
 constexpr uint32_t IMU_POLL_MS = 200;
+
+// What the backlight is set to now: full while navigation runs (a map in daylight), else the setting.
+uint8_t shownBacklight() { return navSession.active() ? 255 : deviceSettings().backlight; }
 
 // First boot with neither a Mac nor a network and nothing received yet.
 bool waitingToPair() { return pairWaitAtBoot(bleBonded(), settingsHaveWifi()) && !payload.valid; }
@@ -162,7 +170,7 @@ void handleBleSettings() {
   // The Mac's write wins over an open editor: it shows what is now stored,
   // rather than saving its older copy over it on DONE.
   if (editing) editDevice = deviceSettings();
-  if (screenOn) lcd.setBrightness(deviceSettings().backlight);
+  if (screenOn) lcd.setBrightness(shownBacklight());
   buzzerSetLevel(deviceSettings().sound);
   lastRotate = millis();
   dirty = true;
@@ -233,12 +241,12 @@ void pollTouch() {
   }
   if (down) unlock.touch(now);
   // The unlock prompt covers the deck: a tap there is for it alone.
-  const bool onUnlock = !editing && unlock.screen(now) != UnlockScreen::Hidden;
+  const bool onUnlock = !editing && !navSession.active() && unlock.screen(now) != UnlockScreen::Hidden;
   // On the Volume card a vertical move is the volume, not a swipe (gesture.h).
   // Whether it is the slider's touch is decided where the finger landed, so a touch that began on
   // another card never reaches it; the latch clears on the lift pass, after the gesture is routed.
   if (landing) {
-    touchOnVolume = onVolumeCard() && !editing && !onUnlock;
+    touchOnVolume = onVolumeCard() && !editing && !onUnlock && !navSession.active();
     touchOnVolumeRow = touchOnVolume && volumeInRow(y);
   }
   const bool onVolume = touchOnVolume && onVolumeCard() && !editing;
@@ -252,6 +260,11 @@ void pollTouch() {
   if (volSlider.held() && !onVolume) {
     volSlider.release(now);
     dirty = true;
+  }
+  // Navigation owns the screen: the tracker has read the touch (so it stays consistent), nothing acts on it.
+  if (navSession.active()) {
+    if (volSlider.held()) volSlider.release(now);
+    return;
   }
   // While the panel slides in its buttons are not where the hit-test puts
   // them, so nothing is pressed until it has landed.
@@ -324,6 +337,7 @@ void pollTouch() {
 }
 
 void pollOrientation(uint32_t now) {
+  if (navSession.active()) return;  // a vibrating mount must not flip the map
   if (!imuUp || now - lastImu < IMU_POLL_MS) return;
   lastImu = now;
   float ax, ay, az;
@@ -379,7 +393,7 @@ void setup() {
   bleBegin();
   if (setupHoldRequested()) portalRun(lcd, false);
 
-  if (!bleBonded()) {
+  if (!bleMacBonded()) {
     if (settingsHaveWifi()) {
       uiMessage(lcd, "CONNECTING", settings().ssid);
       const bool joined = netBegin();
@@ -394,6 +408,7 @@ void setup() {
     uiMessage(lcd, "NO MAC", "WAITING FOR LINK");
   }
 
+  if (blePairingOpen()) uiMessage(lcd, "PAIRING OPEN", "PAIR FROM THE APP OR MAC");
   idle.begin(millis());
   policy.begin(millis());
   cpuPolicy.begin(millis());
@@ -417,7 +432,7 @@ void loop() {
   // Which transport feeds the cube (transport_policy.h): BLE while the Mac is
   // delivering, WiFi when it is not.
   const TransportDecision td =
-      policy.update(now, bleLastGood(), bleBonded(), settingsHaveWifi(), WIFI_ALWAYS_ON != 0);
+      policy.update(now, bleLastGood(), bleMacBonded(), settingsHaveWifi(), WIFI_ALWAYS_ON != 0);
   if (td.wifiOn && !wifiUp) {
     netStart();
     wifiUp = true;
@@ -446,10 +461,32 @@ void loop() {
   }
   const DeckSpot was = deckSpot();
   if (bleTake(payload)) gotData = true;
-  // Navigation frames from the iPhone. Drained every pass so the hand-over
-  // buffer stays fresh; the screen that shows them is wired in later.
-  static NavScene navScene;  // ~4 KB: static, not on the loop's stack
-  bleTakeNav(navScene);
+  // Navigation frames from the iPhone, drained every pass so the hand-over buffer stays fresh.
+  const bool navFrame = bleTakeNav(navScene);
+  if (navFrame) {
+    navSession.frame(navScene.state, now);
+    dirty = true;
+  }
+  navSession.tick(now);
+  if (navSession.takeStarted()) {
+    Serial.println("[nav] ride started");
+    if (editing) {  // closed without saving: the map cannot wait for DONE
+      editing = false;
+      uiDeviceSlide(false, editDevice);
+      buzzerSetLevel(deviceSettings().sound);
+    }
+    if (volSlider.held()) volSlider.release(now);
+    if (screenOn) lcd.setBrightness(255);
+    dirty = true;
+  }
+  if (navSession.takeEnded()) {
+    Serial.println("[nav] ride ended");
+    if (screenOn) lcd.setBrightness(deviceSettings().backlight);
+    lastRotate = now;  // auto-advance does not fire at once
+    if (onVolumeCard()) uiReplayVolume();
+    else uiReplay(cardIndex);
+    dirty = true;
+  }
   handleBleSettings();
   // The Mac's volume. Not a reading: it never keeps the screen awake.
   MacVolume macVol{};
@@ -500,14 +537,14 @@ void loop() {
   }
 
   // Screen sleep: never while the editor or a pairing code is up (see idle_sleep.h).
-  const bool keepOn = editing || bleState() == BleState::Pairing || (!pairWaitDismissed && waitingToPair());
+  const bool keepOn = editing || navSession.active() || blePairingOpen() || bleState() == BleState::Pairing || (!pairWaitDismissed && waitingToPair());
   const bool wantOn = idle.update(now, keepOn, sleepMs());
   if (wantOn != screenOn) {
     screenOn = wantOn;
     if (screenOn) {
       setCpu(CPU_MHZ_FAST);
       lcd.wakeup();
-      lcd.setBrightness(deviceSettings().backlight);
+      lcd.setBrightness(shownBacklight());
       uiInvalidate();  // the first frame after sleep goes out whole
       dirty = true;
     } else {
@@ -521,7 +558,7 @@ void loop() {
     return;
   }
   applyRotation();
-  setCpu(cpuPolicy.update(now, touchDown || uiAnimating()));
+  setCpu(cpuPolicy.update(now, touchDown || uiAnimating() || navSession.active()));
 
   // Redraw on change, every frame while a ring is still moving, and once a
   // second otherwise so the freshness counter ticks.
@@ -530,8 +567,11 @@ void loop() {
     const bool pairing = bleState() == BleState::Pairing;
     const bool waiting = !pairWaitDismissed && waitingToPair();
     const bool editorUp = editing && !uiEditorSliding();
+    const bool navOn = navSession.active();
     const UnlockScreen us = editing ? UnlockScreen::Hidden : unlock.screen(now);
     if (pairing) uiBlePair(lcd, blePasskey());  // the code must be seen
+    else if (navOn) uiNav(lcd, navScene, navSession.phoneLost(now), bv);
+    else if (blePairingOpen()) uiMessage(lcd, "PAIRING OPEN", "PAIR FROM THE APP OR MAC");
     else if (waiting) uiBlePair(lcd, 0);
     else if (editorUp) uiDeviceEditor(lcd, editDevice);
     else if (us != UnlockScreen::Hidden) uiUnlock(lcd, us == UnlockScreen::Waiting);

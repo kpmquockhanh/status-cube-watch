@@ -186,6 +186,10 @@ Scenario makeScenario(const std::string &name) {
     s.strokes.push_back(swipe(1000, 190, 150, 50, 150));       // swipe left: usage -> Volume
     s.strokes.push_back(Stroke{2000, 600, 120, 180, 120, 60});  // drag up, above the button row
     s.strokes.push_back(tapAt(3500, VOL_MUTE_CX, VOL_MUTE_CY));  // the number: mute
+  } else if (name == "nav") {
+    s.what = "navigation: Mac and iPhone bonded, a busy frame every 200 ms, rider moving, full brightness";
+    s.seconds = 600;
+    s.nav = "busy";
   } else if (name == "sleep") {
     s.what = "Mac gone: WiFi fetches fail, screen sleeps after the timeout (2 min)";
     s.seconds = 600;
@@ -348,6 +352,17 @@ bool bleTakeNav(NavScene &out) {
   const uint32_t now = millis();
   if (sent && now - last < 200) return false;
   if (!nav_samples::navSample(S.nav, out)) return false;
+  // The rider moves: the whole map slides 2 px down per frame and wraps, so
+  // every frame differs from the last one.
+  static int shift = 0;
+  shift += 2;
+  const auto slide = [](NavPoint &p) {
+    int y = p.y + shift % 400;
+    if (y > 340) y -= 400;
+    p.y = (int16_t)y;
+  };
+  for (uint16_t i = 0; i < out.nRoute; i++) slide(out.route[i]);
+  for (uint16_t i = 0; i < out.nStreetPts; i++) slide(out.streetPts[i]);
   sent = true;
   last = now;
   return true;
@@ -558,6 +573,10 @@ void runRender() {
   volume.fromMac(mv, 0);
   const VolumeView vv = volume.view();
 
+  static NavScene navTurn, navBusy;
+  nav_samples::navSample("turn", navTurn);
+  nav_samples::navSample("busy", navBusy);
+
   struct Case {
     const char *name;
     std::function<void()> draw;
@@ -566,6 +585,8 @@ void runRender() {
       {"usage card", [&] { uiRender(lcd, p, 0, true, 2000, bv, UiLink::Ble); }},
       {"volume card", [&] { uiRender(lcd, p, uiVolumeIndex(p), true, 2000, bv, UiLink::Ble, &vv); }},
       {"display panel", [&] { uiDeviceEditor(lcd, deviceSettings()); }},
+      {"nav turn", [&] { uiNav(lcd, navTurn, false, bv); }},
+      {"nav busy", [&] { uiNav(lcd, navBusy, false, bv); }},
   };
   // "redraw" is the same screen a second later (only what changed is sent);
   // "whole" is the frame after uiInvalidate(), as after a wake.
