@@ -24,14 +24,14 @@ The nav server API key is not committed and never stored in the repo. After the 
 
 ## Using it
 
-1. Open the app. The Cube card says whether the cube is linked and, if not, what to do (Bluetooth off or not allowed, pairing code, Pair new device in the cube's portal, forget Claude Cube in iOS Settings > Bluetooth, firmware too old). Tap Try again after fixing it; the app also retries each time it comes to the foreground.
-2. Search a place (or tap a recent one). The preview draws the server's route with distance and time. Start downloads the map for the route, then the ride screen takes over; allow location "Always" so it keeps going with the phone locked.
-3. Stop sends the end of the ride to the cube and stops the GPS.
+1. Open the app. The Cube card says whether the cube is linked and, if not, what to do (Bluetooth off or not allowed, pairing code, Pair new device in the cube's portal, forget Claude Cube in iOS Settings > Bluetooth, firmware too old). Tap Try again after fixing it; the app also retries each time it comes to the foreground. After replacing the cube, use Settings > Forget cube.
+2. Search a place (or tap a recent one). The preview draws the server's route with distance and time. Start downloads the map for the route, then the ride screen takes over; allow location "Always" so it keeps going with the phone locked. The download carries on if you pocket the phone; going back from the preview cancels it. With no connection, the preview offers "Start saved route (offline)" when the last ride went to the same place (within about 100 m).
+3. Stop sends the end of the ride to the cube and turns off background location: the GPS keeps running only while the app is open (for the map and the next route), and stops when the app goes to the background.
 
 ## On-bike checklist
 
 - Built from Xcode this week; key entered; Bluetooth on; cube connected on the main screen.
-- Start with mobile data: the whole map is downloaded first, so a lost signal later only disables rerouting.
+- Start with mobile data: the whole map is downloaded first, so a lost signal later only disables rerouting (after a reroute, the map of the new part fills in as the signal allows).
 - Lock the phone, ride 500 m: the cube map follows.
 - Signal lost and off the route: the cube shows OFF ROUTE, NO SIGNAL with an arrow back; it reroutes when the signal returns.
 - Stop at the end, and check the cube leaves the map.
