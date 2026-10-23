@@ -34,7 +34,7 @@ struct ContentView: View {
                     }
                     .navigationDestination(for: Place.self) { PreviewView(place: $0) }
             }
-            .sheet(isPresented: $showSettings) { SettingsView() }
+            .sheet(isPresented: $showSettings) { SettingsView().environmentObject(ride) }
         }
     }
 }

@@ -92,6 +92,35 @@ final class CubeLink: NSObject, ObservableObject {
         enqueue(scene)
     }
 
+    /// For a replaced cube: forgets the remembered identifier and the skip lists, drops the link and
+    /// searches again. The old cube is passed over for a minute while its link winds down, so the
+    /// search does not pick it straight back up.
+    func forget() {
+        log.info("forgetting the remembered cube")
+        UserDefaults.standard.removeObject(forKey: Self.idKey)
+        skipped.removeAll()
+        blocked.removeAll()
+        cancelPairingHint()
+        retryDelay = 1
+        wasReady = false
+        if let old = peripheral {
+            peripheral = nil   // its disconnect callback is ignored from here on
+            if old.state == .connected || old.state == .connecting { central.cancelPeripheralConnection(old) }
+            skipped.skip(old.identifier, at: Date())
+            DispatchQueue.main.asyncAfter(deadline: .now() + NavSkipList.ttl + 1) { [weak self] in
+                self?.rescanIfIdle()
+            }
+        }
+        infoChar = nil
+        navChar = nil
+        queue.reset()
+        wanted = true
+        guard central.state == .poweredOn else { return }
+        status = .searching
+        central.stopScan()
+        start()
+    }
+
     // MARK: status
 
     /// Sets a passing status, unless one that needs the user's attention is showing.

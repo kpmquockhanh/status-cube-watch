@@ -16,13 +16,16 @@ enum ServerConfig {
     }
 
     static var key: String {
-        get {
-            migrateOldKey()
-            return read(service, account)
-        }
-        set {
-            _ = write(newValue, service, account)
-        }
+        migrateOldKey()
+        return read(service, account)
+    }
+
+    /// Stores the key when it differs from the stored one (blank removes it). False when the
+    /// Keychain refused the write.
+    static func saveKey(_ newValue: String) -> Bool {
+        let k = newValue.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard k != key else { return true }
+        return write(k, service, account)
     }
 
     /// One-time move of a key typed into an earlier build.
@@ -34,30 +37,36 @@ enum ServerConfig {
         if read(service, account) == old { _ = write("", oldService, oldAccount) }
     }
 
-    private static func read(_ service: String, _ account: String) -> String {
-        do {
-            let q: [String: Any] = [kSecClass as String: kSecClassGenericPassword, kSecAttrService as String: service,
-                                    kSecAttrAccount as String: account, kSecReturnData as String: true,
-                                    kSecMatchLimit as String: kSecMatchLimitOne]
-            var out: CFTypeRef?
-            guard SecItemCopyMatching(q as CFDictionary, &out) == errSecSuccess, let d = out as? Data else { return "" }
-            return String(decoding: d, as: UTF8.self)
-        }
+    private static func base(_ service: String, _ account: String) -> [String: Any] {
+        [kSecClass as String: kSecClassGenericPassword, kSecAttrService as String: service,
+         kSecAttrAccount as String: account]
     }
 
+    private static func read(_ service: String, _ account: String) -> String {
+        var q = base(service, account)
+        q[kSecReturnData as String] = true
+        q[kSecMatchLimit as String] = kSecMatchLimitOne
+        var out: CFTypeRef?
+        guard SecItemCopyMatching(q as CFDictionary, &out) == errSecSuccess, let d = out as? Data else { return "" }
+        return String(decoding: d, as: UTF8.self)
+    }
+
+    /// Updates the item in place, adding it only when there is none: a failed write never leaves
+    /// the phone without the old key. Blank deletes it.
     @discardableResult
-    private static func write(_ newValue: String, _ service: String, _ account: String) -> Bool {
-        do {
-            let base: [String: Any] = [kSecClass as String: kSecClassGenericPassword, kSecAttrService as String: service,
-                                       kSecAttrAccount as String: account]
-            SecItemDelete(base as CFDictionary)
-            let k = newValue.trimmingCharacters(in: .whitespacesAndNewlines)
-            guard !k.isEmpty else { return true }
-            var add = base
-            add[kSecValueData as String] = Data(k.utf8)
-            add[kSecAttrAccessible as String] = kSecAttrAccessibleAfterFirstUnlock   // readable while the phone is locked
-            return SecItemAdd(add as CFDictionary, nil) == errSecSuccess
+    private static func write(_ k: String, _ service: String, _ account: String) -> Bool {
+        let q = base(service, account)
+        if k.isEmpty {
+            let s = SecItemDelete(q as CFDictionary)
+            return s == errSecSuccess || s == errSecItemNotFound
         }
+        let attrs: [String: Any] = [kSecValueData as String: Data(k.utf8),
+                                    // readable while the phone is locked
+                                    kSecAttrAccessible as String: kSecAttrAccessibleAfterFirstUnlock]
+        let s = SecItemUpdate(q as CFDictionary, attrs as CFDictionary)
+        if s == errSecSuccess { return true }
+        guard s == errSecItemNotFound else { return false }
+        return SecItemAdd(q.merging(attrs) { $1 } as CFDictionary, nil) == errSecSuccess
     }
 
     /// nil when the URL is not usable or there is no key yet.
