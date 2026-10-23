@@ -32,6 +32,7 @@ void testActiveStates() {
 
 void testArrived() {
   NavSession n;
+  n.frame(NavState::Navigating, 500);
   n.frame(NavState::Arrived, 1000);
   CHECK(n.active());
   n.frame(NavState::Arrived, 5000);  // does not extend
@@ -40,8 +41,34 @@ void testArrived() {
   n.frame(NavState::Arrived, 1000 + NAV_ARRIVED_MS - 1);
   n.tick(1000 + NAV_ARRIVED_MS);
   CHECK(!n.active());
-  CHECK(n.takeStarted());
   CHECK(n.takeEnded());
+  CHECK(!n.takeStarted());  // stop() drops an unread start
+}
+
+void testArrivedNeverStarts() {
+  NavSession n;
+  n.frame(NavState::Arrived, 0);
+  CHECK(!n.active());
+  CHECK(!n.takeStarted());
+  n.frame(NavState::Navigating, 100);
+  CHECK(n.takeStarted());
+  n.frame(NavState::Arrived, 200);
+  n.tick(200 + NAV_ARRIVED_MS);
+  CHECK(!n.active());
+  CHECK(n.takeEnded());
+  const uint32_t e = 200 + NAV_ARRIVED_MS;
+  const uint32_t late[] = {e + 1, e + 500, e + 3000};
+  for (uint32_t t : late) {
+    n.frame(NavState::Arrived, t);
+    n.tick(t);
+    CHECK(!n.active());
+    CHECK(!n.takeStarted());
+    CHECK(!n.takeEnded());
+  }
+  n.frame(NavState::Navigating, e + 4000);
+  CHECK(n.active());
+  CHECK(n.takeStarted());
+  CHECK(!n.takeStarted());
 }
 
 void testLost() {
@@ -82,6 +109,7 @@ void testWrap() {
   n.tick(t0 + NAV_END_MS);
   CHECK(!n.active());
   NavSession a;
+  a.frame(NavState::Navigating, t0 - 10);
   a.frame(NavState::Arrived, t0);
   a.tick(t0 + NAV_ARRIVED_MS - 1);
   CHECK(a.active());
@@ -95,6 +123,7 @@ int main() {
   testStartEnd();
   testActiveStates();
   testArrived();
+  testArrivedNeverStarts();
   testLost();
   testRecovery();
   testWrap();

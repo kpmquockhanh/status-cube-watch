@@ -5,7 +5,7 @@
 // A decoded frame (not Ended) starts or keeps the ride; Ended stops it. With no
 // frame for NAV_LOST_MS the phone counts as lost (the screen says so); after
 // NAV_END_MS the ride ends by itself. Arrived is shown for NAV_ARRIVED_MS from
-// its first frame, then the ride ends.
+// its first frame, then the ride ends; an Arrived frame never starts a ride.
 #include <stdint.h>
 
 #include "nav_frame.h"
@@ -22,6 +22,7 @@ class NavSession {
       return;
     }
     if (!active_) {
+      if (s == NavState::Arrived) return;  // a late Arrived never starts a ride
       active_ = true;
       started_ = true;
       arrived_ = false;
@@ -62,6 +63,7 @@ class NavSession {
     if (!active_) return;
     active_ = false;
     arrived_ = false;
+    started_ = false;
     ended_ = true;
   }
 
