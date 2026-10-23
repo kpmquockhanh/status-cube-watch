@@ -28,7 +28,9 @@ public struct Instruction: Equatable, Sendable {
     public var turn: NavTurn
     public var exit: UInt8
     public var streetName: String
+    /// Meters.
     public var distance: Double
+    /// Seconds (GraphHopper reports milliseconds; converted in `RouteDecoding.decode`).
     public var time: Double
     /// Indices into `Route.points`.
     public var interval: ClosedRange<Int>
@@ -40,7 +42,9 @@ public struct Instruction: Equatable, Sendable {
 
 public struct Route: Equatable, Sendable {
     public var points: [Coord]
+    /// Meters.
     public var distance: Double
+    /// Seconds (converted from GraphHopper milliseconds).
     public var time: Double
     public var instructions: [Instruction]
     public init(points: [Coord], distance: Double, time: Double, instructions: [Instruction]) {
@@ -87,9 +91,9 @@ public enum RouteDecoding {
             let turn = navTurn(graphHopperSign: i.sign)
             let exit = turn == .roundabout ? UInt8(clamping: i.exit_number ?? 0) : 0
             out.append(Instruction(turn: turn, exit: exit, streetName: i.street_name ?? "",
-                                   distance: i.distance, time: i.time,
+                                   distance: i.distance, time: i.time / 1000,
                                    interval: i.interval[0]...i.interval[1]))
         }
-        return Route(points: points, distance: p.distance, time: p.time, instructions: out)
+        return Route(points: points, distance: p.distance, time: p.time / 1000, instructions: out)
     }
 }

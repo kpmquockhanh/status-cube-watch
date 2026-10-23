@@ -21,6 +21,17 @@ func fixtureData(_ name: String) throws -> Data {
         #expect(route.points[0] == Coord(lat: coords[0][1], lon: coords[0][0]))
     }
 
+    @Test func timesAreSeconds() throws {
+        let data = try fixtureData("route-hcmc")
+        let route = try RouteDecoding.decode(data)
+        let json = try #require(JSONSerialization.jsonObject(with: data) as? [String: Any])
+        let path = try #require((json["paths"] as? [[String: Any]])?.first)
+        let ms = try #require(path["time"] as? Double)
+        #expect(route.time == ms / 1000)
+        #expect(route.time > 5 * 60 && route.time < 60 * 60)
+        #expect(abs(route.instructions.reduce(0) { $0 + $1.time } - route.time) < 2)
+    }
+
     @Test func signTable() {
         for s in [-98, -8, 8] { #expect(navTurn(graphHopperSign: s) == .uTurn) }
         #expect(navTurn(graphHopperSign: -7) == .keepLeft)

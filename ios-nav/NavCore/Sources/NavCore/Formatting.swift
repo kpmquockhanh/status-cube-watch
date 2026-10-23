@@ -1,10 +1,11 @@
 import Foundation
 
-/// "Now" under 10 m, 50 m steps below 950 m, then kilometres with one decimal.
+/// "Now" under 50 m; otherwise rounded to the nearest 10 m, shown as kilometres with one decimal once that reaches 1000.
 public func formatDistance(_ meters: Double) -> String {
-    if meters < 10 { return "Now" }
-    if meters >= 950 { return String(format: "%.1f km", meters / 1000) }
-    return "\(Int((meters / 50).rounded()) * 50) m"
+    if meters < 50 { return "Now" }
+    let r = Int((meters / 10).rounded()) * 10
+    if r >= 1000 { return String(format: "%.1f km", Double(r) / 1000) }
+    return "\(r) m"
 }
 
 /// "12 min" or "1 h 05 min".
