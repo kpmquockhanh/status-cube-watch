@@ -42,20 +42,24 @@ done
 
 run() { docker run --rm -v "$NAV:$NAV" "$@"; }
 
-rm -rf "$WORK/graph" "$WORK/tiles" "$WORK/vietnam.osm.pbf.part" "$WORK/highways.osm.pbf"
+rm -rf "$WORK/graph" "$WORK/tiles" "$WORK/vietnam.osm.pbf.part" "$WORK/highways.osm.pbf" "$WORK/import.osm.pbf"
 
 echo "[refresh] download $PBF_URL"
-curl -fL --retry 3 -o "$WORK/vietnam.osm.pbf.part" "$PBF_URL"
+curl -fL --retry 3 --speed-limit 10000 --speed-time 120 --max-time 3600 -o "$WORK/vietnam.osm.pbf.part" "$PBF_URL"
 mv "$WORK/vietnam.osm.pbf.part" "$WORK/vietnam.osm.pbf"
+
+echo "[refresh] expressway pre-filter"
+# Drop motorroad=yes / motorcycle=no ways (e.g. trunk expressways) from the routing input only; tiles keep them.
+run --memory=4g "$IMAGE" osmium tags-filter -i --overwrite -o "$WORK/import.osm.pbf" "$WORK/vietnam.osm.pbf" w/motorroad=yes w/motorcycle=no
 
 echo "[refresh] graphhopper import"
 run --memory=4g -w /app "$IMAGE" java -Xmx3g \
-  -Ddw.graphhopper.datareader.file="$WORK/vietnam.osm.pbf" \
+  -Ddw.graphhopper.datareader.file="$WORK/import.osm.pbf" \
   -Ddw.graphhopper.graph.location="$WORK/graph" \
   -jar graphhopper-web-11.1.jar import config.yml
 
 echo "[refresh] tiles"
-run "$IMAGE" bash -euo pipefail -c "
+run --memory=4g "$IMAGE" bash -euo pipefail -c "
   osmium tags-filter -o '$WORK/highways.osm.pbf' --overwrite '$WORK/vietnam.osm.pbf' w/highway
   mkdir -p '$WORK/tiles'
   osmium export -f geojsonseq '$WORK/highways.osm.pbf' | node /app/tiles/build-tiles.mjs '$WORK/tiles'
@@ -69,7 +73,7 @@ prev_tiles=$(readlink "$LIVE/tiles" 2>/dev/null | sed 's|^releases/||' || true)
 echo "[refresh] swap live data ($stamp)"
 mv "$WORK/graph" "$REL/graph-$stamp"
 mv "$WORK/tiles" "$REL/tiles-$stamp"
-rm -f "$WORK/vietnam.osm.pbf" "$WORK/highways.osm.pbf"
+rm -f "$WORK/vietnam.osm.pbf" "$WORK/highways.osm.pbf" "$WORK/import.osm.pbf"
 flip graph "graph-$stamp"
 flip tiles "tiles-$stamp"
 

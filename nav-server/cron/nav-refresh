@@ -1,1 +1,1 @@
-30 3 3 * * root /root/nav-server/refresh.sh >> /var/log/nav-refresh.log 2>&1
+30 3 3 * * root timeout 4h /root/nav-server/refresh.sh >> /var/log/nav-refresh.log 2>&1

@@ -2,6 +2,7 @@ services:
   graphhopper:
     image: nav-graphhopper:11.1
     restart: unless-stopped
+    mem_limit: 3500m
     # The whole data dir is mounted (not the graph symlink) because refresh.sh flips it.
     command: ["java", "-Xmx3g", "-Ddw.graphhopper.graph.location=/data/graph", "-jar", "graphhopper-web-11.1.jar", "server", "config.yml"]
     volumes:

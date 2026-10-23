@@ -37,6 +37,15 @@ t=$(mktemp)
 [ "$(curl -s -o "$t" -w '%{http_code}' --max-time 30 -H "X-Nav-Key: $KEY" "$URL$TILE")" = 200 ] || { rm -f "$t"; fail "tile not 200"; }
 node -e 'const j=JSON.parse(require("fs").readFileSync(process.argv[1],"utf8")); if(!j.w||!j.w.length) process.exit(1)' "$t" || { rm -f "$t"; fail "tile has empty w"; }
 rm -f "$t"
+# Corridor burst: ~300 distinct tiles, 8 at a time, as the app does for a long ride. 404 is fine; 429/503/5xx is not.
+codes=$(mktemp)
+for x in $(seq 26085 26104); do for y in $(seq 15390 15404); do echo "$URL/tiles/15/$x/$y.json"; done; done \
+  | xargs -P 8 -I{} curl -s -o /dev/null -w '%{http_code}\n' --max-time 30 -H "X-Nav-Key: $KEY" {} > "$codes"
+n=$(wc -l < "$codes" | tr -d ' ')
+[ "$n" -ge 300 ] || { rm -f "$codes"; fail "corridor fetched only $n tiles"; }
+bad=$(grep -v -E '^(200|404)$' "$codes" | sort | uniq -c | tr '\n' ' ')
+rm -f "$codes"
+[ -z "$bad" ] || fail "corridor burst got non-200/404 codes: $bad"
 [ "$(code -H "X-Nav-Key: $KEY" "$URL/health")" = 200 ] || fail "/health not 200"
 
 echo "smoke: all checks passed"
