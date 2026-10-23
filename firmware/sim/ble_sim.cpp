@@ -9,7 +9,7 @@
 // once: a level 0..100, `muted` (56, muted), `fixed` (an HDMI output), or
 // `none` / unset (no Volume write: the card shows NO MAC). CUBE_LOCKED=1 adds
 // the Mac-locked flag, so the unlock prompt shows; a tap logs [ble] (sim) unlock.
-// CUBE_NAV=<sample> (nav_samples.h: turn vn long reroute offroute arrived lost
+// CUBE_NAV=<sample> (nav_samples.h: turn vn long longeta reroute offroute arrived lost
 // busy) is a bonded iPhone sending that frame every 200 ms; CUBE_NAV_STOP_MS=<n>
 // stops it n ms after start, as a phone dropping out. CUBE_PAIRING=1 opens the
 // "Pair new device" window for BLE_PAIR_WINDOW_MS from start.

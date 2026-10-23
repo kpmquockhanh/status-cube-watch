@@ -53,7 +53,8 @@ inline bool base(NavScene &s) {
 }
 
 // 96 streets, 640 points, a 256-point route: the most a frame can carry. A
-// jittered grid of cross streets (deterministic) with a winding route up it.
+// jittered grid of cross streets (deterministic) with a winding route up it,
+// every point inside the clip box (nav_frame.h) as a real frame's must be.
 inline void busy(NavScene &s) {
   clear(s);
   s.state = NavState::Navigating;
@@ -71,9 +72,9 @@ inline void busy(NavScene &s) {
     const uint8_t cls = i < 6 ? 0 : i < 24 ? 1 : i < 60 ? 2 : 3;
     NavPoint p[7];
     const bool horiz = i % 2 == 0;
-    const int lane = -40 + (i / 2) * 360 / 48 + rnd(12);
+    const int lane = -40 + (i / 2) * 320 / 48 + rnd(12);  // -40 .. 284
     for (int k = 0; k < n; k++) {
-      const int along = -60 + k * 380 / (n - 1);
+      const int along = -60 + k * 360 / (n - 1);  // -60 .. 300
       const int off = lane + rnd(18) - 9;
       p[k] = horiz ? NavPoint{(int16_t)along, (int16_t)off} : NavPoint{(int16_t)off, (int16_t)along};
     }
@@ -81,7 +82,7 @@ inline void busy(NavScene &s) {
   }
   for (int i = 0; i < 256; i++) {
     const float t = i / 255.0f;
-    addRoute(s, 120 + (int)(46.0f * sinf(t * 9.0f) * t), 225 - (int)(t * 330.0f));
+    addRoute(s, 120 + (int)(46.0f * sinf(t * 9.0f) * t), 225 - (int)(t * 285.0f));  // y 225 .. -60
   }
 }
 
@@ -95,7 +96,7 @@ inline bool navSample(const char *name, NavScene &s) {
     busy(s);
     return true;
   }
-  if (!strcmp(name, "vn") || !strcmp(name, "long") || !strcmp(name, "reroute")) {
+  if (!strcmp(name, "vn") || !strcmp(name, "long") || !strcmp(name, "reroute") || !strcmp(name, "longeta")) {
     if (!base(s)) return false;
     if (!strcmp(name, "vn")) {
       s.turn = NavTurn::Roundabout;
@@ -103,6 +104,9 @@ inline bool navSample(const char *name, NavScene &s) {
       setText(s.street, sizeof(s.street), "Nguyễn Thị Minh Khai");
     } else if (!strcmp(name, "long")) {
       setText(s.street, sizeof(s.street), "Đường Nguyễn Văn Linh nối dài");
+    } else if (!strcmp(name, "longeta")) {  // the longest eta a frame carries (23 bytes)
+      setText(s.street, sizeof(s.street), "Đường Nguyễn Văn Linh nối dài");
+      setText(s.eta, sizeof(s.eta), "1 h 59 min (arr. 23:59)");
     } else {
       s.state = NavState::Rerouting;
     }

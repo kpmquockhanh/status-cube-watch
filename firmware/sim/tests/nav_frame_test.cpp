@@ -187,6 +187,46 @@ void testMaxRoute() {
   CHECK(s.nRoute == 256);
 }
 
+void push16(Bytes &b, int v) {
+  b.push_back((uint8_t)(v & 0xFF));
+  b.push_back((uint8_t)((v >> 8) & 0xFF));
+}
+
+// A frame with one route point at (rx, ry) beside (120, 140), and one street
+// (0, 150) -> (sx, sy).
+Bytes framePts(int rx, int ry, int sx, int sy) {
+  Bytes b{1, 1, 0, 0, 0, 0, 0, 0, 0};  // header, three empty strings
+  push16(b, 2);
+  push16(b, 120), push16(b, 140), push16(b, rx), push16(b, ry);
+  b.push_back(1);  // one street
+  b.push_back(2), b.push_back(2);  // cls 2, two points
+  push16(b, 0), push16(b, 150), push16(b, sx), push16(b, sy);
+  return b;
+}
+
+bool decodes(const Bytes &b) {
+  NavScene s = sentinel();
+  return navDecode(b.data(), b.size(), s);
+}
+
+// Every coordinate must lie in x [-64, 304], y [-64, 344]: the edges are in,
+// one pixel past them rejects the whole frame, in the route or a street.
+void testClipBox() {
+  CHECK(NAV_CLIP_MIN_X == -64 && NAV_CLIP_MAX_X == 304 && NAV_CLIP_MIN_Y == -64 && NAV_CLIP_MAX_Y == 344);
+  CHECK(decodes(framePts(-64, -64, 304, 344)));
+  CHECK(decodes(framePts(304, 344, -64, -64)));
+  CHECK(rejects(framePts(-65, 0, 0, 0)));   // route x
+  CHECK(rejects(framePts(305, 0, 0, 0)));
+  CHECK(rejects(framePts(0, -65, 0, 0)));   // route y
+  CHECK(rejects(framePts(0, 345, 0, 0)));
+  CHECK(rejects(framePts(0, 0, -65, 0)));   // street x
+  CHECK(rejects(framePts(0, 0, 305, 0)));
+  CHECK(rejects(framePts(0, 0, 0, -65)));   // street y
+  CHECK(rejects(framePts(0, 0, 0, 345)));
+  CHECK(rejects(framePts(-32768, 0, 0, 0)));  // int16 extremes
+  CHECK(rejects(framePts(0, 0, 0, 32767)));
+}
+
 Bytes chunk(uint8_t seq, uint8_t idx, uint8_t total, const Bytes &body) {
   Bytes b{BLE_PROTO_VER, seq, idx, total};
   b.insert(b.end(), body.begin(), body.end());
@@ -231,6 +271,7 @@ int main() {
   testRejections();
   testTotalStreetPoints();
   testMaxRoute();
+  testClipBox();
   testAssembler();
   return checksDone("nav_frame_test");
 }

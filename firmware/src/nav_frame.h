@@ -24,6 +24,15 @@ struct NavPoint {
 constexpr uint16_t NAV_MAX_ROUTE = 256;
 constexpr uint8_t NAV_MAX_STREETS = 96;
 constexpr uint16_t NAV_MAX_STREET_PTS = 640;
+// The clip box the phone clips every coordinate to (screen pixels of the
+// 240x280 frame, 64 px of margin). A point outside it rejects the frame: the
+// drawing code may assume every line stays near the screen.
+constexpr int16_t NAV_CLIP_MIN_X = -64, NAV_CLIP_MAX_X = 304;
+constexpr int16_t NAV_CLIP_MIN_Y = -64, NAV_CLIP_MAX_Y = 344;
+
+inline bool navPointInClip(int16_t x, int16_t y) {
+  return x >= NAV_CLIP_MIN_X && x <= NAV_CLIP_MAX_X && y >= NAV_CLIP_MIN_Y && y <= NAV_CLIP_MAX_Y;
+}
 
 // About 4 KB: keep it off small stacks (the NimBLE host task); hold it in a
 // static or member.
@@ -104,6 +113,7 @@ inline bool parse(const uint8_t *data, size_t len, NavScene *out) {
   if (out) out->nRoute = nRoute;
   for (uint16_t i = 0; i < nRoute; i++) {
     const int16_t x = r.i16(), y = r.i16();
+    if (!navPointInClip(x, y)) return false;
     if (out) out->route[i] = NavPoint{x, y};
   }
 
@@ -121,6 +131,7 @@ inline bool parse(const uint8_t *data, size_t len, NavScene *out) {
     }
     for (uint8_t i = 0; i < nPts; i++) {
       const int16_t x = r.i16(), y = r.i16();
+      if (!navPointInClip(x, y)) return false;
       if (out) out->streetPts[total + i] = NavPoint{x, y};
     }
     total = (uint16_t)(total + nPts);
@@ -133,7 +144,7 @@ inline bool parse(const uint8_t *data, size_t len, NavScene *out) {
 
 // Decodes one reassembled frame into `out`. Returns false, leaving `out`
 // untouched, for anything malformed (wrong version, enum or length out of
-// range, truncated body, trailing bytes). Two passes, validate then fill, so
+// range, a coordinate outside the clip box, truncated body, trailing bytes). Two passes, validate then fill, so
 // no NavScene is ever built on the stack.
 inline bool navDecode(const uint8_t *data, size_t len, NavScene &out) {
   if (!nav_detail::parse(data, len, nullptr)) return false;
