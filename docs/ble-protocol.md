@@ -63,14 +63,20 @@ cube sees honest staleness.
 ## Pairing
 
 Display-only IO capability, MITM, Secure Connections, bonding. A device pairing shows a random
-6-digit passkey on the cube; macOS or iOS asks for it. Only a passkey pairing counts: a link that
+6-digit passkey on the cube; macOS or iOS asks for it. The code is shown only for a pairing that can
+be accepted (the first device, a bonded device pairing again, or any device in the pairing window);
+any other pairing gets a code that is never shown and is refused when it completes. Only the
+pairing link's own completion or disconnect clears the code on screen. Only a passkey pairing counts: a link that
 ends up encrypted but not authenticated (Just Works, from a central with no input) is dropped along
 with any bond it stored. The policy is `firmware/src/ble_bonds.h` (pure, `ble_bonds_test`).
 
-**Two bonds, two links.** The cube keeps one Mac and one iPhone bonded and connected at once. It
-keeps advertising while fewer than two links are up (three during the pairing window, so a
-replacement can pair while the old device is still connected), and drops a link that is not
-secured within 60 s of connecting, so a central that connects and never pairs cannot hold a slot.
+**Two bonds, two links.** The cube keeps one Mac and one iPhone bonded and connected at once. With
+no bond it advertises while fewer than two links are up; with bonds, only while a bonded device is
+not connected (and fewer than two links are up), so a cube with its Mac and iPhone both connected,
+or with only a Mac bonded and connected, goes quiet. During the pairing window it advertises while
+fewer than three links are up, so a replacement can pair while the old device is still connected;
+when the window ends with both links up, advertising stops. It drops a link that is not secured
+within 60 s of connecting, so a central that connects and never pairs cannot hold a slot.
 
 **Who may pair.** With no bond, the first device pairs freely. With a bond stored, a stored bond
 re-encrypting always gets in, and a new pairing gets in only during the **pairing window**: the
@@ -93,7 +99,8 @@ with no link up first, then the oldest) and otherwise refuses the write, so the 
 not bond; a known Mac or iPhone bond is never removed to make room. The Volume card and the WiFi transport policy follow
 the Mac's bond only; the "Waiting for a Mac" screen at first boot follows any bond.
 
-**Links.** Once secured, the iPhone's link asks for 15-30 ms, latency 0, timeout 4 s
+**Links.** Once secured and its kind known (at once for a stored bond, at the first write for a
+new one), the iPhone's link asks for 15-30 ms, latency 0, timeout 4 s
 (`BLE_NAV_PARAMS`), and the Mac's for 30-45 ms, latency 6, timeout 4 s (`BLE_IDLE_PARAMS`), both in
 `firmware/src/ble_conn.h` and checked against Apple's rules. Control notifications go to every
 subscribed central. Liveness (`bleLastGood`) counts only Payload writes.
@@ -127,7 +134,7 @@ Reassembled frame, little-endian:
 | nRoute | u16 | ≤ 256, then nRoute × (i16 x, i16 y) screen px |
 | nStreets | u8 | ≤ 96, then each: u8 cls (0–3, as the server's tiles), u8 nPts (≥ 2), nPts × (i16 x, i16 y); total street points ≤ 640 |
 
-Coordinates are screen pixels of the 240×280 frame, already clipped by the phone to x ∈ [−64, 304], y ∈ [−64, 344]. Any length over its limit, a truncated body, or trailing bytes rejects the frame (the last good frame stays).
+Coordinates are screen pixels of the 240×280 frame, clipped by the phone to x ∈ [−64, 304], y ∈ [−64, 344] (edges included). A coordinate outside that box, any length over its limit, a truncated body, or trailing bytes rejects the frame (the last good frame stays).
 
 Golden frames (pinned by `firmware/sim/fixtures/nav-frames.txt`, one per line, `nav <name> <hex>`; `nav_frame_test` decodes them):
 
