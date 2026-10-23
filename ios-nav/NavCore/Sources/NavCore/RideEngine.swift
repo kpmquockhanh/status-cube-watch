@@ -17,14 +17,15 @@ import Foundation
     /// Largest frame the link can deliver; the BLE layer sets `chunkCapacity(maxWrite:)`.
     public var frameBudget: Int = NavLimits.maxFrameBytes
 
-    private var route: Route?
+    private(set) var route: Route?
     private var tracker: RouteTracker?
     private var destination: Coord?
-    private var tiles: [TileID: [StreetLine]] = [:]
+    private(set) var tiles: [TileID: [StreetLine]] = [:]
     private var streets: [StreetLine] = []
     private var arrivedAt: Date?
     private var lastRerouteAttempt: Date?
-    private var rerouteTask: Task<Void, Never>?
+    private(set) var rerouteTask: Task<Void, Never>?
+    private var saveTask: Task<Void, Never>?
     private var generation = 0
 
     public init(server: NavServer, cache: RideCache,
@@ -42,7 +43,7 @@ import Foundation
         let (r, t) = try await fetch(from: from, to: to, have: [:])
         cancelReroute()
         begin(route: r, tiles: t, destination: to)
-        cache.save(route: r, tiles: t)
+        save(route: r, tiles: t)
     }
 
     /// Restarts the last cached ride (same trip, offline). False when there is none.
@@ -107,7 +108,8 @@ import Foundation
         guard rerouteTask == nil, let destination else { return }
         if !force, let last = lastRerouteAttempt, now().timeIntervalSince(last) < Self.rerouteRetry { return }
         lastRerouteAttempt = now()
-        state = .rerouting
+        // Only the first attempt shows "Rerouting"; retries keep "no signal" so the label does not flip.
+        if state == .navigating { state = .rerouting }
         generation += 1
         let gen = generation
         rerouteTask = Task { [weak self] in
@@ -125,22 +127,34 @@ import Foundation
         switch result {
         case .success(let (r, t)):
             begin(route: r, tiles: t, destination: destination ?? r.points.last ?? Coord(lat: 0, lon: 0))
-            cache.save(route: r, tiles: t)
+            save(route: r, tiles: t)
         case .failure:
             state = .offRouteNoSignal
         }
     }
 
+    /// The deadline covers the whole fetch (route and tiles): on timeout it is a failure and
+    /// the old route and tiles stay.
     private func fetchWithTimeout(from: Coord, to: Coord) async throws -> (Route, [TileID: [StreetLine]]) {
         let server = self.server, have = tiles, sleep = self.sleep, limit = rerouteTimeout
-        // The 8 s covers the route request; the corridor tiles follow without it.
-        let r: Route = try await withThrowingTaskGroup(of: Route.self) { group in
-            group.addTask { try await server.route(from: from, to: to) }
+        return try await withThrowingTaskGroup(of: (Route, [TileID: [StreetLine]]).self) { group in
+            group.addTask {
+                let r = try await server.route(from: from, to: to)
+                return (r, try await Self.fetchTiles(server: server, route: r, have: have))
+            }
             group.addTask { try await sleep(limit); throw StartError.noSignal }
             defer { group.cancelAll() }
             return try await group.next()!
         }
-        return (r, try await Self.fetchTiles(server: server, route: r, have: have))
+    }
+
+    /// Writes the cache off the main actor, one write after another.
+    private func save(route r: Route, tiles t: [TileID: [StreetLine]]) {
+        let cache = self.cache, previous = saveTask
+        saveTask = Task.detached(priority: .utility) {
+            await previous?.value
+            cache.save(route: r, tiles: t)
+        }
     }
 
     // MARK: fetching
@@ -182,4 +196,5 @@ import Foundation
 
     /// Test hook: waits for a reroute in flight.
     func waitForReroute() async { await rerouteTask?.value }
+    func waitForSave() async { await saveTask?.value }
 }

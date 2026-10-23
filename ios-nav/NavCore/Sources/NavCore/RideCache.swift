@@ -1,7 +1,7 @@
 import Foundation
 
 /// Keeps the last ride (route + tiles) on disk for an offline restart of the same trip.
-public struct RideCache {
+public struct RideCache: Sendable {
     private let file: URL
 
     public init(directory: URL) {

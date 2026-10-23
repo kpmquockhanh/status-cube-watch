@@ -17,7 +17,15 @@ public final class HTTPNavServer: NavServer {
     private let session: URLSession
     private let sleep: @Sendable (TimeInterval) async throws -> Void
 
-    public init(baseURL: URL, key: String, session: URLSession = .shared,
+    /// Short timeouts: a dead data connection must fail fast, not hang for a minute.
+    public static let defaultSession: URLSession = {
+        let cfg = URLSessionConfiguration.default
+        cfg.timeoutIntervalForRequest = 10
+        cfg.waitsForConnectivity = false
+        return URLSession(configuration: cfg)
+    }()
+
+    public init(baseURL: URL, key: String, session: URLSession = HTTPNavServer.defaultSession,
                 sleep: @escaping @Sendable (TimeInterval) async throws -> Void = { try await Task.sleep(nanoseconds: UInt64($0 * 1e9)) }) {
         self.baseURL = baseURL; self.key = key; self.session = session; self.sleep = sleep
     }

@@ -29,6 +29,10 @@ private actor FakeNavServer: NavServer {
     var fixedRoute: Route?
     var routeCalls = 0
     var tileCalls = 0
+    var hangTiles = false
+    var failTiles = false
+    func set(hangTiles: Bool) { self.hangTiles = hangTiles }
+    func set(failTiles: Bool) { self.failTiles = failTiles }
     func set(online: Bool) { self.online = online }
     func set(route: Route?) { fixedRoute = route }
 
@@ -43,7 +47,8 @@ private actor FakeNavServer: NavServer {
 
     func tile(_ id: TileID) async throws -> [StreetLine] {
         tileCalls += 1
-        guard online else { throw StartError.noSignal }
+        guard online, !failTiles else { throw StartError.noSignal }
+        if hangTiles { try await Task.sleep(nanoseconds: 3_600_000_000_000) }
         // One cross street through the corridor (west-east at 250 m north).
         return [StreetLine(cls: 2, points: [north(250, east: -300), north(250, east: 300)])]
     }
@@ -58,8 +63,8 @@ private func tmpCache() -> RideCache {
     RideCache(directory: FileManager.default.temporaryDirectory.appendingPathComponent("ride-\(UUID().uuidString)"))
 }
 
-@MainActor private func makeEngine(_ server: FakeNavServer, _ clock: Clock, cache: RideCache = tmpCache()) -> RideEngine {
-    RideEngine(server: server, cache: cache, now: { clock.t })
+@MainActor private func makeEngine(_ server: FakeNavServer, _ clock: Clock, cache: RideCache = tmpCache(), timeout: TimeInterval = 8) -> RideEngine {
+    RideEngine(server: server, cache: cache, now: { clock.t }, rerouteTimeout: timeout)
 }
 
 @MainActor @Test func startOfflineThrowsNoSignalAndStaysEnded() async {
@@ -124,7 +129,8 @@ private func tmpCache() -> RideCache {
 
     await server.set(online: true)
     clock.advance(5)
-    #expect(engine.update(fix(off)).state == .rerouting)
+    // A retry keeps the "no signal" label while in flight.
+    #expect(engine.update(fix(off)).state == .offRouteNoSignal)
     await engine.waitForReroute()
     #expect(engine.state == .navigating)
     let back = engine.update(fix(north(0, east: 0, from: off)))
@@ -135,13 +141,72 @@ private func tmpCache() -> RideCache {
 @MainActor @Test func resumeLastRestoresTheCachedRide() async throws {
     let server = FakeNavServer(); await server.set(route: lRoute())
     let cache = tmpCache()
-    try await makeEngine(server, Clock(), cache: cache).start(from: north(0), to: lRoute().points.last!)
+    let first = makeEngine(server, Clock(), cache: cache)
+    try await first.start(from: north(0), to: lRoute().points.last!)
+    await first.waitForSave()
     let engine = makeEngine(server, Clock(), cache: cache)
     #expect(engine.resumeLast())
     let scene = engine.update(fix(north(100)))
     #expect(scene.state == .navigating)
     #expect(!scene.streets.isEmpty)
     #expect(RideCache(directory: FileManager.default.temporaryDirectory.appendingPathComponent("none-\(UUID())")).loadLast() == nil)
+}
+
+@MainActor private func offRouteEngine(_ server: FakeNavServer, _ clock: Clock, timeout: TimeInterval = 8) async throws -> (RideEngine, Coord) {
+    await server.set(route: lRoute())
+    let engine = makeEngine(server, clock, timeout: timeout)
+    try await engine.start(from: north(0), to: lRoute().points.last!)
+    // The reroute detours 2 km west, so it needs corridor tiles the first route never loaded.
+    let far = north(250, east: -2000)
+    await server.set(route: Route(points: [north(250, east: -120), far, lRoute().points.last!], distance: 4000, time: 400, instructions: [
+        Instruction(turn: .straight, streetName: "Detour", distance: 4000, time: 400, interval: 0...2),
+        Instruction(turn: .arrive, streetName: "", distance: 0, time: 0, interval: 2...2)]))
+    _ = engine.update(fix(north(200)))
+    return (engine, north(250, east: -120))
+}
+
+@MainActor @Test func hangingTilesTimeOutKeepOldRideAndRetryLater() async throws {
+    let server = FakeNavServer(); let clock = Clock()
+    let (engine, off) = try await offRouteEngine(server, clock, timeout: 0.05)
+    await server.set(hangTiles: true)
+    _ = engine.update(fix(off)); _ = engine.update(fix(off))
+    #expect(engine.update(fix(off)).state == .rerouting)
+    await engine.waitForReroute()
+    let lost = engine.update(fix(off))
+    #expect(lost.state == .offRouteNoSignal)
+    #expect(!lost.streets.isEmpty)
+    #expect(engine.route == lRoute())
+    await server.set(hangTiles: false)
+    clock.advance(15)
+    _ = engine.update(fix(off))
+    await engine.waitForReroute()
+    #expect(engine.state == .navigating)
+    #expect(engine.route != lRoute())
+}
+
+@MainActor @Test func rerouteWithFailedTilesKeepsOldRouteAndTiles() async throws {
+    let server = FakeNavServer(); let clock = Clock()
+    let (engine, off) = try await offRouteEngine(server, clock)
+    let tilesBefore = engine.tiles
+    await server.set(failTiles: true)
+    _ = engine.update(fix(off)); _ = engine.update(fix(off)); _ = engine.update(fix(off))
+    await engine.waitForReroute()
+    #expect(await server.routeCalls == 2)   // the route request itself succeeded
+    #expect(engine.state == .offRouteNoSignal)
+    #expect(engine.route == lRoute())
+    #expect(engine.tiles == tilesBefore)
+}
+
+@MainActor @Test func stopWhileReroutingIsNotRevivedByTheLateResult() async throws {
+    let server = FakeNavServer(); let clock = Clock()
+    let (engine, off) = try await offRouteEngine(server, clock)
+    _ = engine.update(fix(off)); _ = engine.update(fix(off))
+    #expect(engine.update(fix(off)).state == .rerouting)
+    let task = engine.rerouteTask
+    #expect(engine.stop().state == .ended)
+    await task?.value
+    #expect(engine.state == .ended)
+    #expect(engine.update(fix(off)).state == .ended)
 }
 
 // MARK: HTTPNavServer against a stub URLProtocol
