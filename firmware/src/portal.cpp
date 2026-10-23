@@ -74,10 +74,21 @@ std::string formPage(const Settings &cur, const std::string &error) {
                 "How often the cube polls the bridge over WiFi.");
   h += numField("Sound", "sd", d.sound, 0, DEV_MAX_SOUND, "0 = off, 1 = low, 2 = medium, 3 = high");
   h += "<button>Save and reboot</button></form>";
+  // Bluetooth: each button only when it would do something.
+  const std::string btn = "<button style='background:#2a3242;color:#e7ecf5'>";
+  // With no bond at all, pairing is open anyway.
   if (bleBonded())
-    h += "<form method=post action=/forget>" + token + "<button style='background:#2a3242;color:#e7ecf5'>"
-         "Forget paired Mac</button></form>"
+    h += "<h2>Bluetooth</h2><form method=post action=/pair>" + token + btn + "Pair new device</button></form>"
+         "<div class=hint>Reboots and lets one more Mac or iPhone pair for 2 minutes. "
+         "A new device of a kind already paired replaces the old one.</div>";
+  if (bleMacBonded())
+    h += "<form method=post action=/forget>" + token + "<input type=hidden name=k value=mac>" + btn +
+         "Forget Mac</button></form>"
          "<div class=hint>Also remove &ldquo;Claude Cube&rdquo; in the Mac's Bluetooth settings.</div>";
+  if (blePhoneBonded())
+    h += "<form method=post action=/forget>" + token + "<input type=hidden name=k value=phone>" + btn +
+         "Forget iPhone</button></form>"
+         "<div class=hint>Also forget &ldquo;Claude Cube&rdquo; in the iPhone's Bluetooth settings.</div>";
   h += "</body></html>";
   return h;
 }
@@ -167,15 +178,31 @@ void handleSave() {
   ESP.restart();
 }
 
+void sendRebooting(const char *what) {
+  server.send(200, "text/html",
+              (std::string("<!doctype html><meta charset=utf-8><meta name=viewport "
+                           "content='width=device-width,initial-scale=1'>"
+                           "<body style='font:16px system-ui;background:#0b0d12;color:#e7ecf5;padding:24px'>") +
+               what + "</body>")
+                  .c_str());
+  delay(1000);  // let the reply leave before the radio goes away
+  ESP.restart();
+}
+
 void handleForget() {
   if (!postOk()) return;
-  bleForgetBonds();
-  server.send(200, "text/html",
-              "<!doctype html><meta charset=utf-8><meta name=viewport content='width=device-width,initial-scale=1'>"
-              "<body style='font:16px system-ui;background:#0b0d12;color:#e7ecf5;padding:24px'>"
-              "Forgotten. The cube is rebooting and will wait to pair again.</body>");
-  delay(1000);
-  ESP.restart();
+  const std::string k = server.arg("k").c_str();
+  if (k == "mac") bleForget(BondKind::Mac);
+  else if (k == "phone") bleForget(BondKind::Phone);
+  else return sendForm(400, "Nothing to forget.");
+  sendRebooting("Forgotten. The cube is rebooting.");
+}
+
+void handlePair() {
+  if (!postOk()) return;
+  bleRequestPairingAtBoot();
+  sendRebooting("The cube is rebooting. For the next 2 minutes, pair the new Mac or iPhone "
+                "(the cube shows the code to type).");
 }
 
 // AP+STA with BLE up is the most the radio carries at once, and platformio.ini
@@ -211,6 +238,7 @@ void logHeap(const char *when) {
   server.on("/", HTTP_GET, handleRoot);
   server.on("/save", HTTP_POST, handleSave);
   server.on("/forget", HTTP_POST, handleForget);
+  server.on("/pair", HTTP_POST, handlePair);
   server.onNotFound(handleNotFound);
   server.begin();
 

@@ -42,6 +42,7 @@
 #include "../src/touch.h"
 #include "../src/ui.h"
 #include "battery_env.h"
+#include "nav_samples.h"
 
 void setup();
 void loop();
@@ -123,6 +124,9 @@ struct Scenario {
   const char *what;
   uint32_t seconds;
   bool bonded, bleLive;
+  // The iPhone: `nav` names a nav_samples.h scene it sends every 200 ms while
+  // the scenario runs (nullptr = no phone).
+  const char *nav;
   // Screen sleep, set by the scenario so the numbers do not depend on whose
   // config.h the bench is built with. `mustSleep`: the run fails unless the
   // screen is off at the end.
@@ -328,7 +332,25 @@ bool Touch::read(int16_t &x, int16_t &y) {
 void bleBegin() { publishSettings(); }
 BleState bleState() { return S.bleLive ? BleState::Connected : BleState::Advertising; }
 uint32_t blePasskey() { return 0; }
-bool bleBonded() { return S.bonded; }
+bool bleMacBonded() { return S.bonded; }
+bool blePhoneBonded() { return S.nav != nullptr; }
+bool bleBonded() { return bleMacBonded() || blePhoneBonded(); }
+void bleForget(BondKind) {}
+void bleRequestPairingAtBoot() {}
+bool blePairingOpen() { return false; }
+
+// The phone's feed: the scenario's sample, one frame every 200 ms.
+bool bleTakeNav(NavScene &out) {
+  static uint32_t last = 0;
+  static bool sent = false;
+  if (!S.nav || !g_running) return false;
+  const uint32_t now = millis();
+  if (sent && now - last < 200) return false;
+  if (!nav_samples::navSample(S.nav, out)) return false;
+  sent = true;
+  last = now;
+  return true;
+}
 
 // The Mac's PushPolicy sends every 5 s whether or not anything changed.
 bool bleTake(Payload &out) {
@@ -342,7 +364,6 @@ bool bleTake(Payload &out) {
 }
 
 uint32_t bleLastGood() { return g_bleLastGood; }
-void bleForgetBonds() {}
 bool bleTakeSettings(char *, size_t) { return false; }
 void bleSettingsReply(uint8_t) { publishSettings(); }
 void bleSettingsChanged() { publishSettings(); }

@@ -446,6 +446,10 @@ void loop() {
   }
   const DeckSpot was = deckSpot();
   if (bleTake(payload)) gotData = true;
+  // Navigation frames from the iPhone. Drained every pass so the hand-over
+  // buffer stays fresh; the screen that shows them is wired in later.
+  static NavScene navScene;  // ~4 KB: static, not on the loop's stack
+  bleTakeNav(navScene);
   handleBleSettings();
   // The Mac's volume. Not a reading: it never keeps the screen awake.
   MacVolume macVol{};

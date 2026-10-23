@@ -15,6 +15,16 @@ void testChosenParamsAreAccepted() {
   CHECK(BLE_IDLE_PARAMS.maxItvl * 1.25 * (BLE_IDLE_PARAMS.latency + 1) <= 500);
 }
 
+// The phone streams map frames every 200 ms: short interval, no latency, so a
+// frame starts at the next event (at most 30 ms).
+void testNavParams() {
+  CHECK(bleAppleAccepts(BLE_NAV_PARAMS));
+  CHECK(BLE_NAV_PARAMS.minItvl * 1.25 == 15);
+  CHECK(BLE_NAV_PARAMS.maxItvl * 1.25 == 30);
+  CHECK(BLE_NAV_PARAMS.latency == 0);
+  CHECK(BLE_NAV_PARAMS.timeout * 10 == 4000);
+}
+
 void testMinInterval() {
   CHECK(bleAppleAccepts({itvl(15), itvl(30), 0, tmo(2000)}));
   CHECK(!bleAppleAccepts({itvl(11.25), itvl(30), 0, tmo(2000)}));  // under 15 ms
@@ -60,6 +70,7 @@ void testNimbleExampleParamsAreRejected() {
 
 int main() {
   testChosenParamsAreAccepted();
+  testNavParams();
   testMinInterval();
   testMaxInterval();
   testLatency();

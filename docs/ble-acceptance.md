@@ -12,10 +12,10 @@ Tick an item only when you observed it. Logs: `./install.sh logs` (Mac, from `ma
 
 ## Pairing
 
-- [ ] First pairing: forget the bond (portal "Forget paired Mac"), install, the code on the cube matches the Mac prompt, cards appear.
+- [ ] First pairing: forget the bond (portal "Forget Mac"), install, the code on the cube matches the Mac prompt, cards appear.
 - [ ] Wrong passkey: type a wrong code. The cube stays unpaired and shows a fresh code on the next attempt. Note whether `onAuthenticationComplete` fires on a wrong passkey (the cube's pairing screen must not get stuck).
 - [ ] Passkey display and subscribe: the code shows while pairing and clears afterwards; on subscribe the cube asks for "send now" and the first cards arrive without waiting for the 5 s heartbeat.
-- [ ] Stranger-bond check: a second Mac or phone (nRF Connect) cannot pair while a bond exists; the cube log shows "second Mac refused". NimBLE's bond-count timing may make this check fire too early or late; if so, compare bond addresses or check on the first write / Info read instead.
+- [ ] Stranger-bond check: with the pairing window closed, a third device (nRF Connect) cannot pair while a bond exists; the cube log shows `[ble] link refused (... new 1 ...)`, the bond count is unchanged after it, and the Mac and iPhone still reconnect.
 - [ ] The app's cancel-on-Info-read-encryption-error path in `CubeLink` does not abort a macOS passkey prompt that is still pending.
 
 ## Reconnect and range
@@ -32,8 +32,21 @@ Tick an item only when you observed it. Logs: `./install.sh logs` (Mac, from `ma
 
 ## Bond management
 
-- [ ] Forget the bond through the portal (hold the screen at boot, "Forget paired Mac"); the cube advertises for pairing again.
+- [ ] Forget the Mac through the portal (hold the screen at boot, "Forget Mac"); the iPhone's bond stays, and the Mac can pair again without "Pair new device" only if it was the last bond.
 - [ ] Stale macOS bond: erase flash (`pio run -t erase`), re-flash, run. The app's log shows the "remove Claude Cube in Bluetooth settings" message; after doing so, pairing works.
+
+## Mac and iPhone at once (fw_rev 8)
+
+- [ ] Upgrade from fw_rev 7 with the Mac bonded: serial shows `[ble] bond <addr>: Mac` at boot (legacy bond taken as the Mac); the Mac reconnects with no dialog and rediscovers the Nav characteristic (Service Changed).
+- [ ] Portal "Pair new device": the cube reboots, serial shows `[ble] pairing window open for 120 s`; the iPhone pairs with the passkey while the Mac stays connected (`[ble] connect` with `links 2`).
+- [ ] Both links up at once: the Mac's cards keep updating every 5 s while the iPhone streams Nav frames; `getConnectedCount` reaches 2 and advertising stops (a third central cannot see the cube outside the window).
+- [ ] Kind learning: the iPhone's first Nav write logs `[ble] link N is the iPhone`; the Mac's first payload logs `... is the Mac`. After a reboot the kinds come back from NVS (`[ble] bond ...: iPhone`).
+- [ ] Replacement: open the window, pair a second iPhone; on its first Nav write serial shows `[ble] new iPhone replaces <addr>: bond deleted`, and the old iPhone's link drops. Same for a second Mac.
+- [ ] Conn params: the iPhone's link reports `interval 15` or `30 ms, latency 0, timeout 4000 ms`; the Mac's still reports `BLE_IDLE_PARAMS`. Note whether iOS honours the request.
+- [ ] Window closed: two minutes after the reboot (or after one new bond), a further pairing is refused and its bond deleted.
+- [ ] Bond store: with 3 bonds stored (window open, replacement not yet identified), check NimBLE's store does not delete the Mac on its own (`ble_store_util_status_rr` evicts the oldest only when a 4th bond is written).
+- [ ] Portal "Forget iPhone" deletes only the iPhone's bond; "Forget Mac" only the Mac's.
+- [ ] Nav throughput: frames of the `busy` size (about 4 KB, several chunks) arrive at 5 per second without `[ble] bad nav chunk` lines; the NimBLE host task does not overflow its stack (no `stack overflow` panic) while decoding.
 
 ## Radio and power
 

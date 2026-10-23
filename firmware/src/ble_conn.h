@@ -21,6 +21,12 @@ struct BleConnParams {
 
 constexpr BleConnParams BLE_IDLE_PARAMS{24, 36, 6, 400};  // 30..45 ms, skip up to 6 events, 4 s
 
+// The iPhone's link while it streams map frames (one every ~200 ms, several
+// writes each): short interval and no latency, so a frame starts at the next
+// connection event and lands well inside its 200 ms. The Mac's link keeps
+// BLE_IDLE_PARAMS.
+constexpr BleConnParams BLE_NAV_PARAMS{12, 24, 0, 400};  // 15..30 ms, no latency, 4 s
+
 // Apple's Accessory Design Guidelines, Bluetooth "Connection Parameters". A
 // request that breaks any of these is rejected, and the link keeps the Mac's
 // own choice. One return per function: the board builds as C++11.
@@ -40,3 +46,4 @@ constexpr bool bleAppleAccepts(const BleConnParams &p) {
 }
 
 static_assert(bleAppleAccepts(BLE_IDLE_PARAMS), "macOS would reject BLE_IDLE_PARAMS");
+static_assert(bleAppleAccepts(BLE_NAV_PARAMS), "iOS would reject BLE_NAV_PARAMS");

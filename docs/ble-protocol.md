@@ -1,8 +1,10 @@
 # BLE protocol (version 1)
 
-The cube is a BLE peripheral advertising as **Claude Cube**; the Mac app is the central.
-Everything here is pinned by `firmware/src/ble_frame.h` and `firmware/sim/fixtures/ble-frames.txt`
-(read by both the C++ and the Swift tests).
+The cube is a BLE peripheral advertising as **Claude Cube**; the Mac app and the iPhone app are
+centrals, bonded and connected at the same time (see "Pairing"). Everything here is pinned by
+`firmware/src/ble_frame.h` and `firmware/sim/fixtures/ble-frames.txt` (read by both the C++ and the
+Swift tests); the navigation frames by `firmware/src/nav_frame.h` and
+`firmware/sim/fixtures/nav-frames.txt`.
 
 ## Service
 
@@ -14,8 +16,9 @@ Everything here is pinned by `firmware/src/ble_frame.h` and `firmware/sim/fixtur
 | Info    | `6e6d3c10-5d1a-4c1e-9f0b-7c4a2b8e1a04` | read (encrypted + authenticated)         |
 | Settings| `6e6d3c10-5d1a-4c1e-9f0b-7c4a2b8e1a05` | read + write (encrypted + authenticated) |
 | Volume  | `6e6d3c10-5d1a-4c1e-9f0b-7c4a2b8e1a06` | write (encrypted + authenticated), fw_rev 5+ |
+| Nav     | `6e6d3c10-5d1a-4c1e-9f0b-7c4a2b8e1a07` | write + write without response (encrypted + authenticated), fw_rev 8+ |
 
-Info is 2 bytes: `[proto_ver, fw_rev]`. Reading it is what triggers pairing, so the Mac reads
+Info is 2 bytes: `[proto_ver, fw_rev]` (current firmware: `[1, 8]`). Reading it is what triggers pairing, so the Mac reads
 Info first, checks `proto_ver == 1`, then subscribes to Control, then writes payloads.
 
 A bonded Mac caches this table. When the cube boots a `fw_rev` other than the one it last
@@ -59,14 +62,77 @@ cube sees honest staleness.
 
 ## Pairing
 
-Display-only IO capability, MITM, Secure Connections, bonding. A cube with no bond shows a random
-6-digit passkey; macOS asks for it. Only a passkey pairing counts: a link that ends up encrypted but
-not authenticated (Just Works, from a central with no input) is dropped along with any bond it
-stored. One bond at a time: while a bond exists, only that bond gets in; a second device that
-completes pairing (bonding or not) is disconnected and its new bond deleted. A link that is not
-secured within 60 s of connecting is dropped, so a central that connects and never pairs cannot
-hold the cube's only connection slot (it stops advertising while connected). To pair again, use "Forget paired
-Mac" in the setup portal and also remove "Claude Cube" in the Mac's Bluetooth settings.
+Display-only IO capability, MITM, Secure Connections, bonding. A device pairing shows a random
+6-digit passkey on the cube; macOS or iOS asks for it. Only a passkey pairing counts: a link that
+ends up encrypted but not authenticated (Just Works, from a central with no input) is dropped along
+with any bond it stored. The policy is `firmware/src/ble_bonds.h` (pure, `ble_bonds_test`).
+
+**Two bonds, two links.** The cube keeps one Mac and one iPhone bonded and connected at once. It
+keeps advertising while fewer than two links are up (three during the pairing window, so a
+replacement can pair while the old device is still connected), and drops a link that is not
+secured within 60 s of connecting, so a central that connects and never pairs cannot hold a slot.
+
+**Who may pair.** With no bond, the first device pairs freely. With a bond stored, a stored bond
+re-encrypting always gets in, and a new pairing gets in only during the **pairing window**: the
+120 s after a reboot from "Pair new device" in the setup portal (NVS namespace `ble`, key `pw`,
+cleared at that boot). Outside the window, a device that completes pairing is disconnected and the
+bond it just stored is deleted; the bonds already there are untouched. The window closes early once
+one new bond beside the existing ones is accepted.
+
+**Kinds.** A bond's kind is learned from the first write on its secured link: Nav means an iPhone;
+Payload, Settings or Volume mean a Mac. It is stored in NVS namespace `ble` under the identity
+address as 12 lowercase hex digits (most significant byte first), value `m` or `p` (one byte). A
+bond left by firmware before fw_rev 8 (which bonded only a Mac) is taken as the Mac. Once a kind is
+learned, an older bond of the same kind is deleted and its link dropped: pairing a new iPhone
+replaces the old one, and likewise for a Mac. The Volume card and the WiFi transport policy follow
+the Mac's bond only; the "Waiting for a Mac" screen at first boot follows any bond.
+
+**Links.** Once secured, the iPhone's link asks for 15-30 ms, latency 0, timeout 4 s
+(`BLE_NAV_PARAMS`), and the Mac's for 30-45 ms, latency 6, timeout 4 s (`BLE_IDLE_PARAMS`), both in
+`firmware/src/ble_conn.h` and checked against Apple's rules. Control notifications go to every
+subscribed central. Liveness (`bleLastGood`) counts only Payload writes.
+
+**Forgetting.** The setup portal has "Forget Mac" and "Forget iPhone" (each shown only while such a
+bond exists; the cube reboots). Also remove "Claude Cube" in that device's Bluetooth settings
+before pairing it again.
+
+## Nav (added in fw_rev 8, protocol still 1)
+
+The iPhone streams ready-to-draw map frames to the Nav characteristic (about one every 200 ms,
+written without response). There is no ack: the newest frame wins. The cube reassembles and decodes
+each frame on the NimBLE task and hands the latest valid one to the main loop; a frame that fails
+to decode is dropped and the last good one stays.
+
+Chunks: each write is `[ver=1][seq][idx][total]` + body bytes, same rules as Payload (`docs/ble-protocol.md`) except `total ≤ 32` and the reassembled frame `≤ 8192` bytes. A new `seq` replaces a half-finished frame (latest wins).
+
+Reassembled frame, little-endian:
+
+| Field | Type | Notes |
+|---|---|---|
+| version | u8 | `1` |
+| state | u8 | `NavState`: 0 Ended, 1 Navigating, 2 Rerouting, 3 OffRouteNoSignal, 4 Arrived |
+| turn | u8 | `NavTurn`: 0 Straight, 1 SlightLeft, 2 Left, 3 SharpLeft, 4 SlightRight, 5 Right, 6 SharpRight, 7 UTurn, 8 KeepLeft, 9 KeepRight, 10 Roundabout, 11 Arrive, 12 Rejoin |
+| exit | u8 | roundabout exit number, 0 = none |
+| dir | u8 | Rejoin arrow, 0..255 = 0..360° clockwise from screen-up (only meaningful for Rejoin) |
+| flags | u8 | bit0 = GPS weak (rider arrow drawn grey) |
+| dist | u8 len + UTF-8 | ≤ 15 bytes, e.g. `150 m` |
+| street | u8 len + UTF-8 | ≤ 63 bytes |
+| eta | u8 len + UTF-8 | ≤ 23 bytes, e.g. `12 min` |
+| nRoute | u16 | ≤ 256, then nRoute × (i16 x, i16 y) screen px |
+| nStreets | u8 | ≤ 96, then each: u8 cls (0–3, as the server's tiles), u8 nPts (≥ 2), nPts × (i16 x, i16 y); total street points ≤ 640 |
+
+Coordinates are screen pixels of the 240×280 frame, already clipped by the phone to x ∈ [−64, 304], y ∈ [−64, 344]. Any length over its limit, a truncated body, or trailing bytes rejects the frame (the last good frame stays).
+
+Golden frames (pinned by `firmware/sim/fixtures/nav-frames.txt`, one per line, `nav <name> <hex>`; `nav_frame_test` decodes them):
+
+```
+# turn: Navigating, Right, "150 m", "Lê Lợi", "12 min", route (120,200)(120,90)(200,80), one cls-2 street (0,150)(240,160)
+nav turn 01 01 05 00 00 00 05 31 35 30 20 6d 09 4c c3 aa 20 4c e1 bb a3 69 06 31 32 20 6d 69 6e 03 00 78 00 c8 00 78 00 5a 00 c8 00 50 00 01 02 02 00 00 96 00 f0 00 a0 00
+# arrived: Arrived, Arrive, "", "Bến Thành", "", no route, no streets
+nav arrived 01 04 0b 00 00 00 00 0c 42 e1 ba bf 6e 20 54 68 c3 a0 6e 68 00 00 00 00
+# offroute: OffRouteNoSignal, Rejoin, dir 64 (90° right), GPS weak, "80 m", route (-64,304)(300,-64)
+nav offroute 01 03 0c 00 40 01 04 38 30 20 6d 00 00 02 00 c0 ff 30 01 2c 01 c0 ff 00
+```
 
 ## Settings (added in fw_rev 2, protocol still 1)
 
