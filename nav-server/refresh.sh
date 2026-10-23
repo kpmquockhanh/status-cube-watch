@@ -98,9 +98,13 @@ healthy() {
   return 1
 }
 
+# Recreate, not restart: a restart keeps the old container's image, heap and memory limit, and a
+# graph with more profiles needs the current compose file's (see NOTES.md "Four route profiles").
+up() { $DC -f "$COMPOSE" up -d --force-recreate --no-deps graphhopper; }
+
 if [ -f "$COMPOSE" ] && [ -n "$($DC -f "$COMPOSE" ps -aq graphhopper 2>/dev/null)" ]; then
-  echo "[refresh] restart graphhopper"
-  if ! $DC -f "$COMPOSE" restart graphhopper || ! healthy; then
+  echo "[refresh] recreate graphhopper"
+  if ! up || ! healthy; then
     echo "[refresh] graphhopper restart/health failed; rolling back" >&2
     if [ -z "$prev_graph" ] || [ -z "$prev_tiles" ]; then
       echo "[refresh] no previous data to roll back to" >&2
@@ -109,7 +113,7 @@ if [ -f "$COMPOSE" ] && [ -n "$($DC -f "$COMPOSE" ps -aq graphhopper 2>/dev/null
     flip graph "$prev_graph"
     flip tiles "$prev_tiles"
     rm -rf "$REL/graph-$stamp" "$REL/tiles-$stamp"
-    if ! $DC -f "$COMPOSE" restart graphhopper; then
+    if ! up; then
       echo "[refresh] ROLLBACK RESTART FAILED: previous data is linked but graphhopper is not running" >&2
       exit 1
     fi

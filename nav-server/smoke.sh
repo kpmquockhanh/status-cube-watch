@@ -14,24 +14,28 @@ code() { curl -s -o /dev/null -w '%{http_code}' --max-time 30 "$@"; }
 [ "$(code -X POST "$URL/route" -H 'X-Nav-Key: wrong' -H 'content-type: application/json' -d '{}')" = 401 ] || fail "wrong key on /route is not 401"
 [ "$(code "$URL$TILE" -H 'X-Nav-Key: wrong')" = 401 ] || fail "wrong key on tile is not 401"
 
-route() { # name lon1 lat1 lon2 lat2
+route() { # name lon1 lat1 lon2 lat2 [profile]
   local out
   out=$(mktemp)
   local c
   c=$(curl -s -o "$out" -w '%{http_code}' --max-time 60 -X POST "$URL/route" \
     -H "X-Nav-Key: $KEY" -H 'content-type: application/json' \
-    -d "{\"points\":[[$2,$3],[$4,$5]],\"profile\":\"moto_vn\",\"instructions\":true,\"points_encoded\":false,\"locale\":\"en\",\"details\":[\"road_class\"]}")
-  [ "$c" = 200 ] || { rm -f "$out"; fail "$1 route returned $c"; }
+    -d "{\"points\":[[$2,$3],[$4,$5]],\"profile\":\"${6:-moto_vn}\",\"instructions\":true,\"points_encoded\":false,\"locale\":\"en\",\"details\":[\"road_class\",\"crossing\"]}")
+  [ "$c" = 200 ] || { rm -f "$out"; fail "$1 ${6:-moto_vn} route returned $c"; }
   node -e '
     const p=JSON.parse(require("fs").readFileSync(process.argv[1],"utf8")).paths[0];
     if(!(p.instructions.length>1)) { console.error("too few instructions"); process.exit(1); }
     if(p.details.road_class.some(d=>String(d[2]).toLowerCase()==="motorway")) { console.error("MOTORWAY in route"); process.exit(1); }
-  ' "$out" || { rm -f "$out"; fail "$1 route content"; }
-  [ -n "${SAVE:-}" ] && [ "$1" = hcmc ] && cp "$out" "$SAVE"
+    if(!p.details.crossing) { console.error("no crossing detail"); process.exit(1); }
+  ' "$out" || { rm -f "$out"; fail "$1 ${6:-moto_vn} route content"; }
+  [ -n "${SAVE:-}" ] && [ "$1" = hcmc ] && [ "${6:-moto_vn}" = moto_vn ] && cp "$out" "$SAVE"
   rm -f "$out"
 }
-route hcmc 106.6980 10.7725 106.6588 10.8185
-route hanoi 105.8523 21.0287 105.8042 21.2187
+# Every route style the app asks for (ios-nav RouteStyle.swift).
+for profile in moto_vn moto_calm moto_calm_rush moto_turns; do
+  route hcmc 106.6980 10.7725 106.6588 10.8185 "$profile"
+  route hanoi 105.8523 21.0287 105.8042 21.2187 "$profile"
+done
 
 t=$(mktemp)
 [ "$(curl -s -o "$t" -w '%{http_code}' --max-time 30 -H "X-Nav-Key: $KEY" "$URL$TILE")" = 200 ] || { rm -f "$t"; fail "tile not 200"; }
