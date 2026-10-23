@@ -23,6 +23,8 @@ import Foundation
     public var frameBudget: Int = NavLimits.maxFrameBytes
 
     private(set) var route: Route?
+    /// The style the rider picked; every reroute asks for it again (Calm by the clock at that moment).
+    public private(set) var style: RouteStyle = .fastest
     private var tracker: RouteTracker?
     private var destination: Coord?
     private(set) var tiles: [TileID: [StreetLine]] = [:]
@@ -56,11 +58,20 @@ import Foundation
     // MARK: start / stop
 
     /// Fetches the route and every corridor tile, or throws and keeps nothing.
-    public func start(from: Coord, to: Coord) async throws {
-        let (r, t) = try await fetch(from: from, to: to, have: [:])
+    public func start(from: Coord, to: Coord, style: RouteStyle = .fastest) async throws {
+        let (r, t) = try await fetch(from: from, to: to, profile: style.profile(rushHour: isRushHour(now())), have: [:])
         try Task.checkCancellation()
         newRide()
-        begin(route: r, tiles: t, destination: to)
+        begin(route: r, tiles: t, destination: to, style: style)
+        save()
+    }
+
+    /// Rides a route the preview already has: fetches its corridor tiles only, or throws and keeps nothing.
+    public func start(route r: Route, to: Coord, style: RouteStyle) async throws {
+        let t = try await Self.fetchTiles(server: server, route: r, have: [:])
+        try Task.checkCancellation()
+        newRide()
+        begin(route: r, tiles: t, destination: to, style: style)
         save()
     }
 
@@ -73,7 +84,7 @@ import Foundation
         guard let c = cache.loadLast() else { return false }
         if let dest, distanceMeters(dest, c.destination) > meters { return false }
         newRide()
-        begin(route: c.route, tiles: c.tiles, destination: c.destination)
+        begin(route: c.route, tiles: c.tiles, destination: c.destination, style: c.style)
         // A ride cached right after a reroute may lack some tiles: they are asked for in passing.
         missingTiles = corridorTiles(route: c.route.points).subtracting(c.tiles.keys)
         return true
@@ -95,8 +106,8 @@ import Foundation
         lastFix = nil; lastFixAt = nil; lastProgress = nil
     }
 
-    private func begin(route r: Route, tiles t: [TileID: [StreetLine]], destination dest: Coord) {
-        route = r; tracker = RouteTracker(route: r); destination = dest
+    private func begin(route r: Route, tiles t: [TileID: [StreetLine]], destination dest: Coord, style s: RouteStyle) {
+        route = r; tracker = RouteTracker(route: r); destination = dest; style = s
         tiles = t; streets = t.values.flatMap { $0 }
         arrivedAt = nil; lastRerouteAttempt = nil
         state = .navigating
@@ -172,10 +183,11 @@ import Foundation
         generation += 1
         let gen = generation
         let server = self.server, sleep = self.sleep, limit = rerouteTimeout
+        let profile = style.profile(rushHour: isRushHour(t))
         rerouteTask = Task { [weak self] in
             let result: Result<Route, Error>
             do { result = .success(try await Self.routeWithTimeout(server: server, from: from, to: destination,
-                                                                   sleep: sleep, limit: limit)) }
+                                                                   profile: profile, sleep: sleep, limit: limit)) }
             catch { result = .failure(error) }
             self?.finishReroute(result, generation: gen)
         }
@@ -187,7 +199,7 @@ import Foundation
         rerouteTask = nil
         switch result {
         case .success(let r):
-            begin(route: r, tiles: tiles, destination: destination ?? r.points.last ?? Coord(lat: 0, lon: 0))
+            begin(route: r, tiles: tiles, destination: destination ?? r.points.last ?? Coord(lat: 0, lon: 0), style: style)
             // The new tracker starts from the last fix (its first sight of it).
             lastProgress = lastFix.map { tracker!.update($0) }
             missingTiles = corridorTiles(route: r.points).subtracting(tiles.keys)
@@ -201,11 +213,11 @@ import Foundation
     }
 
     /// The deadline covers the route request only; on timeout it is a failure and the old route stays.
-    nonisolated private static func routeWithTimeout(server: NavServer, from: Coord, to: Coord,
+    nonisolated private static func routeWithTimeout(server: NavServer, from: Coord, to: Coord, profile: String,
                                                      sleep: @escaping @Sendable (TimeInterval) async throws -> Void,
                                                      limit: TimeInterval) async throws -> Route {
         try await withThrowingTaskGroup(of: Route.self) { group in
-            group.addTask { try await server.route(from: from, to: to, profile: RouteStyle.fastest.profile(rushHour: false)) }
+            group.addTask { try await server.route(from: from, to: to, profile: profile) }
             group.addTask { try await sleep(limit); throw StartError.noSignal }
             defer { group.cancelAll() }
             return try await group.next()!
@@ -257,15 +269,15 @@ import Foundation
     /// Writes the cache off the main actor, one write after another.
     private func save() {
         guard let route, let destination else { return }
-        cache.saveInBackground(route: route, tiles: tiles, destination: destination)
+        cache.saveInBackground(route: route, tiles: tiles, destination: destination, style: style)
     }
 
     // MARK: fetching
 
-    private func fetch(from: Coord, to: Coord, have: [TileID: [StreetLine]]) async throws -> (Route, [TileID: [StreetLine]]) {
+    private func fetch(from: Coord, to: Coord, profile: String, have: [TileID: [StreetLine]]) async throws -> (Route, [TileID: [StreetLine]]) {
         let server = self.server
         do {
-            let r = try await server.route(from: from, to: to, profile: RouteStyle.fastest.profile(rushHour: false))
+            let r = try await server.route(from: from, to: to, profile: profile)
             return (r, try await Self.fetchTiles(server: server, route: r, have: have))
         } catch let e as StartError { throw e
         } catch let e as CancellationError { throw e

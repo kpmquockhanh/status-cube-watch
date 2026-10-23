@@ -6,6 +6,7 @@ public struct CachedRide: Sendable {
     public var route: Route
     public var tiles: [TileID: [StreetLine]]
     public var destination: Coord
+    public var style: RouteStyle
 }
 
 /// Keeps the last ride (route + tiles + destination) on disk for an offline restart of the same
@@ -13,7 +14,7 @@ public struct CachedRide: Sendable {
 /// after another; `waitForPendingSave` lets a reader see the latest one.
 public final class RideCache: @unchecked Sendable {
     /// Bumped whenever the file layout changes; a file of another version reads as no ride.
-    static let version = 2
+    static let version = 3
 
     private let file: URL
     private let lock = NSLock()
@@ -38,6 +39,7 @@ public final class RideCache: @unchecked Sendable {
         var distance: Double, time: Double
         var instr: [Instr]
         var tiles: [Tile]
+        var style: String
     }
 
     private static func pack(_ cs: [Coord]) -> [Int32] {
@@ -56,7 +58,7 @@ public final class RideCache: @unchecked Sendable {
     }
 
     /// Writes now, on the calling thread.
-    public func save(route: Route, tiles: [TileID: [StreetLine]], destination: Coord) {
+    public func save(route: Route, tiles: [TileID: [StreetLine]], destination: Coord, style: RouteStyle) {
         let dto = DTO(
             v: Self.version, dest: Self.pack([destination]), pts: Self.pack(route.points),
             distance: route.distance, time: route.time,
@@ -64,19 +66,20 @@ public final class RideCache: @unchecked Sendable {
                 .init(turn: $0.turn.rawValue, exit: $0.exit, street: $0.streetName, distance: $0.distance,
                       time: $0.time, lo: $0.interval.lowerBound, hi: $0.interval.upperBound)
             },
-            tiles: tiles.map { id, lines in .init(x: id.x, y: id.y, lines: lines.map { .init(c: $0.cls, p: Self.pack($0.points)) }) })
+            tiles: tiles.map { id, lines in .init(x: id.x, y: id.y, lines: lines.map { .init(c: $0.cls, p: Self.pack($0.points)) }) },
+            style: style.rawValue)
         guard let data = try? JSONEncoder().encode(dto) else { return }
         try? FileManager.default.createDirectory(at: file.deletingLastPathComponent(), withIntermediateDirectories: true)
         try? data.write(to: file, options: .atomic)
     }
 
     /// Writes off the caller's thread, after any write still in flight.
-    public func saveInBackground(route: Route, tiles: [TileID: [StreetLine]], destination: Coord) {
+    public func saveInBackground(route: Route, tiles: [TileID: [StreetLine]], destination: Coord, style: RouteStyle) {
         lock.lock(); defer { lock.unlock() }
         let previous = pending
         pending = Task.detached(priority: .utility) { [self] in
             await previous?.value
-            save(route: route, tiles: tiles, destination: destination)
+            save(route: route, tiles: tiles, destination: destination, style: style)
         }
     }
 
@@ -111,7 +114,7 @@ public final class RideCache: @unchecked Sendable {
             tiles[TileID(x: t.x, y: t.y)] = lines
         }
         return CachedRide(route: Route(points: points, distance: dto.distance, time: dto.time, instructions: instructions),
-                          tiles: tiles, destination: dest)
+                          tiles: tiles, destination: dest, style: RouteStyle(rawValue: dto.style) ?? .fastest)
     }
 
     /// The cached ride's destination when it is within `meters` of `dest`.

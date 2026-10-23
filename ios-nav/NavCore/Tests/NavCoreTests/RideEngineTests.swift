@@ -202,14 +202,88 @@ private func tmpCache() -> RideCache {
     #expect(distanceMeters(to, asked) < 1)
 }
 
+/// `h:m` on 2026-10-19 (a Monday) in the phone's time zone, as the engine reads it.
+private func monday(_ h: Int, _ m: Int = 0) -> Date {
+    Calendar.current.date(from: DateComponents(year: 2026, month: 10, day: 19, hour: h, minute: m))!
+}
+
+/// Leaves the route (three fixes off it) and waits for the reroute request.
+@MainActor private func goOffRoute(_ engine: RideEngine) async {
+    _ = engine.update(fix(north(200)))
+    let off = north(250, east: -120)
+    _ = engine.update(fix(off)); _ = engine.update(fix(off)); _ = engine.update(fix(off))
+    await engine.waitForReroute()
+}
+
+@MainActor @Test func startWithRouteMakesNoRouteRequest() async throws {
+    let server = FakeNavServer()
+    let engine = makeEngine(server, Clock())
+    try await engine.start(route: lRoute(), to: lRoute().points.last!, style: .calm)
+    #expect(await server.routeCalls == 0)
+    #expect(await server.tileCalls > 0)
+    #expect(engine.state == .navigating)
+    #expect(engine.style == .calm)
+    #expect(engine.route == lRoute())
+}
+
+@MainActor @Test func startWithRouteOfflineThrowsAndStaysEnded() async {
+    let server = FakeNavServer(); await server.set(online: false)
+    let engine = makeEngine(server, Clock())
+    await #expect(throws: StartError.noSignal) { try await engine.start(route: lRoute(), to: lRoute().points.last!, style: .calm) }
+    #expect(engine.state == .ended)
+}
+
+@MainActor @Test func startFromToAsksForTheStyle() async throws {
+    let server = FakeNavServer(); await server.set(route: lRoute())
+    let engine = makeEngine(server, Clock())
+    try await engine.start(from: north(0), to: lRoute().points.last!, style: .fewestTurns)
+    #expect(await server.lastProfile == "moto_turns")
+    #expect(engine.style == .fewestTurns)
+}
+
+@MainActor @Test func rerouteKeepsStyle() async throws {
+    let server = FakeNavServer()
+    let engine = makeEngine(server, Clock())
+    try await engine.start(route: lRoute(), to: lRoute().points.last!, style: .fewestTurns)
+    await goOffRoute(engine)
+    #expect(await server.lastProfile == "moto_turns")
+    #expect(engine.style == .fewestTurns)
+}
+
+@MainActor @Test func calmRerouteFollowsTheClock() async throws {
+    let server = FakeNavServer(); let clock = Clock()
+    clock.t = monday(8)
+    let engine = makeEngine(server, clock)
+    try await engine.start(route: lRoute(), to: lRoute().points.last!, style: .calm)
+    await goOffRoute(engine)
+    #expect(await server.lastProfile == "moto_calm_rush")
+    clock.t = monday(12)
+    try await engine.start(route: lRoute(), to: lRoute().points.last!, style: .calm)
+    await goOffRoute(engine)
+    #expect(await server.lastProfile == "moto_calm")
+}
+
+@MainActor @Test func cachedRideKeepsStyle() async throws {
+    let server = FakeNavServer()
+    let cache = tmpCache()
+    let first = makeEngine(server, Clock(), cache: cache)
+    try await first.start(route: lRoute(), to: lRoute().points.last!, style: .fewestTurns)
+    let engine = makeEngine(server, Clock(), cache: cache)
+    #expect(await engine.resumeLast())
+    #expect(engine.style == .fewestTurns)
+    await goOffRoute(engine)
+    #expect(await server.lastProfile == "moto_turns")
+}
+
 @Test func cacheRoundTripsAndRejectsOtherVersions() throws {
     let dir = FileManager.default.temporaryDirectory.appendingPathComponent("ride-\(UUID().uuidString)")
     let cache = RideCache(directory: dir)
     let route = lRoute()
     let tiles = [TileID(x: 3, y: 4): [StreetLine(cls: 1, points: [north(10), north(20, east: 5)])], TileID(x: 5, y: 6): []]
     let dest = north(0, east: 310, from: north(500))
-    cache.save(route: route, tiles: tiles, destination: dest)
+    cache.save(route: route, tiles: tiles, destination: dest, style: .calm)
     let back = try #require(cache.loadLast())
+    #expect(back.style == .calm)
     #expect(back.route.points.count == route.points.count)
     #expect(zip(back.route.points, route.points).allSatisfy { distanceMeters($0, $1) < 0.2 })
     #expect(back.route.instructions == route.instructions)
@@ -219,13 +293,16 @@ private func tmpCache() -> RideCache {
     #expect(distanceMeters(back.destination, dest) < 0.2)
     // Integer microdegrees, not decimal degrees.
     let text = try String(contentsOf: dir.appendingPathComponent("last-ride.json"), encoding: .utf8)
-    #expect(text.contains("\"v\":2"))
+    #expect(text.contains("\"v\":3"))
     #expect(!text.contains("\"lat\""))
 
     // Another version (or the old layout without one) reads as no ride.
     let file = dir.appendingPathComponent("last-ride.json")
-    try Data(text.replacingOccurrences(of: "\"v\":2", with: "\"v\":1").utf8).write(to: file)
+    try Data(text.replacingOccurrences(of: "\"v\":3", with: "\"v\":2").utf8).write(to: file)
     #expect(cache.loadLast() == nil)
+    // A style this build does not know rides as Fastest.
+    try Data(text.replacingOccurrences(of: "\"style\":\"calm\"", with: "\"style\":\"scenic\"").utf8).write(to: file)
+    #expect(cache.loadLast()?.style == .fastest)
     try Data(#"{"points":[{"lat":1,"lon":2}],"distance":1,"time":1,"instructions":[],"tiles":[]}"#.utf8).write(to: file)
     #expect(cache.loadLast() == nil)
 }
