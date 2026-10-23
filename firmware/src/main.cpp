@@ -99,6 +99,11 @@ bool touchDown = false;  // a finger was on the glass at the last poll: do not f
 uint32_t lastImu = 0;
 constexpr uint32_t IMU_POLL_MS = 200;
 
+// The "PAIRING OPEN" message covers the deck for the pairing window; a tap dismisses it for the rest
+// of that window (it is cleared when the window ends). Until then gestures do not reach the deck.
+bool pairMsgDismissed = false;
+bool pairingMsgUp() { return blePairingOpen() && !pairMsgDismissed; }
+
 // What the backlight is set to now: full while navigation runs (a map in daylight), else the setting.
 uint8_t shownBacklight() { return navSession.active() ? 255 : deviceSettings().backlight; }
 
@@ -241,12 +246,12 @@ void pollTouch() {
   }
   if (down) unlock.touch(now);
   // The unlock prompt covers the deck: a tap there is for it alone.
-  const bool onUnlock = !editing && !navSession.active() && unlock.screen(now) != UnlockScreen::Hidden;
+  const bool onUnlock = !editing && !navSession.active() && !pairingMsgUp() && unlock.screen(now) != UnlockScreen::Hidden;
   // On the Volume card a vertical move is the volume, not a swipe (gesture.h).
   // Whether it is the slider's touch is decided where the finger landed, so a touch that began on
   // another card never reaches it; the latch clears on the lift pass, after the gesture is routed.
   if (landing) {
-    touchOnVolume = onVolumeCard() && !editing && !onUnlock && !navSession.active();
+    touchOnVolume = onVolumeCard() && !editing && !onUnlock && !navSession.active() && !pairingMsgUp();
     touchOnVolumeRow = touchOnVolume && volumeInRow(y);
   }
   const bool onVolume = touchOnVolume && onVolumeCard() && !editing;
@@ -264,6 +269,15 @@ void pollTouch() {
   // Navigation owns the screen: the tracker has read the touch (so it stays consistent), nothing acts on it.
   if (navSession.active()) {
     if (volSlider.held()) volSlider.release(now);
+    return;
+  }
+  // Likewise under the "PAIRING OPEN" message: a tap dismisses it, nothing else acts.
+  if (pairingMsgUp()) {
+    if (volSlider.held()) volSlider.release(now);
+    if (gesture == Gesture::Tap) {
+      pairMsgDismissed = true;
+      dirty = true;
+    }
     return;
   }
   // While the panel slides in its buttons are not where the hit-test puts
@@ -526,7 +540,8 @@ void loop() {
     dirty = true;
   }
 
-  if (rotateMs() > 0 && !editing && !touchDown && !volSlider.held() && now - lastRotate >= rotateMs()) {
+  if (!blePairingOpen()) pairMsgDismissed = false;
+  if (rotateMs() > 0 && !editing && !navSession.active() && !touchDown && !volSlider.held() && now - lastRotate >= rotateMs()) {
     step(1);
   }
 
@@ -537,7 +552,7 @@ void loop() {
   }
 
   // Screen sleep: never while the editor or a pairing code is up (see idle_sleep.h).
-  const bool keepOn = editing || navSession.active() || blePairingOpen() || bleState() == BleState::Pairing || (!pairWaitDismissed && waitingToPair());
+  const bool keepOn = editing || navSession.active() || pairingMsgUp() || bleState() == BleState::Pairing || (!pairWaitDismissed && waitingToPair());
   const bool wantOn = idle.update(now, keepOn, sleepMs());
   if (wantOn != screenOn) {
     screenOn = wantOn;
@@ -571,7 +586,7 @@ void loop() {
     const UnlockScreen us = editing ? UnlockScreen::Hidden : unlock.screen(now);
     if (pairing) uiBlePair(lcd, blePasskey());  // the code must be seen
     else if (navOn) uiNav(lcd, navScene, navSession.phoneLost(now), bv);
-    else if (blePairingOpen()) uiMessage(lcd, "PAIRING OPEN", "PAIR FROM THE APP OR MAC");
+    else if (pairingMsgUp()) uiMessage(lcd, "PAIRING OPEN", "PAIR FROM THE APP OR MAC");
     else if (waiting) uiBlePair(lcd, 0);
     else if (editorUp) uiDeviceEditor(lcd, editDevice);
     else if (us != UnlockScreen::Hidden) uiUnlock(lcd, us == UnlockScreen::Waiting);
@@ -595,3 +610,8 @@ void loop() {
     delay(15);
   }
 }
+
+#ifdef SIM_BENCH
+// The bench checks that a ride leaves the deck where it was.
+uint8_t benchCardIndex() { return cardIndex; }
+#endif

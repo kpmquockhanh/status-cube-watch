@@ -9,12 +9,15 @@ you observed it. Logs: `pio device monitor` (cube; look for `[nav]` and `[ble]`)
 - [ ] Mac and iPhone both bonded and connected: the deck keeps updating from the Mac while the iPhone streams a ride; neither link drops the other.
 - [ ] Start a ride: the map takes the screen within about 1 s, at full brightness, whatever the Display panel's brightness is. `[nav] ride started` is logged.
 - [ ] Swipes and taps do nothing while the map is up; the screen never sleeps during the ride.
+- [ ] With auto-advance on (e.g. 10 s), a long ride does not change cards under the map; when the ride ends the deck is on the card it was on.
 - [ ] End the ride in the app: the deck returns at once, brightness goes back to its setting, auto-advance does not fire immediately.
 - [ ] Open the display panel, then start a ride: the panel closes without saving.
 - [ ] Mac locked with "Unlock Mac with cube" on, then a ride: the map stays up (no unlock prompt over it).
 - [ ] Turn the phone's Bluetooth off mid-ride: `NO PHONE` shows after about 3 s and the deck returns about 20 s after the last frame.
 
 ## Pairing window
+
+- [ ] While "PAIRING OPEN" shows, swipes and taps do nothing to the deck (no editor, no card change, no mute); a tap dismisses the message for the rest of the window.
 
 - [ ] Portal "Pair new device" and reboot: "PAIRING OPEN" shows for 2 minutes, a new device can pair beside the bonded ones, the passkey screen takes over when it pairs, and the deck returns when the window ends.
 - [ ] With the window closed, a third device cannot pair (see `docs/ble-acceptance.md`).

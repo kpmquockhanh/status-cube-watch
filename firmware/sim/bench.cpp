@@ -50,6 +50,8 @@ void loop();
 uint64_t g_simUs = 100000;  // the board has been up a moment when setup() runs
 Display *g_simDisplay = nullptr;
 
+uint8_t benchCardIndex();  // main.cpp
+
 namespace {
 
 using Clock = std::chrono::steady_clock;
@@ -132,10 +134,12 @@ struct Scenario {
   // screen is off at the end.
   uint8_t sleepMin;
   bool mustSleep;
+  uint16_t rotateSec;  // auto-advance, 0 = off
   std::vector<Stroke> strokes;
 };
 
 Scenario S;
+uint8_t g_endCard = 0;
 uint32_t g_start = 0;  // millis() when the scenario's clock starts (after setup)
 bool g_running = false;
 
@@ -190,6 +194,7 @@ Scenario makeScenario(const std::string &name) {
     s.what = "navigation: Mac and iPhone bonded, a busy frame every 200 ms, rider moving, full brightness";
     s.seconds = 600;
     s.nav = "busy";
+    s.rotateSec = 5;  // auto-advance is on: it must not move the deck during the ride
   } else if (name == "sleep") {
     s.what = "Mac gone: WiFi fetches fail, screen sleeps after the timeout (2 min)";
     s.seconds = 600;
@@ -494,7 +499,7 @@ void runScenario() {
   setup();  // loads the config.h defaults, so the scenario's timers go in after it
   DeviceSettings d = deviceSettings();
   d.sleepMin = S.sleepMin;
-  d.rotateSec = 0;
+  d.rotateSec = S.rotateSec;
   deviceSettingsSave(d);
   publishSettings();  // as if stored before boot
   resetCounters();
@@ -523,6 +528,7 @@ void runScenario() {
     }
   }
 
+  g_endCard = benchCardIndex();
   const double total = (double)S.seconds * 1e6;
   double charge = 0, busy = 0;
   for (int i = 0; i < NCLK; i++) {
@@ -636,6 +642,11 @@ int main(int argc, char **argv) {
   if (g_unpublished) {
     fprintf(stderr, "%s: a Settings read over BLE returned stale settings after %llu passes\n", S.name,
             (unsigned long long)g_unpublished);
+    return 1;
+  }
+  if (S.nav && g_endCard != 0) {
+    fprintf(stderr, "%s: the ride moved the deck to card %u (auto-advance must freeze during navigation)\n", S.name,
+            (unsigned)g_endCard);
     return 1;
   }
   if (S.mustSleep && g_backlight != 0) {
