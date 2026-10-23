@@ -9,8 +9,8 @@ private func north(_ m: Double, east: Double = 0) -> Coord {
     Coord(lat: origin.lat + m / mPerDegLat, lon: origin.lon + east / (mPerDegLat * cos(origin.lat * .pi / 180)))
 }
 
-private func progress(heading: Double = 0, toTurn: Double = 500, snapped: Coord = origin, along: Double = 0) -> Progress {
-    Progress(snapped: snapped, heading: heading, distanceAlong: along, nextInstruction: 0, distanceToTurn: toTurn,
+private func progress(heading: Double = 0, toTurn: Double = 500, snapped: Coord = origin, along: Double = 0, fix: Coord? = nil) -> Progress {
+    Progress(fix: fix ?? snapped, snapped: snapped, heading: heading, distanceAlong: along, nextInstruction: 0, distanceToTurn: toTurn,
              remainingTime: 720, offRoute: false, distanceToRoute: 0, bearingToRoute: 0, arrived: false, gpsWeak: false)
 }
 
@@ -146,5 +146,57 @@ private func allPoints(_ s: NavScene) -> [ScreenPoint] { s.route + s.streets.fla
         let s = buildScene(progress: progress(toTurn: 300), route: route, streets: [], state: .navigating)
         #expect(s.route.allSatisfy { $0.y >= -64 })
         #expect(s.route.last!.y == -64)
+    }
+
+    @Test func offRouteRiderStaysAtFixAndRouteIsOffset() {
+        let route = straightRoute(length: 1000)
+        var p = progress(snapped: origin, fix: north(0, east: 200))
+        p.offRoute = true; p.distanceToRoute = 200; p.bearingToRoute = 270
+        let s = buildScene(progress: p, route: route, streets: [], state: .rerouting)
+        let mpp = min(3.0, max(1.5, 200.0 / 100))
+        #expect(s.route.count >= 2)
+        #expect(s.route.allSatisfy { $0.x < 120 })
+        #expect(abs(Double(s.route[0].x) - (120 - 200 / mpp)) <= 1)
+        #expect(s.route[0].y == 200)
+        #expect(!s.route.contains(ScreenPoint(x: 120, y: 200)))
+    }
+
+    @Test func rotationSign() {
+        let east = StreetLine(cls: 0, points: [north(50, east: 50), north(-50, east: 50)])
+        let mpp = metersPerPixel(distanceToTurn: 500, speed: 0)
+        var s = buildScene(progress: progress(), route: straightRoute(length: 100), streets: [east], state: .navigating)
+        let e = s.streets[0].points
+        #expect(abs(Double(e[0].x) - (120 + 50 / mpp)) <= 1)
+        #expect(abs(Double(e[0].y) - (200 - 50 / mpp)) <= 1)
+        let nort = StreetLine(cls: 0, points: [north(50, east: -10), north(50, east: 10)])
+        s = buildScene(progress: progress(heading: 90), route: straightRoute(length: 100), streets: [nort], state: .navigating)
+        #expect(s.streets[0].points.allSatisfy { $0.x < 120 })
+        // Point exactly 50 m east at heading 0: x = 120 + 50/mpp, y = 200.
+        let pure = StreetLine(cls: 0, points: [north(0, east: 50), north(0, east: 60)])
+        s = buildScene(progress: progress(), route: straightRoute(length: 100), streets: [pure], state: .navigating)
+        #expect(abs(Double(s.streets[0].points[0].x) - (120 + 50 / mpp)) <= 1 && s.streets[0].points[0].y == 200)
+    }
+
+    @Test func farStreetsAreCulled() {
+        let near = (0..<5).map { i in StreetLine(cls: 2, points: [north(Double(i) * 20, east: 30), north(Double(i) * 20 + 15, east: 30)]) }
+        let far = (0..<500).map { i in StreetLine(cls: 0, points: [north(20_000 + Double(i), east: 20_000), north(20_050 + Double(i), east: 20_000)]) }
+        let route = straightRoute(length: 100)
+        let a = buildScene(progress: progress(), route: route, streets: near, state: .navigating)
+        let b = buildScene(progress: progress(), route: route, streets: far + near, state: .navigating)
+        #expect(a == b)
+        #expect(!a.streets.isEmpty)
+    }
+
+    @Test func tiesBreakByOriginalOrder() {
+        // Two identical-priority streets: the budget always keeps the first.
+        let a = StreetLine(cls: 1, points: [north(0, east: 30), north(40, east: 30)])
+        let b = StreetLine(cls: 1, points: [north(0, east: -30), north(40, east: -30)])
+        let route = straightRoute(length: 100)
+        let base = encode(buildScene(progress: progress(), route: route, streets: [], state: .navigating)).count
+        let one = base + 10
+        for _ in 0..<5 {
+            let s = buildScene(progress: progress(), route: route, streets: [a, b], state: .navigating, maxBytes: one)
+            #expect(s.streets.count == 1 && s.streets[0].points[0].x > 120)
+        }
     }
 }

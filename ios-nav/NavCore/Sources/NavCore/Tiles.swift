@@ -47,10 +47,20 @@ public func corridorTiles(route: [Coord], bufferMeters: Double = 300) -> Set<Til
     return out
 }
 
+public struct GeoBounds: Equatable, Sendable {
+    public var minLat: Double, maxLat: Double, minLon: Double, maxLon: Double
+    init(_ pts: [Coord]) {
+        minLat = pts.map(\.lat).min() ?? 0; maxLat = pts.map(\.lat).max() ?? 0
+        minLon = pts.map(\.lon).min() ?? 0; maxLon = pts.map(\.lon).max() ?? 0
+    }
+}
+
 public struct StreetLine: Equatable, Sendable {
     public var cls: UInt8
-    public var points: [Coord]
-    public init(cls: UInt8, points: [Coord]) { self.cls = cls; self.points = points }
+    public var points: [Coord] { didSet { bounds = GeoBounds(points) } }
+    /// Bounding box of `points`, computed once, for cheap culling.
+    public private(set) var bounds: GeoBounds
+    public init(cls: UInt8, points: [Coord]) { self.cls = cls; self.points = points; self.bounds = GeoBounds(points) }
 }
 
 public enum TileDecoding {

@@ -67,6 +67,10 @@ private func douglasPeucker(_ pts: [P], epsilon: Double) -> [P] {
     return zip(pts, keep).filter { $0.1 }.map { $0.0 }
 }
 
+private func runDist(_ run: [P]) -> Double {
+    run.reduce(Double.infinity) { min($0, hypot($1.x - riderX, $1.y - riderY)) }
+}
+
 private func round16(_ pts: [P]) -> [ScreenPoint] {
     var out: [ScreenPoint] = []
     for p in pts {
@@ -104,25 +108,31 @@ public func buildScene(progress: Progress, route: Route, streets: [StreetLine], 
                          gpsWeak: progress.gpsWeak, dist: dist, street: streetName, eta: eta, route: [], streets: [])
     if ended { return scene }
 
-    let mpp = metersPerPixel(distanceToTurn: progress.distanceToTurn, speed: speed)
+    let mpp = rejoin ? min(3.0, max(1.5, progress.distanceToRoute / 100))
+                     : metersPerPixel(distanceToTurn: progress.distanceToTurn, speed: speed)
     let h = progress.heading * .pi / 180
     let sinH = sin(h), cosH = cos(h)
-    let kx = metersPerDegree * cos(progress.snapped.lat * .pi / 180)
+    let center = progress.fix
+    let kx = metersPerDegree * cos(center.lat * .pi / 180)
     func project(_ c: Coord) -> P {
-        let e = (c.lon - progress.snapped.lon) * kx, n = (c.lat - progress.snapped.lat) * metersPerDegree
+        let e = (c.lon - center.lon) * kx, n = (c.lat - center.lat) * metersPerDegree
         let fwd = e * sinH + n * cosH, right = e * cosH - n * sinH
         return P(x: riderX + right / mpp, y: riderY - fwd / mpp)
     }
 
-    // Route: from the rider forward, first visible run only (it starts at the rider).
-    var path = [P(x: riderX, y: riderY)]
+    // Route: from the snapped position forward, culled to what can reach the box. Of the
+    // visible runs, the one nearest the rider (the first on route, where it starts at the rider).
+    let radius = 550 * mpp   // about the clip box's diagonal in meters
+    var path = [project(progress.snapped)]
     var along = 0.0
     for i in route.points.indices {
         if i > 0 { along += distanceMeters(route.points[i - 1], route.points[i]) }
-        if along > progress.distanceAlong + 0.01 { path.append(project(route.points[i])) }
+        if along > progress.distanceAlong + 0.01 {
+            path.append(project(route.points[i]))
+            if hypot(path[path.count - 1].x - riderX, path[path.count - 1].y - riderY) * mpp > radius * 1.5 { break }
+        }
     }
-    let runs = clip(path)
-    let routeRun = runs.first ?? []
+    let routeRun = clip(path).min { runDist($0) < runDist($1) } ?? []
     let fixed = frameBytes(dist: dist, street: streetName, eta: eta, route: 0, streets: [])
     var eps = 1.5
     var routePts = round16(douglasPeucker(routeRun, epsilon: eps))
@@ -133,9 +143,13 @@ public func buildScene(progress: Progress, route: Route, streets: [StreetLine], 
     scene.route = routePts.count >= 2 ? routePts : []
 
     // Streets: clip, simplify, order by priority, keep the longest prefix that fits.
-    struct Cand { var cls: UInt8; var pts: [ScreenPoint]; var near: Double }
+    struct Cand { var cls: UInt8; var pts: [ScreenPoint]; var near: Double; var idx: Int }
     var cands: [Cand] = []
-    for s in streets where s.points.count >= 2 && s.cls <= 3 {
+    let dLat = radius / metersPerDegree, dLon = radius / max(1, kx)
+    for (idx, s) in streets.enumerated() where s.points.count >= 2 && s.cls <= 3 {
+        let b = s.bounds
+        if b.maxLat < center.lat - dLat || b.minLat > center.lat + dLat
+            || b.maxLon < center.lon - dLon || b.minLon > center.lon + dLon { continue }
         for run in clip(s.points.map(project)) {
             let pts = round16(douglasPeucker(run, epsilon: 1.5))
             guard pts.count >= 2 else { continue }
@@ -145,12 +159,12 @@ public func buildScene(progress: Progress, route: Route, streets: [StreetLine], 
             var i = 0   // a run over 255 points is cut into overlapping pieces
             while i < pts.count - 1 {
                 let end = min(pts.count, i + 255)
-                cands.append(Cand(cls: s.cls, pts: Array(pts[i..<end]), near: near))
+                cands.append(Cand(cls: s.cls, pts: Array(pts[i..<end]), near: near, idx: idx))
                 i = end - 1
             }
         }
     }
-    cands.sort { $0.cls != $1.cls ? $0.cls < $1.cls : $0.near < $1.near }
+    cands.sort { $0.cls != $1.cls ? $0.cls < $1.cls : ($0.near != $1.near ? $0.near < $1.near : $0.idx < $1.idx) }
     var used = fixed + 4 * scene.route.count
     var total = 0
     for c in cands {

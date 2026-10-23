@@ -15,6 +15,8 @@ public struct Fix: Sendable {
 }
 
 public struct Progress: Equatable, Sendable {
+    /// The raw GPS fix (the rider's real position, which is off the route when off-route).
+    public var fix: Coord
     public var snapped: Coord
     /// Degrees, 0 = north. GPS course above 3 km/h, otherwise the last heading.
     public var heading: Double
@@ -75,7 +77,7 @@ public final class RouteTracker {
     public func update(_ fix: Fix) -> Progress {
         let pts = route.points
         guard pts.count >= 2 else {
-            return Progress(snapped: pts.first ?? fix.coord, heading: fix.course >= 0 ? fix.course : 0,
+            return Progress(fix: fix.coord, snapped: pts.first ?? fix.coord, heading: fix.course >= 0 ? fix.course : 0,
                             distanceAlong: 0, nextInstruction: 0, distanceToTurn: 0, remainingTime: 0,
                             offRoute: false, distanceToRoute: 0, bearingToRoute: 0,
                             arrived: true, gpsWeak: fix.accuracy > Self.goodAccuracy)
@@ -187,7 +189,7 @@ public final class RouteTracker {
         if remaining > Self.farRemaining { sawFar = true }
 
         return Progress(
-            snapped: snapped, heading: heading, distanceAlong: along,
+            fix: fix.coord, snapped: snapped, heading: heading, distanceAlong: along,
             nextInstruction: next, distanceToTurn: toTurn,
             remainingTime: total > 0 ? route.time * remaining / total : 0,
             offRoute: badFixes >= Self.offRouteFixes, distanceToRoute: best.d,
