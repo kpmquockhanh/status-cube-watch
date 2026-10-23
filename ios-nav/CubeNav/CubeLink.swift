@@ -56,8 +56,8 @@ final class CubeLink: NSObject, ObservableObject {
     private var wanted = false
     /// The current link reached `connected`.
     private var wasReady = false
-    /// Cubes found by scanning that never became ready: not tried again this session.
-    private var skipped: Set<UUID> = []
+    /// Cubes found by scanning that never became ready: not tried again for 60 s.
+    private var skipped = NavSkipList()
     /// Cubes that deleted this iPhone's bond: not tried again until `connect()`.
     private var blocked: Set<UUID> = []
     private var retryDelay: TimeInterval = 1
@@ -111,7 +111,7 @@ final class CubeLink: NSObject, ObservableObject {
             return
         }
         setTransient(.searching)
-        let usable = { (p: CBPeripheral) in !self.skipped.contains(p.identifier) && !self.blocked.contains(p.identifier) }
+        let usable = { (p: CBPeripheral) in !self.skipped.contains(p.identifier, now: Date()) && !self.blocked.contains(p.identifier) }
         if let s = UserDefaults.standard.string(forKey: Self.idKey), let id = UUID(uuidString: s),
            let known = central.retrievePeripherals(withIdentifiers: [id]).first, usable(known) {
             log.info("reconnecting to the remembered cube")
@@ -166,20 +166,33 @@ final class CubeLink: NSObject, ObservableObject {
         setTransient(central.state == .poweredOn ? .searching : .off)
     }
 
-    /// Shows `openPairingWindow` if no link becomes ready within 30 s of the first Info read.
+    /// Shows `openPairingWindow` if no link becomes ready within 30 s of the first Info read of a
+    /// cube that is not the remembered one (a bonded cube reconnecting slowly needs no new pairing).
     /// Kept across retries; cancelled once a link is ready or Bluetooth goes away.
-    private func armPairingHint() {
-        guard pairingHint == nil else { return }
+    private func armPairingHint(for p: CBPeripheral) {
+        guard pairingHint == nil,
+              UserDefaults.standard.string(forKey: Self.idKey) != p.identifier.uuidString else { return }
         let item = DispatchWorkItem { [weak self] in
             guard let self else { return }
             self.pairingHint = nil
             if self.status != .connected, self.status != .tooOld, self.status != .forgetCube {
                 self.log.info("pairing not done after 30 s: open Pair new device in the cube's portal")
                 self.status = .openPairingWindow
+                // Give skipped cubes (perhaps this user's own, after a cancelled dialog) another try.
+                self.skipped.removeAll()
+                self.rescanIfIdle()
             }
         }
         pairingHint = item
         DispatchQueue.main.asyncAfter(deadline: .now() + Self.pairingHintDelay, execute: item)
+    }
+
+    /// Restarts the search when no link is up or being made (restarting a scan re-reports cubes).
+    private func rescanIfIdle() {
+        guard wanted, central.state == .poweredOn,
+              peripheral?.state != .connected, peripheral?.state != .connecting else { return }
+        central.stopScan()
+        start()
     }
 
     private func cancelPairingHint() {
@@ -241,7 +254,7 @@ final class CubeLink: NSObject, ObservableObject {
         }
         // Read Info even when Nav is missing: an old firmware is reported as tooOld, not a failure.
         log.info("reading Info (a new cube asks for the code on its screen now)")
-        armPairingHint()
+        armPairingHint(for: p)
         p.readValue(for: info)
     }
 }
@@ -280,7 +293,7 @@ extension CubeLink: @preconcurrency CBCentralManagerDelegate {
 
     func centralManager(_ c: CBCentralManager, didDiscover p: CBPeripheral,
                         advertisementData: [String: Any], rssi: NSNumber) {
-        guard !skipped.contains(p.identifier), !blocked.contains(p.identifier) else { return }
+        guard !skipped.contains(p.identifier, now: Date()), !blocked.contains(p.identifier) else { return }
         // Never orphan a connection already in flight.
         guard peripheral == nil || peripheral?.state == .disconnected else { return }
         log.info("found \(p.name ?? "a cube")")
@@ -323,9 +336,14 @@ extension CubeLink: @preconcurrency CBCentralManagerDelegate {
             retryLater()
         case .skipAndScan:
             log.info("skipping cube \(p.identifier) for this session; scanning again")
-            skipped.insert(p.identifier)
+            skipped.skip(p.identifier, at: Date())
             peripheral = nil
             start()
+            // A running scan does not report a cube it has already seen: restart it once the skip
+            // expires, so that cube can be found again.
+            DispatchQueue.main.asyncAfter(deadline: .now() + NavSkipList.ttl + 1) { [weak self] in
+                self?.rescanIfIdle()
+            }
         case .needsForget:
             log.error("the cube forgot this iPhone: forget Claude Cube in Settings > Bluetooth, then pair again")
             blocked.insert(p.identifier)

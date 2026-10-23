@@ -127,3 +127,21 @@ private func frame(_ n: Int, fill: UInt8) -> Data { Data(repeating: fill, count:
         #expect(P.firstFrame(firstPairing: false, last: nav, age: 2.5) == .ended)
     }
 }
+
+@Suite struct NavSkipListTests {
+    @Test func entriesExpireAfterSixtySeconds() {
+        var s = NavSkipList()
+        let a = UUID(), b = UUID()
+        let t0 = Date(timeIntervalSince1970: 1000)
+        #expect(!s.contains(a, now: t0))
+        s.skip(a, at: t0)
+        #expect(s.contains(a, now: t0))
+        #expect(s.contains(a, now: t0 + 59.9))
+        #expect(!s.contains(a, now: t0 + 60))
+        #expect(!s.contains(b, now: t0))
+        s.skip(a, at: t0 + 60)  // skipped again: a fresh 60 s
+        #expect(s.contains(a, now: t0 + 100))
+        s.removeAll()
+        #expect(!s.contains(a, now: t0 + 100))
+    }
+}

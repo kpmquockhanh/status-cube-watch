@@ -123,3 +123,22 @@ public enum NavLinkPolicy {
         return last
     }
 }
+
+/// Cubes skipped after they never became ready (`NavLinkDrop.skipAndScan`). An entry expires after
+/// `ttl`, so the user's own cube on its first pairing (wrong passkey, cancelled dialog) gets
+/// another try without the app having to be reopened.
+public struct NavSkipList: Sendable {
+    public static let ttl: TimeInterval = 60
+    private var since: [UUID: Date] = [:]
+
+    public init() {}
+
+    public mutating func skip(_ id: UUID, at now: Date) { since[id] = now }
+
+    public func contains(_ id: UUID, now: Date) -> Bool {
+        guard let t = since[id] else { return false }
+        return now.timeIntervalSince(t) < Self.ttl
+    }
+
+    public mutating func removeAll() { since.removeAll() }
+}
