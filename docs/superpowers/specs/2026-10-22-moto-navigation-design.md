@@ -61,18 +61,14 @@ All three live in this repo:
 
 Decided:
 - Runs on the owner's VPS `contabo` (ssh alias; Debian 13, x86_64, 4 cores, 7.8 GB RAM, a 4 GB
-  swap file added 2026-10-22, 89 GB free disk, Docker 29). It already runs n8n under
-  `/root/n8n` with an nginx container and certbot serving `n8n.devxdev.site`. The navigation
-  stack must not disturb n8n.
+  swap file added 2026-10-22, 89 GB free disk, Docker 29). The navigation stack is the only
+  thing on it.
 - Public HTTPS at **`nav.devxdev.site`**. The name already resolves, to Cloudflare addresses
-  (`104.21.23.63`, `172.67.209.117`), as `n8n.devxdev.site` does: the domain is behind
+  (`104.21.23.63`, `172.67.209.117`): the domain is behind
   Cloudflare's proxy, so certificate issuance and the origin setup must work with Cloudflare in
   front (check its SSL mode; the builder may need the owner to adjust the Cloudflare record).
-  The existing nginx gets a second server block and its own Let's Encrypt certificate from the
-  existing certbot (the n8n nginx config is a template at
-  `/root/n8n/nginx/prod.conf.template`, mounted into the container). Whether to extend that
-  container's config or run a separate reverse proxy is the builder's call, as long as n8n keeps
-  working and only one process owns ports 80/443.
+  nginx and certbot run in the nav-server compose project, with a Let's Encrypt certificate for
+  the name; only that nginx owns ports 80/443.
 - Every request carries a secret key in a header; without it the server refuses. The app stores
   the key (entered once in its settings).
 - **Routing:** GraphHopper (open source, self-hosted, Docker) built from the OpenStreetMap
@@ -86,9 +82,9 @@ Decided:
   in the background, switch over only when the build succeeded; the old data serves meanwhile.
 - The setup (compose file, nginx snippet, refresh script, a smoke-test script) is in
   `nav-server/` and deployed from there. A README there says how.
-- The owner allows the builder to deploy directly over `ssh contabo` (root): editing the n8n
-  nginx template, issuing the certificate, and running the GraphHopper import on the box. Back
-  up anything edited first, and check n8n still answers after each nginx change.
+- The owner allows the builder to deploy directly over `ssh contabo` (root): editing the nginx
+  config, issuing the certificate, and running the GraphHopper import on the box. Back up
+  anything edited first.
 
 ### 2. iPhone app (`ios-nav/`)
 
