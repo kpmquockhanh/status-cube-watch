@@ -21,7 +21,7 @@ struct RideView: View {
                 Text(stateText(s)).font(.title2.bold()).foregroundStyle(s.state == .navigating ? Color.primary : .orange)
                 if !s.dist.isEmpty { Text(s.dist).font(.system(size: 56, weight: .bold, design: .rounded)) }
                 if !s.street.isEmpty { Text(s.street).font(.title3) }
-                if !s.eta.isEmpty { Text("Arrive \(s.eta)").foregroundStyle(.secondary) }
+                if !s.eta.isEmpty { Text("Arrive in \(s.eta)").foregroundStyle(.secondary) }
             } else {
                 Text("Waiting for GPS…").font(.title2)
             }

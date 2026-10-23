@@ -17,6 +17,8 @@ final class RideController: ObservableObject {
     @Published private(set) var phase: Phase = .idle
     @Published private(set) var scene: NavScene?
     @Published private(set) var message: String?
+    /// Start failed for lack of signal and the cached ride goes to this destination.
+    @Published private(set) var savedRouteAvailable = false
 
     static let minFrameGap: TimeInterval = 0.2
     static let maxFrameGap: TimeInterval = 1.0
@@ -26,10 +28,11 @@ final class RideController: ObservableObject {
     private var dirty = false
     private var lastSent = Date.distantPast
     private var timer: DispatchSourceTimer?
-    private var lastFix: Fix?
-    private var lastFixAt = Date.distantPast
     private var lastUpdate = Date.distantPast
+    private var startTask: Task<Void, Never>?
+    private var startToken = 0
     private var bag = Set<AnyCancellable>()
+    /// One cache for every ride, so a resume waits for the last ride's write.
     private let cache = RideCache(directory: FileManager.default.urls(for: .cachesDirectory, in: .userDomainMask)[0]
         .appendingPathComponent("ride"))
 
@@ -41,7 +44,7 @@ final class RideController: ObservableObject {
         location.onFix = { [weak self] f in self?.handle(f) }
     }
 
-    func clearMessage() { message = nil }
+    func clearMessage() { message = nil; savedRouteAvailable = false }
 
     /// Called at launch and whenever the app becomes active.
     func appBecameActive() {
@@ -70,19 +73,76 @@ final class RideController: ObservableObject {
 
     // MARK: ride
 
-    func start(to dest: Coord) async {
+    /// Starts a ride: downloads the route and its map, then switches to the ride screen. Background
+    /// location goes on at once, so the download carries on with the phone pocketed. `cancelStart`
+    /// (leaving the preview) abandons it.
+    func start(to dest: Coord) {
         guard phase == .idle else { return }
         guard let server = ServerConfig.makeServer() else { message = Self.text(for: .badKey); return }
         guard let from = location.fix?.coord else { message = "Waiting for a GPS fix. Allow location access and try again."; return }
-        location.requestAlways()
-        phase = .starting; message = nil
+        let token = beginStarting()
         let e = RideEngine(server: server, cache: cache)
         e.frameBudget = cubeLink.frameBudget
-        do { try await e.start(from: from, to: dest) }
-        catch let err as StartError { phase = .idle; message = Self.text(for: err); return }
-        catch { phase = .idle; message = Self.text(for: .noSignal); return }
-        engine = e
+        startTask = Task {
+            var failure: StartError?
+            do { try await e.start(from: from, to: dest) }
+            catch let err as StartError { failure = err }
+            catch { failure = .noSignal }
+            guard token == startToken, phase == .starting else { return }   // cancelled
+            startTask = nil
+            guard let failure else { ride(e); return }
+            endStarting()
+            message = Self.text(for: failure)
+            if failure == .noSignal { await offerSavedRoute(to: dest) }
+        }
+    }
+
+    /// Restarts the cached ride to (about) this destination, offline.
+    func startSaved(to dest: Coord) {
+        guard phase == .idle else { return }
+        guard let server = ServerConfig.makeServer() else { message = Self.text(for: .badKey); return }
+        let token = beginStarting()
+        let e = RideEngine(server: server, cache: cache)   // the server is only for rerouting
+        e.frameBudget = cubeLink.frameBudget
+        startTask = Task {
+            let ok = await e.resumeLast(near: dest)
+            guard token == startToken, phase == .starting else { return }
+            startTask = nil
+            if ok { ride(e); return }
+            endStarting()
+            message = "The saved route is gone. Start needs a connection."
+        }
+    }
+
+    /// Abandons a Start still downloading; the ride screen does not come up.
+    func cancelStart() {
+        guard phase == .starting else { return }
+        startToken += 1
+        startTask?.cancel(); startTask = nil
+        endStarting()
+    }
+
+    /// Shows "Start saved route (offline)" when the cached ride goes to within ~100 m of `dest`.
+    func offerSavedRoute(to dest: Coord) async {
+        let ok = await cache.hasRide(near: dest)
+        if phase == .idle { savedRouteAvailable = ok }
+    }
+
+    private func beginStarting() -> Int {
+        location.requestAlways()
         location.startRide()
+        phase = .starting; message = nil; savedRouteAvailable = false
+        startToken += 1
+        return startToken
+    }
+
+    private func endStarting() {
+        location.endRide()
+        phase = .idle
+    }
+
+    private func ride(_ e: RideEngine) {
+        engine = e
         phase = .riding
         if let f = location.fix { handle(f) }
         let t = DispatchSource.makeTimerSource(queue: .main)   // not a run-loop Timer: keeps firing in the background
@@ -94,37 +154,33 @@ final class RideController: ObservableObject {
 
     /// Always sends an `.ended` scene first; `CubeLink` keeps it for a cube that is not connected now.
     func stop() {
-        guard let e = engine else { phase = .idle; return }
+        guard let e = engine else { return }
         let ended = e.stop()
         cubeLink.send(ended)
-        timer?.cancel(); timer = nil; lastFix = nil
+        timer?.cancel(); timer = nil
         location.endRide()
         engine = nil; latest = nil; dirty = false; scene = nil; phase = .idle
     }
 
     private func handle(_ f: Fix) {
-        lastFix = f; lastFixAt = Date()
-        run(f)
-    }
-
-    private func run(_ f: Fix) {
         guard phase == .riding, let e = engine else { return }
         lastUpdate = Date()
-        let s = e.update(f)
-        latest = s; scene = s; dirty = true
-        if s.state == .ended { stop(); return }   // arrival hold over
+        apply(e.update(f))
+    }
+
+    /// Once a second without a new fix, lets the engine move on with time alone (arrival hold,
+    /// reroute retries, weak GPS once the last fix is old). The last fix is not tracked again.
+    private func tick() {
+        if phase == .riding, let e = engine, Date().timeIntervalSince(lastUpdate) >= 1 {
+            lastUpdate = Date()
+            if let s = e.tick() { apply(s) }
+        }
         flush()
     }
 
-    /// Once a second without a new fix, runs the engine again on the last one (marked weak once it is
-    /// older than 5 s), so the arrival hold and reroute retries go on while standing still.
-    private func tick() {
-        if phase == .riding, let f = lastFix, Date().timeIntervalSince(lastUpdate) >= 1,
-           Date().timeIntervalSince(lastFixAt) >= 1.5 {
-            var g = f
-            if Date().timeIntervalSince(lastFixAt) > 5 { g.accuracy = max(g.accuracy, 100) }
-            run(g)
-        }
+    private func apply(_ s: NavScene) {
+        latest = s; scene = s; dirty = true
+        if s.state == .ended { stop(); return }   // arrival hold over
         flush()
     }
 

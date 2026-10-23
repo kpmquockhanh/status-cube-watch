@@ -24,14 +24,23 @@ struct PreviewView: View {
                 Text(place.name).font(.title3.bold())
                 if loading { ProgressView("Finding the route") }
                 if let route {
-                    Text("\(Self.km(route.distance)) · \(Self.eta(route.time))").font(.headline)
+                    Text("\(Self.km(route.distance)) · \(formatETA(route.time))").font(.headline)
                 }
                 if let m = error ?? ride.message {
                     Text(m).font(.subheadline).foregroundStyle(.red)
                     Button("Try again") { Task { await load() } }.buttonStyle(.bordered)
                 }
+                if ride.savedRouteAvailable {
+                    Button {
+                        ride.startSaved(to: place.coord)
+                    } label: {
+                        Text("Start saved route (offline)").frame(maxWidth: .infinity)
+                    }
+                    .buttonStyle(.bordered).controlSize(.large)
+                    .disabled(ride.phase != .idle)
+                }
                 Button {
-                    Task { await ride.start(to: place.coord) }
+                    ride.start(to: place.coord)
                 } label: {
                     Text(ride.phase == .starting ? "Downloading the map…" : "Start").frame(maxWidth: .infinity)
                 }
@@ -44,6 +53,8 @@ struct PreviewView: View {
         .navigationTitle("Route")
         .navigationBarTitleDisplayMode(.inline)
         .task { await load() }
+        // Leaving the preview while the map downloads abandons the Start.
+        .onDisappear { ride.cancelStart() }
     }
 
     private func load() async {
@@ -55,13 +66,10 @@ struct PreviewView: View {
         case .failure(let e):
             error = ride.location.fix == nil ? "Waiting for a GPS fix. Allow location access and try again."
                                              : RideController.text(for: e)
+            if e == .noSignal { await ride.offerSavedRoute(to: place.coord) }
         }
         loading = false
     }
 
     static func km(_ m: Double) -> String { m < 1000 ? "\(Int(m)) m" : String(format: "%.1f km", m / 1000) }
-    static func eta(_ s: Double) -> String {
-        let min = Int((s / 60).rounded())
-        return min < 60 ? "\(max(1, min)) min" : "\(min / 60) h \(min % 60) min"
-    }
 }
