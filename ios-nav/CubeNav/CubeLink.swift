@@ -9,10 +9,28 @@ import os
 /// -> connect -> discover Info + Nav -> READ Info (encrypted, so this is what makes iOS ask for the
 /// passkey the first time) -> check `[proto 1, fw_rev >= 8]` -> connected. Frames go to Nav written
 /// without response, with flow control and "latest wins" (`NavChunkQueue`). Control is never
-/// subscribed: its messages (acks, volume, unlock) are the Mac's business.
+/// subscribed: its messages (acks, volume, unlock) are the Mac's business. What happens after a
+/// link drops is `NavLinkPolicy.onDrop` (pure, tested).
 @MainActor
 final class CubeLink: NSObject, ObservableObject {
-    enum Status: Equatable { case off, searching, pairing, connected, tooOld }
+    enum Status: Equatable {
+        /// Bluetooth is off or unavailable, or `connect()` was not called yet.
+        case off
+        /// Bluetooth permission denied: allow CubeNav in Settings > Privacy & Security > Bluetooth.
+        case unauthorized
+        case searching
+        /// Connected, reading Info: iOS asks for the passkey on a new cube.
+        case pairing
+        /// Pairing has not completed 30 s after it started: the cube only accepts a second phone
+        /// in its pairing window (portal: "Pair new device"). The link attempt keeps going.
+        case openPairingWindow
+        case connected
+        /// The cube's firmware has no Nav (needs proto 1, fw_rev 8+), or iOS caches an old table.
+        case tooOld
+        /// The cube deleted this iPhone's bond: forget "Claude Cube" in Settings > Bluetooth, then
+        /// call `connect()` again (e.g. on return to the foreground).
+        case forgetCube
+    }
 
     @Published private(set) var status: Status = .off
     /// Largest encoded frame that fits in 32 chunks at the negotiated write length. The ride
@@ -21,6 +39,7 @@ final class CubeLink: NSObject, ObservableObject {
 
     private static let restoreID = "cube-nav"
     private static let idKey = "cubeNavPeripheral"
+    private static let pairingHintDelay: TimeInterval = 30
     private let serviceID = CBUUID(string: CubeBLE.service)
     private let infoID = CBUUID(string: CubeBLE.info)
     private let navID = CBUUID(string: CubeBLE.nav)
@@ -32,13 +51,18 @@ final class CubeLink: NSObject, ObservableObject {
     private var navChar: CBCharacteristic?
     private var queue = NavChunkQueue()
     private var lastScene: NavScene?
+    private var lastSceneAt = Date.distantPast
     /// `connect()` was called (or iOS restored a link): keep the cube linked from now on.
     private var wanted = false
-    /// The current link is being dropped on purpose (setup failed, firmware too old): reconnect
-    /// after a back-off instead of at once.
-    private var droppedOnPurpose = false
+    /// The current link reached `connected`.
+    private var wasReady = false
+    /// Cubes found by scanning that never became ready: not tried again this session.
+    private var skipped: Set<UUID> = []
+    /// Cubes that deleted this iPhone's bond: not tried again until `connect()`.
+    private var blocked: Set<UUID> = []
     private var retryDelay: TimeInterval = 1
     private var retryPending = false
+    private var pairingHint: DispatchWorkItem?
 
     override init() {
         super.init()
@@ -48,17 +72,34 @@ final class CubeLink: NSObject, ObservableObject {
 
     // MARK: public
 
-    /// Starts (and from then on keeps) the link to the cube.
+    /// Starts (and from then on keeps) the link to the cube. Calling it again (e.g. on return to the
+    /// foreground) also retries cubes skipped or given up on earlier in the session.
     func connect() {
         wanted = true
+        skipped.removeAll()
+        if !blocked.isEmpty {
+            blocked.removeAll()
+            if status == .forgetCube { status = .searching }
+        }
         start()
     }
 
     /// Sends one frame. Dropped while not connected; replaces a frame still waiting to go out.
     func send(_ scene: NavScene) {
         lastScene = scene
+        lastSceneAt = Date()
         guard status == .connected else { return }
         enqueue(scene)
+    }
+
+    // MARK: status
+
+    /// Sets a passing status, unless one that needs the user's attention is showing.
+    private func setTransient(_ s: Status) {
+        switch status {
+        case .tooOld, .openPairingWindow, .forgetCube: return
+        default: status = s
+        }
     }
 
     // MARK: connecting
@@ -66,21 +107,23 @@ final class CubeLink: NSObject, ObservableObject {
     private func start() {
         guard wanted, central.state == .poweredOn else { return }
         if let p = peripheral, p.state == .connected || p.state == .connecting {
-            if p.state == .connected, navChar == nil { setUp(p) }
+            if p.state == .connected, navChar == nil { setUp(p, resetQueue: true) }
             return
         }
-        if status != .tooOld { status = .searching }
+        setTransient(.searching)
+        let usable = { (p: CBPeripheral) in !self.skipped.contains(p.identifier) && !self.blocked.contains(p.identifier) }
         if let s = UserDefaults.standard.string(forKey: Self.idKey), let id = UUID(uuidString: s),
-           let known = central.retrievePeripherals(withIdentifiers: [id]).first {
+           let known = central.retrievePeripherals(withIdentifiers: [id]).first, usable(known) {
             log.info("reconnecting to the remembered cube")
             use(known)
             central.connect(known)  // pending until the cube is in range; never times out
-        } else if let up = central.retrieveConnectedPeripherals(withServices: [serviceID]).first {
+        } else if let up = central.retrieveConnectedPeripherals(withServices: [serviceID]).first(where: usable) {
             log.info("cube already connected to this phone")
             use(up)
             central.connect(up)
         } else {
             log.info("scanning for a cube")
+            peripheral = nil
             central.scanForPeripherals(withServices: [serviceID])
         }
     }
@@ -90,17 +133,16 @@ final class CubeLink: NSObject, ObservableObject {
         p.delegate = self
     }
 
-    private func setUp(_ p: CBPeripheral) {
-        if status != .tooOld { status = .pairing }
-        queue.reset()  // the cube clears its frame state on every connection
+    private func setUp(_ p: CBPeripheral, resetQueue: Bool) {
+        setTransient(.pairing)
+        if resetQueue { queue.reset() }  // the cube clears its frame state on every connection
         infoChar = nil
         navChar = nil
         p.discoverServices([serviceID])
     }
 
-    /// A setup step failed with the link still up. Drop it; the disconnect retries after a back-off.
+    /// A setup step failed with the link still up. Drop it; `onDrop` decides what comes next.
     private func drop(_ p: CBPeripheral) {
-        droppedOnPurpose = true
         navChar = nil
         central.cancelPeripheralConnection(p)
     }
@@ -121,7 +163,28 @@ final class CubeLink: NSObject, ObservableObject {
         infoChar = nil
         navChar = nil
         queue.reset()
-        if status != .tooOld { status = central.state == .poweredOn ? .searching : .off }
+        setTransient(central.state == .poweredOn ? .searching : .off)
+    }
+
+    /// Shows `openPairingWindow` if no link becomes ready within 30 s of the first Info read.
+    /// Kept across retries; cancelled once a link is ready or Bluetooth goes away.
+    private func armPairingHint() {
+        guard pairingHint == nil else { return }
+        let item = DispatchWorkItem { [weak self] in
+            guard let self else { return }
+            self.pairingHint = nil
+            if self.status != .connected, self.status != .tooOld, self.status != .forgetCube {
+                self.log.info("pairing not done after 30 s: open Pair new device in the cube's portal")
+                self.status = .openPairingWindow
+            }
+        }
+        pairingHint = item
+        DispatchQueue.main.asyncAfter(deadline: .now() + Self.pairingHintDelay, execute: item)
+    }
+
+    private func cancelPairingHint() {
+        pairingHint?.cancel()
+        pairingHint = nil
     }
 
     // MARK: sending
@@ -154,13 +217,16 @@ final class CubeLink: NSObject, ObservableObject {
         let firstTime = stored != p.identifier.uuidString
         UserDefaults.standard.set(p.identifier.uuidString, forKey: Self.idKey)
         retryDelay = 1
+        wasReady = true
+        cancelPairingHint()
         updateBudget(p.maximumWriteValueLength(for: .withoutResponse))
         status = .connected
         log.info("connected (first pairing: \(firstTime)), frame budget \(self.frameBudget) B")
         // A new bond's kind is learned from its first write, and a new bond whose link drops before
-        // that write is deleted: identify as the iPhone at once. On a reconnect, resend what the
-        // cube should be showing (the ride keeps sending its own frames anyway).
-        enqueue(firstTime ? .ended : (lastScene ?? .ended))
+        // that write is deleted: identify as the iPhone at once. On a reconnect, resend a fresh
+        // last scene; a stale one could start a ghost ride, so that becomes Ended.
+        enqueue(NavLinkPolicy.firstFrame(firstPairing: firstTime, last: lastScene,
+                                         age: Date().timeIntervalSince(lastSceneAt)))
     }
 
     /// Finds Info and Nav among already-known characteristics (a restored link), else discovers.
@@ -175,6 +241,7 @@ final class CubeLink: NSObject, ObservableObject {
         }
         // Read Info even when Nav is missing: an old firmware is reported as tooOld, not a failure.
         log.info("reading Info (a new cube asks for the code on its screen now)")
+        armPairingHint()
         p.readValue(for: info)
     }
 }
@@ -195,18 +262,27 @@ extension CubeLink: @preconcurrency CBCentralManagerDelegate {
     func centralManagerDidUpdateState(_ c: CBCentralManager) {
         switch c.state {
         case .poweredOn:
-            if wanted { start() } else { status = .off }
+            if wanted {
+                if status == .off || status == .unauthorized { status = .searching }
+                start()
+            } else {
+                status = .off
+            }
         default:
             log.info("Bluetooth unavailable (state \(c.state.rawValue))")
             infoChar = nil
             navChar = nil
             queue.reset()
-            status = .off
+            cancelPairingHint()
+            status = c.state == .unauthorized ? .unauthorized : .off
         }
     }
 
     func centralManager(_ c: CBCentralManager, didDiscover p: CBPeripheral,
                         advertisementData: [String: Any], rssi: NSNumber) {
+        guard !skipped.contains(p.identifier), !blocked.contains(p.identifier) else { return }
+        // Never orphan a connection already in flight.
+        guard peripheral == nil || peripheral?.state == .disconnected else { return }
         log.info("found \(p.name ?? "a cube")")
         c.stopScan()
         use(p)
@@ -215,31 +291,47 @@ extension CubeLink: @preconcurrency CBCentralManagerDelegate {
 
     func centralManager(_ c: CBCentralManager, didConnect p: CBPeripheral) {
         guard p.identifier == peripheral?.identifier else { return }
-        droppedOnPurpose = false
-        setUp(p)
+        wasReady = false
+        setUp(p, resetQueue: true)
     }
 
     func centralManager(_ c: CBCentralManager, didFailToConnect p: CBPeripheral, error: Error?) {
         guard p.identifier == peripheral?.identifier else { return }
         log.error("connect failed: \(error?.localizedDescription ?? "?")")
-        linkLost()
-        retryLater()
+        handleDrop(p, error: error)
     }
 
     func centralManager(_ c: CBCentralManager, didDisconnectPeripheral p: CBPeripheral, error: Error?) {
         guard p.identifier == peripheral?.identifier else { return }
         log.info("disconnected: \(error?.localizedDescription ?? "no error")")
-        if let e = error as? CBError, e.code == .peerRemovedPairingInformation {
-            log.error("the cube forgot this iPhone: remove Claude Cube in Settings > Bluetooth, then pair again")
-        }
+        handleDrop(p, error: error)
+    }
+
+    private func handleDrop(_ p: CBPeripheral, error: Error?) {
+        let peerRemoved = (error as? CBError)?.code == .peerRemovedPairingInformation
+        let remembered = UserDefaults.standard.string(forKey: Self.idKey) == p.identifier.uuidString
+        let action = NavLinkPolicy.onDrop(wasReady: wasReady, remembered: remembered,
+                                          tooOld: status == .tooOld, peerRemovedPairing: peerRemoved)
+        wasReady = false
         linkLost()
-        guard wanted, c.state == .poweredOn else { return }
-        if droppedOnPurpose {
-            droppedOnPurpose = false
-            retryLater()
-        } else {
+        guard wanted, central.state == .poweredOn else { return }
+        switch action {
+        case .reconnectNow:
             // A pending connect is kept by iOS even while the app is suspended in the background.
-            c.connect(p)
+            central.connect(p)
+        case .retryLater:
+            retryLater()
+        case .skipAndScan:
+            log.info("skipping cube \(p.identifier) for this session; scanning again")
+            skipped.insert(p.identifier)
+            peripheral = nil
+            start()
+        case .needsForget:
+            log.error("the cube forgot this iPhone: forget Claude Cube in Settings > Bluetooth, then pair again")
+            blocked.insert(p.identifier)
+            peripheral = nil
+            cancelPairingHint()
+            status = .forgetCube
         }
     }
 }
@@ -275,7 +367,8 @@ extension CubeLink: @preconcurrency CBPeripheralDelegate {
         guard p.identifier == peripheral?.identifier,
               invalidatedServices.contains(where: { $0.uuid == serviceID }) else { return }
         log.info("cube's GATT table changed; rediscovering")
-        setUp(p)
+        // Same connection: the cube keeps its frame state, so the queue and seq carry on.
+        setUp(p, resetQueue: false)
     }
 
     func peripheral(_ p: CBPeripheral, didUpdateValueFor ch: CBCharacteristic, error: Error?) {
@@ -288,6 +381,7 @@ extension CubeLink: @preconcurrency CBPeripheralDelegate {
         let info = [UInt8](ch.value ?? Data())
         guard CubeBLE.infoSupportsNav(info) else {
             log.error("cube firmware too old for navigation: Info \(info)")
+            cancelPairingHint()
             status = .tooOld
             drop(p)
             return
@@ -295,6 +389,7 @@ extension CubeLink: @preconcurrency CBPeripheralDelegate {
         guard navChar != nil else {
             // fw_rev 8+ without Nav listed: iOS is serving a cached GATT table.
             log.error("cube reports Nav but iOS did not list it: remove Claude Cube in Settings > Bluetooth and pair again")
+            cancelPairingHint()
             status = .tooOld
             drop(p)
             return

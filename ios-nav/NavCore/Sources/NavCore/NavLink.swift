@@ -45,6 +45,7 @@ public struct NavChunkQueue: Sendable {
             return .tooLarge
         }
         if currentIndex >= current.count {
+            pending = nil  // an older frame parked behind the one just finished must not follow this one
             start(frame, maxWrite: maxWrite)
             return .started
         }
@@ -83,4 +84,42 @@ extension NavScene {
     /// What the cube shows when no ride is going: also the phone's first write on a new link.
     public static let ended = NavScene(state: .ended, turn: .straight, exit: 0, dir: 0, gpsWeak: false,
                                        dist: "", street: "", eta: "", route: [], streets: [])
+}
+
+/// What the iPhone's link does after it loses (or drops) a cube.
+public enum NavLinkDrop: Equatable, Sendable {
+    /// A working link went away (out of range, cube rebooted): connect again at once. iOS keeps
+    /// the pending connect even while the app is suspended.
+    case reconnectNow
+    /// The link never became ready, or setup failed: try the same cube again after a back-off,
+    /// so a refused pairing does not bring the passkey dialog straight back.
+    case retryLater
+    /// A cube found by scanning that never became ready (a neighbour's cube, or one outside its
+    /// pairing window): skip it for the rest of the session and scan again.
+    case skipAndScan
+    /// The cube deleted this iPhone's bond: only the user can fix it (forget "Claude Cube" in
+    /// Settings > Bluetooth), so stop retrying that cube.
+    case needsForget
+}
+
+public enum NavLinkPolicy {
+    /// `wasReady`: the link reached `connected`. `remembered`: the cube is the one this app paired
+    /// with before. `tooOld`: its firmware cannot take Nav frames (retry slowly, it may be updated).
+    public static func onDrop(wasReady: Bool, remembered: Bool, tooOld: Bool,
+                              peerRemovedPairing: Bool) -> NavLinkDrop {
+        if peerRemovedPairing { return .needsForget }
+        if wasReady { return .reconnectNow }
+        if !remembered && !tooOld { return .skipAndScan }
+        return .retryLater
+    }
+
+    /// The last scene older than this is not resent on reconnect.
+    public static let resendMaxAge: TimeInterval = 2
+
+    /// The first frame on a link: `.ended` on a first pairing (it identifies the iPhone to the
+    /// cube at once) or when the last scene is missing or stale, else the last scene.
+    public static func firstFrame(firstPairing: Bool, last: NavScene?, age: TimeInterval) -> NavScene {
+        guard !firstPairing, let last, age <= resendMaxAge else { return .ended }
+        return last
+    }
 }

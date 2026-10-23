@@ -89,3 +89,41 @@ private func frame(_ n: Int, fill: UInt8) -> Data { Data(repeating: fill, count:
         #expect(q.next()![1] == 1)
     }
 }
+
+@Suite struct NavLinkFixTests {
+    @Test func parkedFrameNeverOvertakesNewerOne() {
+        // A still has a chunk to send, B parks, A's last chunk goes out (B not started yet), C arrives.
+        var r = NavChunkQueue()
+        _ = r.offer(frame(8, fill: 1), maxWrite: 8)                     // A: 2 chunks, seq 1
+        _ = r.next()
+        #expect(r.offer(frame(4, fill: 2), maxWrite: 8) == .queued)    // B parks
+        _ = r.next()                                                     // A's last chunk out
+        #expect(r.offer(frame(4, fill: 3), maxWrite: 8) == .started)   // C starts, B is gone
+        let out = drain(&r)
+        #expect(out.count == 1)
+        #expect([UInt8](out[0]) == [1, 2, 0, 1, 3, 3, 3, 3])
+        #expect(r.isIdle)
+    }
+
+    @Test func dropPolicy() {
+        typealias P = NavLinkPolicy
+        #expect(P.onDrop(wasReady: true, remembered: true, tooOld: false, peerRemovedPairing: true) == .needsForget)
+        #expect(P.onDrop(wasReady: false, remembered: true, tooOld: false, peerRemovedPairing: true) == .needsForget)
+        #expect(P.onDrop(wasReady: true, remembered: true, tooOld: false, peerRemovedPairing: false) == .reconnectNow)
+        #expect(P.onDrop(wasReady: true, remembered: false, tooOld: false, peerRemovedPairing: false) == .reconnectNow)
+        #expect(P.onDrop(wasReady: false, remembered: true, tooOld: false, peerRemovedPairing: false) == .retryLater)
+        #expect(P.onDrop(wasReady: false, remembered: false, tooOld: false, peerRemovedPairing: false) == .skipAndScan)
+        #expect(P.onDrop(wasReady: false, remembered: false, tooOld: true, peerRemovedPairing: false) == .retryLater)
+        #expect(P.onDrop(wasReady: false, remembered: true, tooOld: true, peerRemovedPairing: false) == .retryLater)
+    }
+
+    @Test func firstFrameOnALink() {
+        let nav = NavScene(state: .navigating, turn: .left, exit: 0, dir: 0, gpsWeak: false,
+                           dist: "1 km", street: "X", eta: "5 min", route: [], streets: [])
+        typealias P = NavLinkPolicy
+        #expect(P.firstFrame(firstPairing: true, last: nav, age: 0) == .ended)
+        #expect(P.firstFrame(firstPairing: false, last: nil, age: 0) == .ended)
+        #expect(P.firstFrame(firstPairing: false, last: nav, age: 1.9) == nav)
+        #expect(P.firstFrame(firstPairing: false, last: nav, age: 2.5) == .ended)
+    }
+}
