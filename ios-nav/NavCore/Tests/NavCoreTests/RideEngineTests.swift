@@ -37,6 +37,7 @@ private actor FakeNavServer: NavServer {
     /// Tile requests wait while this is set.
     var holdTiles = false
     var lastTo: Coord?
+    var lastProfile: String?
     func set(hangTiles: Bool) { self.hangTiles = hangTiles }
     func set(hangRoute: Bool) { self.hangRoute = hangRoute }
     func set(failTiles: Bool) { self.failTiles = failTiles }
@@ -45,9 +46,10 @@ private actor FakeNavServer: NavServer {
     func set(online: Bool) { self.online = online }
     func set(route: Route?) { fixedRoute = route }
 
-    func route(from: Coord, to: Coord) async throws -> Route {
+    func route(from: Coord, to: Coord, profile: String) async throws -> Route {
         routeCalls += 1
         lastTo = to
+        lastProfile = profile
         guard online else { throw StartError.noSignal }
         if hangRoute { try await Task.sleep(nanoseconds: 3_600_000_000_000) }
         if let fixedRoute { return fixedRoute }
@@ -451,14 +453,25 @@ private let tileJSON = Data(#"{"v":1,"z":15,"x":1,"y":2,"w":[[2,50000000,1000000
         let json = try Data(contentsOf: #require(Bundle.module.url(forResource: "route-hcmc", withExtension: "json", subdirectory: "Fixtures")))
         let server = httpServer()
         Stub.handler = { _, _ in (200, json) }
-        let r = try await server.route(from: Coord(lat: 10.5, lon: 106.5), to: Coord(lat: 10.6, lon: 106.6))
+        let r = try await server.route(from: Coord(lat: 10.5, lon: 106.5), to: Coord(lat: 10.6, lon: 106.6), profile: "moto_vn")
         #expect(r.points.count > 2)
         let (req, body) = try #require(Stub.seen.first)
         #expect(req.httpMethod == "POST")
         #expect(req.url?.path == "/route")
         #expect(req.value(forHTTPHeaderField: "X-Nav-Key") == "K3Y")
         #expect(String(decoding: body ?? Data(), as: UTF8.self) ==
-            #"{"points":[[106.5,10.5],[106.6,10.6]],"profile":"moto_vn","instructions":true,"points_encoded":false,"locale":"en","details":["road_class"]}"#)
+            #"{"points":[[106.5,10.5],[106.6,10.6]],"profile":"moto_vn","instructions":true,"points_encoded":false,"locale":"en","details":["road_class","crossing"]}"#)
+    }
+
+    @Test func requestNamesProfile() async throws {
+        let json = try Data(contentsOf: #require(Bundle.module.url(forResource: "route-hcmc", withExtension: "json", subdirectory: "Fixtures")))
+        let server = httpServer()
+        Stub.handler = { _, _ in (200, json) }
+        _ = try await server.route(from: Coord(lat: 10.5, lon: 106.5), to: Coord(lat: 10.6, lon: 106.6), profile: "moto_turns")
+        let (_, body) = try #require(Stub.seen.first)
+        let obj = try #require(JSONSerialization.jsonObject(with: body ?? Data()) as? [String: Any])
+        #expect(obj["profile"] as? String == "moto_turns")
+        #expect((obj["details"] as? [String])?.contains("road_class") == true)
     }
 
     @Test func tile404IsEmptyAnd200Decodes() async throws {

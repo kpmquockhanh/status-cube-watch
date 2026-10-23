@@ -75,6 +75,55 @@ func fixtureData(_ name: String) throws -> Data {
         #expect(abs(bearingDegrees(north, a) - 180) < 0.01)
     }
 
+    @Test func statsFromFixture() throws {
+        let data = try fixtureData("route-hcmc")
+        let route = try RouteDecoding.decode(data)
+        let json = try #require(JSONSerialization.jsonObject(with: data) as? [String: Any])
+        let path = try #require((json["paths"] as? [[String: Any]])?.first)
+        let coords = try #require((path["points"] as? [String: Any])?["coordinates"] as? [[Double]])
+        let pts = coords.map { Coord(lat: $0[1], lon: $0[0]) }
+        let instr = try #require(path["instructions"] as? [[String: Any]])
+        let turnSigns: Set<Int> = [-98, -8, 8, -3, -2, 2, 3, 6, -6]
+        #expect(route.stats.turns == instr.filter { turnSigns.contains($0["sign"] as? Int ?? 0) }.count)
+        let classes = try #require((path["details"] as? [String: Any])?["road_class"] as? [[Any]])
+        var main = 0.0, total = 0.0
+        for i in 1..<pts.count { total += distanceMeters(pts[i - 1], pts[i]) }
+        for c in classes {
+            let from = c[0] as! Int, to = c[1] as! Int, v = (c[2] as! String).lowercased()
+            guard v == "primary" || v == "trunk" else { continue }
+            for i in from..<to { main += distanceMeters(pts[i], pts[i + 1]) }
+        }
+        #expect(route.stats.mainRoadShare > 0 && route.stats.mainRoadShare < 1)
+        #expect(abs(route.stats.mainRoadShare - main / total) < 1e-9)
+        #expect(route.stats.lights == nil)   // the fixture predates the signals detail
+    }
+
+    @Test func missingSignalsDetailIsNil() throws {
+        let json = #"{"paths":[{"distance":10,"time":1000,"points":{"coordinates":[[106.0,10.0],[106.1,10.1]]},"instructions":[],"details":{"road_class":[[0,1,"PRIMARY"]]}}]}"#
+        let r = try RouteDecoding.decode(Data(json.utf8))
+        #expect(r.stats.lights == nil)
+        #expect(abs(r.stats.mainRoadShare - 1) < 1e-9)
+    }
+
+    @Test func noDetailsDecodes() throws {
+        let json = #"{"paths":[{"distance":10,"time":1000,"points":{"coordinates":[[106.0,10.0],[106.1,10.1]]}}]}"#
+        let r = try RouteDecoding.decode(Data(json.utf8))
+        #expect(r.stats == RouteStats(turns: 0, lights: nil, mainRoadShare: 0))
+    }
+
+    @Test func signalsCounted() throws {
+        let key = try #require(RouteDecoding.signalsDetail)
+        let json = #"{"paths":[{"distance":10,"time":1000,"points":{"coordinates":[[106.0,10.0],[106.1,10.1],[106.2,10.2],[106.3,10.3],[106.4,10.4]]},"details":{"road_class":[[0,4,"secondary"]],"\#(key)":[[0,1,"traffic_signals"],[1,3,"missing"],[3,4,"traffic_signals"]]}}]}"#
+        let r = try RouteDecoding.decode(Data(json.utf8))
+        #expect(r.stats.lights == 2)
+        #expect(r.stats.mainRoadShare == 0)
+    }
+
+    @Test func badDetailIntervalThrows() {
+        let json = #"{"paths":[{"distance":10,"time":1000,"points":{"coordinates":[[106.0,10.0],[106.1,10.1]]},"details":{"road_class":[[0,5,"primary"]]}}]}"#
+        #expect(throws: (any Error).self) { try RouteDecoding.decode(Data(json.utf8)) }
+    }
+
     @Test func badJSONThrows() {
         #expect(throws: (any Error).self) { try RouteDecoding.decode(Data("{}".utf8)) }
     }

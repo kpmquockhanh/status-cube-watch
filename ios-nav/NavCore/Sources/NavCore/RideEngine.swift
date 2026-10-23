@@ -205,7 +205,7 @@ import Foundation
                                                      sleep: @escaping @Sendable (TimeInterval) async throws -> Void,
                                                      limit: TimeInterval) async throws -> Route {
         try await withThrowingTaskGroup(of: Route.self) { group in
-            group.addTask { try await server.route(from: from, to: to) }
+            group.addTask { try await server.route(from: from, to: to, profile: RouteStyle.fastest.profile(rushHour: false)) }
             group.addTask { try await sleep(limit); throw StartError.noSignal }
             defer { group.cancelAll() }
             return try await group.next()!
@@ -265,7 +265,7 @@ import Foundation
     private func fetch(from: Coord, to: Coord, have: [TileID: [StreetLine]]) async throws -> (Route, [TileID: [StreetLine]]) {
         let server = self.server
         do {
-            let r = try await server.route(from: from, to: to)
+            let r = try await server.route(from: from, to: to, profile: RouteStyle.fastest.profile(rushHour: false))
             return (r, try await Self.fetchTiles(server: server, route: r, have: have))
         } catch let e as StartError { throw e
         } catch let e as CancellationError { throw e

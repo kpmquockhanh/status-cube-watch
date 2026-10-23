@@ -59,7 +59,7 @@ final class RideController: ObservableObject {
     func plan(to dest: Coord) async -> Result<Route, StartError> {
         guard let server = ServerConfig.makeServer() else { return .failure(.badKey) }
         guard let from = location.fix?.coord else { return .failure(.noSignal) }
-        do { return .success(try await server.route(from: from, to: dest)) }
+        do { return .success(try await server.route(from: from, to: dest, profile: RouteStyle.fastest.profile(rushHour: false))) }
         catch let e as StartError { return .failure(e) }
         catch { return .failure(.noSignal) }
     }

@@ -1,7 +1,8 @@
 import Foundation
 
 public protocol NavServer: Sendable {
-    func route(from: Coord, to: Coord) async throws -> Route
+    /// `profile` is a GraphHopper profile, see `RouteStyle.profile(rushHour:)`.
+    func route(from: Coord, to: Coord, profile: String) async throws -> Route
     /// 404 (no streets in the tile) answers `[]`.
     func tile(_ id: TileID) async throws -> [StreetLine]
 }
@@ -30,12 +31,14 @@ public final class HTTPNavServer: NavServer {
         self.baseURL = baseURL; self.key = key; self.session = session; self.sleep = sleep
     }
 
-    public func route(from: Coord, to: Coord) async throws -> Route {
+    public func route(from: Coord, to: Coord, profile: String) async throws -> Route {
         var req = URLRequest(url: baseURL.appendingPathComponent("route"))
         req.httpMethod = "POST"
         req.setValue("application/json", forHTTPHeaderField: "Content-Type")
-        let body = "{\"points\":[[\(from.lon),\(from.lat)],[\(to.lon),\(to.lat)]],\"profile\":\"moto_vn\","
-            + "\"instructions\":true,\"points_encoded\":false,\"locale\":\"en\",\"details\":[\"road_class\"]}"
+        let details = (["road_class"] + [RouteDecoding.signalsDetail].compactMap { $0 })
+            .map { "\"\($0)\"" }.joined(separator: ",")
+        let body = "{\"points\":[[\(from.lon),\(from.lat)],[\(to.lon),\(to.lat)]],\"profile\":\"\(profile)\","
+            + "\"instructions\":true,\"points_encoded\":false,\"locale\":\"en\",\"details\":[\(details)]}"
         req.httpBody = Data(body.utf8)
         let (data, code) = try await send(req)
         guard code == 200 else { throw StartError.server(code) }
