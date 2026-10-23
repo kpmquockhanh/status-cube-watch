@@ -11,7 +11,8 @@ Run these from `firmware/`. `src/config.h` must exist (copy `src/config.h.exampl
 ```sh
 pio run                                  # board build; also fetches LovyanGFX / ArduinoJson / NimBLE into .pio/libdeps, which sim/ compiles against
 pio run -t upload && pio device monitor  # USB flash + serial (115200, exception decoder)
-python3 tools/gen_fonts.py               # regenerate src/fonts_gen.h from tools/Inter.ttf (needs Pillow)
+pip install -r tools/requirements.txt    # in a venv: pillow==11.3.0, pinned because glyph boxes move between releases
+python3 tools/gen_fonts.py               # regenerate src/fonts_gen.h from tools/Inter.ttf (run it from that venv)
 ```
 
 Run these from `sim/`:
@@ -77,7 +78,7 @@ Adding a persisted setting touches all of these:
 
 ## Gotchas
 
-- `src/fonts_gen.h` (~680 KB) is generated, so don't hand-edit it. Its fonts cover only printable ASCII (0x20–0x7E), at the sizes listed in `FONTS` in `tools/gen_fonts.py`. `bridge/cards.mjs` folds payload strings down to that range already. Text the firmware draws itself must stay inside it too, unless you widen `CHARS` and regenerate.
+- `src/fonts_gen.h` (~680 KB) is generated, so don't hand-edit it. The shared fonts cover only printable ASCII (0x20–0x7E), at the sizes listed in `FONTS` in `tools/gen_fonts.py`. `bridge/cards.mjs` folds payload strings down to that range already. Text the firmware draws itself must stay inside it too. `b18v` and `s12v` are the exception: they carry the Vietnamese letters and U+00B7 for the navigation screen, and are separate fonts because LovyanGFX takes a VLW's line height from its tallest glyph, so accented glyphs in `b18`/`s12` would shift every ASCII label. `b44`, `b36` and `b30` are frozen: no Pillow release reproduces them, so `gen_fonts.py` copies them from the existing `fonts_gen.h` and they cannot be regenerated from a clean checkout.
 - `board_build.arduino.memory_type = qio_opi` in `platformio.ini` is required, because the PSRAM is octal. With `qio_qspi`, the PSRAM is not found. Starting the portal AP while BLE is up then runs out of memory and crashes in the WiFi driver.
 - The board compiles as `-std=gnu++11` (the Arduino core's default), but the host tests use C++17. A pure header can pass `make test` and still break `pio run`: a `constexpr` function must be a single `return`, and there are no C++14/17 features. Run `pio run` after touching a pure header.
 - Serial logs use `[tag]` prefixes (`[boot]`, `[net]`, `[ble]`, `[imu]`, `[settings]`, `[buzz]`). The simulator prints the same lines to stdout, so `make run` output can be compared with `pio device monitor`.
