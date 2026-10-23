@@ -140,6 +140,18 @@ private func allPoints(_ s: NavScene) -> [ScreenPoint] { s.route + s.streets.fla
         #expect(s.streets.count == 1 && s.streets[0].cls == 0)
     }
 
+    @Test func streetTooBigIsSkippedNotTheRest() {
+        // A high-priority street too big for the budget must not drop the smaller ones after it.
+        let zigzag = StreetLine(cls: 0, points: (0..<20).map { north(Double($0) * 10, east: $0 % 2 == 0 ? 130 : 160) })
+        let small = StreetLine(cls: 3, points: [north(0, east: 5), north(50, east: 5)])
+        let route = straightRoute(length: 100)
+        let base = buildScene(progress: progress(), route: route, streets: [], state: .navigating)
+        let one = encode(base).count + 2 + 8
+        let s = buildScene(progress: progress(), route: route, streets: [zigzag, small], state: .navigating, maxBytes: one)
+        #expect(s.streets.count == 1 && s.streets[0].cls == 3)
+        #expect(encode(s).count <= one)
+    }
+
     @Test func clipsToBox() {
         // A route running 5 km ahead leaves the clip box; it is cut at the edge.
         let route = straightRoute(length: 5000, step: 50)

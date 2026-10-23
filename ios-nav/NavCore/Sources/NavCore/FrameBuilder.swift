@@ -142,7 +142,7 @@ public func buildScene(progress: Progress, route: Route, streets: [StreetLine], 
     }
     scene.route = routePts.count >= 2 ? routePts : []
 
-    // Streets: clip, simplify, order by priority, keep the longest prefix that fits.
+    // Streets: clip, simplify, order by priority, keep each in turn that still fits.
     struct Cand { var cls: UInt8; var pts: [ScreenPoint]; var near: Double; var idx: Int }
     var cands: [Cand] = []
     let dLat = radius / metersPerDegree, dLon = radius / max(1, kx)
@@ -168,9 +168,10 @@ public func buildScene(progress: Progress, route: Route, streets: [StreetLine], 
     var used = fixed + 4 * scene.route.count
     var total = 0
     for c in cands {
+        if scene.streets.count >= NavLimits.maxStreets { break }
+        // A street that does not fit is skipped; a smaller one after it may still fit.
         let cost = 2 + 4 * c.pts.count
-        if scene.streets.count >= NavLimits.maxStreets || total + c.pts.count > NavLimits.maxStreetPoints
-            || used + cost > maxBytes { break }
+        if total + c.pts.count > NavLimits.maxStreetPoints || used + cost > maxBytes { continue }
         scene.streets.append(SceneStreet(cls: c.cls, points: c.pts))
         used += cost; total += c.pts.count
     }
