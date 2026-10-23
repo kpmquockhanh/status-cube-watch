@@ -7,7 +7,7 @@
 //   ./build/cube-shot out @portal   # <out>-portal.png: a screen that is not a
 //                                   # payload card (see renderSpecial):
 //                                   # @portal, @ota, @ble-pair, @ble-wait, @waiting, @dev-edit,
-//                                   # @unlock|unlock-wait, @vol-56|muted|full|zero|fixed|noout|long|none|press|playing|paused
+//                                   # @unlock|unlock-wait, @nav-turn|vn|long|reroute|offroute|arrived|lost|busy, @vol-56|muted|full|zero|fixed|noout|long|none|press|playing|paused
 //
 // Reads the payload JSON from the file named on the command line, or stdin.
 
@@ -25,6 +25,7 @@
 
 #include "../src/display.h"
 #include "battery_env.h"
+#include "nav_samples.h"
 #include "../src/payload.h"
 #include "../src/ui.h"
 
@@ -171,6 +172,14 @@ bool volumeShot(Display &lcd, const char *state) {
   return true;
 }
 
+// A navigation scene by name (nav_samples.h); `lost` also shows NO PHONE.
+bool navShot(Display &lcd, const char *name) {
+  static NavScene scene;
+  if (!navSample(name, scene)) return false;
+  uiNav(lcd, scene, !strcmp(name, "lost"), batteryViewFromEnv());
+  return true;
+}
+
 // Screens that are not payload cards. Selected with `@name` on the command
 // line; the grab goes to <prefix>-<name>.png. Returns false for an unknown name.
 bool renderSpecial(Display &lcd, const char *name) {
@@ -190,6 +199,8 @@ bool renderSpecial(Display &lcd, const char *name) {
     waitingShot(lcd);
   } else if (!strcmp(name, "dev-edit")) {
     uiDeviceEditor(lcd, DeviceSettings{160, 15, 0, 5, 2});
+  } else if (!strncmp(name, "nav-", 4)) {
+    if (!navShot(lcd, name + 4)) return false;
   } else if (!strncmp(name, "vol-", 4)) {
     if (!volumeShot(lcd, name + 4)) return false;
   } else {

@@ -9,6 +9,7 @@
 #include "dev_editor.h"
 #include "editor_layout.h"
 #include "settings.h"
+#include "utf8_fit.h"
 
 namespace {
 
@@ -182,6 +183,9 @@ struct Vlw {
   lgfx::VLWfont font;
 };
 Vlw V_B44, V_B36, V_B30, V_B24, V_B18, V_S12, V_R17;
+// Navigation strings can carry Vietnamese letters: separate fonts so the shared
+// ones stay pixel-identical (accented glyphs raise a font's line height).
+Vlw V_B18V, V_S12V;
 
 void loadVlw(Vlw &v, const uint8_t *blob, size_t len) {
   v.data.set(blob, len);
@@ -975,6 +979,8 @@ void uiBegin(Display &) {
   loadVlw(V_B18, font_b18, sizeof(font_b18));
   loadVlw(V_S12, font_s12, sizeof(font_s12));
   loadVlw(V_R17, font_r17, sizeof(font_r17));
+  loadVlw(V_B18V, font_b18v, sizeof(font_b18v));
+  loadVlw(V_S12V, font_s12v, sizeof(font_s12v));
 
   g_canvas.setColorDepth(16);
   g_sprite = g_canvas.createSprite(LCD_WIDTH, LCD_HEIGHT) != nullptr;
@@ -1172,6 +1178,255 @@ void uiUnlock(Display &lcd, bool waiting) {
   drawCaps(g, waiting ? "Check your Mac" : "Your Mac is locked", CX, 214, DIM, middle_center);
 
   drawCaps(g, "Swipe for the cards", CX, 256, MUTED, middle_center);
+  present(lcd);
+}
+
+// --- navigation ----------------------------------------------------------------
+namespace {
+
+constexpr uint32_t NAV_STREET_RGB[4] = {0x59606F, 0x4A5263, 0x3A4152, 0x2A3040};
+constexpr int NAV_STREET_W[4] = {7, 5, 3, 2};
+constexpr int NAV_BANNER_H = 62;
+constexpr int NAV_GLYPH_CX = 38, NAV_GLYPH_CY = 31;  // the 44 px box at x 16..60
+constexpr int NAV_TEXT_X = 72;
+constexpr int NAV_BOTTOM_Y = 262;
+constexpr int NAV_BOTTOM_MAX_W = 212;
+
+// A stroked polyline with round caps and joins (a filled circle at every vertex).
+void navStroke(LovyanGFX *g, const NavPoint *p, size_t n, int w, uint16_t col) {
+  const float r = w * 0.5f;
+  for (size_t i = 0; i + 1 < n; i++) g->drawWideLine(p[i].x, p[i].y, p[i + 1].x, p[i + 1].y, r, col);
+  if (w <= 2) return;  // a 2 px line has no joint worth rounding
+  for (size_t i = 0; i < n; i++) g->fillSmoothCircle(p[i].x, p[i].y, (int)(r + 0.5f), col);
+}
+
+void navPolyline(LovyanGFX *g, const NavPoint *p, size_t n, int w, uint16_t col) {
+  if (w <= 2) {
+    for (size_t i = 0; i + 1 < n; i++) g->drawWideLine(p[i].x, p[i].y, p[i + 1].x, p[i + 1].y, 1.0f, col);
+  } else {
+    navStroke(g, p, n, w, col);
+  }
+}
+
+// A turn arrow from a polyline in glyph space (origin = box centre, y down, the
+// last point is the tip), rotated clockwise by `rot` radians.
+void navArrow(LovyanGFX *g, const int8_t (*pts)[2], size_t n, float rot, uint16_t col) {
+  const float cs = cosf(rot), sn = sinf(rot);
+  NavPoint q[10];
+  if (n > 10) n = 10;
+  for (size_t i = 0; i < n; i++) {
+    const float x = pts[i][0], y = pts[i][1];
+    q[i] = NavPoint{(int16_t)lroundf(NAV_GLYPH_CX + x * cs - y * sn), (int16_t)lroundf(NAV_GLYPH_CY + x * sn + y * cs)};
+  }
+  // Head: a triangle at the tip, along the last segment.
+  const float dx = q[n - 1].x - q[n - 2].x, dy = q[n - 1].y - q[n - 2].y;
+  const float len = sqrtf(dx * dx + dy * dy);
+  if (len < 1.0f) return;
+  const float ux = dx / len, uy = dy / len;
+  constexpr float HEAD_L = 13.0f, HEAD_W = 8.5f;
+  const float bx = q[n - 1].x - ux * HEAD_L, by = q[n - 1].y - uy * HEAD_L;
+  q[n - 1] = NavPoint{(int16_t)lroundf(bx + ux * 2.0f), (int16_t)lroundf(by + uy * 2.0f)};
+  navStroke(g, q, n, 5, col);
+  g->fillTriangle((int)lroundf(bx - uy * HEAD_W), (int)lroundf(by + ux * HEAD_W), (int)lroundf(bx + uy * HEAD_W),
+                  (int)lroundf(by - ux * HEAD_W), (int)lroundf(bx + ux * HEAD_L), (int)lroundf(by + uy * HEAD_L), col);
+}
+
+#define NAV_ARROW(g, rot, col, ...)                       \
+  do {                                                    \
+    static const int8_t P[][2] = {__VA_ARGS__};           \
+    navArrow(g, P, sizeof(P) / sizeof(P[0]), rot, col);   \
+  } while (0)
+
+// The turn glyph in the banner's left box.
+void drawNavTurn(LovyanGFX *g, NavTurn turn, uint8_t exitNo, uint8_t dir, uint16_t col) {
+  switch (turn) {
+    case NavTurn::Straight: NAV_ARROW(g, 0, col, {0, 20}, {0, -22}); break;
+    case NavTurn::Right: NAV_ARROW(g, 0, col, {-9, 20}, {-9, -1}, {22, -1}); break;
+    case NavTurn::Left: NAV_ARROW(g, 0, col, {9, 20}, {9, -1}, {-22, -1}); break;
+    case NavTurn::SlightRight: NAV_ARROW(g, 0, col, {-7, 20}, {-7, 6}, {12, -20}); break;
+    case NavTurn::SlightLeft: NAV_ARROW(g, 0, col, {7, 20}, {7, 6}, {-12, -20}); break;
+    case NavTurn::SharpRight: NAV_ARROW(g, 0, col, {-14, 20}, {-14, -8}, {12, 12}); break;
+    case NavTurn::SharpLeft: NAV_ARROW(g, 0, col, {14, 20}, {14, -8}, {-12, 12}); break;
+    case NavTurn::UTurn:
+      NAV_ARROW(g, 0, col, {10, 20}, {10, -6}, {7, -14}, {0, -18}, {-7, -14}, {-10, -6}, {-10, 14});
+      break;
+    case NavTurn::KeepRight:
+      g->drawWideLine(NAV_GLYPH_CX - 4, NAV_GLYPH_CY + 2, NAV_GLYPH_CX - 4, NAV_GLYPH_CY - 21, 2.0f, MUTED);
+      NAV_ARROW(g, 0, col, {-4, 20}, {-4, 2}, {12, -18});
+      break;
+    case NavTurn::KeepLeft:
+      g->drawWideLine(NAV_GLYPH_CX + 4, NAV_GLYPH_CY + 2, NAV_GLYPH_CX + 4, NAV_GLYPH_CY - 21, 2.0f, MUTED);
+      NAV_ARROW(g, 0, col, {4, 20}, {4, 2}, {-12, -18});
+      break;
+    case NavTurn::Roundabout: {
+      const int cx = NAV_GLYPH_CX, cy = NAV_GLYPH_CY + 4;
+      g->fillSmoothCircle(cx, cy, 15, col);
+      g->fillSmoothCircle(cx, cy, 10, g->color565(0x0B, 0x0D, 0x12));
+      g->fillRect(cx - 2, cy + 14, 5, 6, col);  // the entry
+      static const int8_t P[][2] = {{0, -8}, {0, -22}};
+      navArrow(g, P, 2, 0.0f, col);
+      if (exitNo) {
+        char d[4];
+        snprintf(d, sizeof(d), "%u", (unsigned)exitNo);
+        g->setFont(&V_S12.font);
+        g->setTextDatum(middle_center);
+        g->setTextColor(col, g->color565(0x0B, 0x0D, 0x12));
+        g->drawString(d, cx, cy);
+      }
+      break;
+    }
+    case NavTurn::Arrive: {
+      const int cx = NAV_GLYPH_CX, cy = NAV_GLYPH_CY;
+      g->fillSmoothCircle(cx, cy, 20, col);
+      g->fillSmoothCircle(cx, cy, 15, g->color565(0x0B, 0x0D, 0x12));
+      const NavPoint chk[3] = {{(int16_t)(cx - 8), (int16_t)cy}, {(int16_t)(cx - 2), (int16_t)(cy + 7)}, {(int16_t)(cx + 9), (int16_t)(cy - 7)}};
+      navStroke(g, chk, 3, 5, col);
+      break;
+    }
+    case NavTurn::Rejoin: {
+      const float rot = (float)dir * (6.2831853f / 256.0f);
+      NAV_ARROW(g, rot, col, {0, 20}, {0, -22});
+      break;
+    }
+  }
+}
+
+// The bottom line: street (INK) then the ETA (DIM), the street cut with "..."
+// so the pair fits NAV_BOTTOM_MAX_W pixels.
+void drawNavBottom(LovyanGFX *g, const NavScene &s) {
+  g->setFont(&V_B18V.font);
+  g->setTextDatum(middle_left);
+  char eta[28];
+  eta[0] = '\0';
+  if (s.eta[0]) snprintf(eta, sizeof(eta), "  %s", s.eta);
+  const int etaW = eta[0] ? g->textWidth(eta) : 0;
+  char street[72];
+  snprintf(street, sizeof(street), "%s", s.street);
+  size_t n = strlen(street);
+  if (g->textWidth(street) + etaW > NAV_BOTTOM_MAX_W) {
+    const int dotsW = g->textWidth("...");
+    while (n > 0) {
+      n = utf8FitBytes(street, n - 1);
+      street[n] = '\0';
+      if (g->textWidth(street) + dotsW + etaW <= NAV_BOTTOM_MAX_W) break;
+    }
+    memcpy(street + n, "...", 4);
+  }
+  const int streetW = g->textWidth(street);
+  int x = (LCD_WIDTH - (streetW + etaW)) / 2;
+  g->setTextColor(INK, BG);
+  g->drawString(street, x, NAV_BOTTOM_Y);
+  if (eta[0]) {
+    g->setTextColor(DIM, BG);
+    g->drawString(eta, x + streetW, NAV_BOTTOM_Y);
+  }
+}
+
+void drawNavArrived(LovyanGFX *g, const NavScene &s) {
+  const int cx = LCD_WIDTH / 2, cy = 92;
+  const uint16_t acc = g_palette[ACC_ACCENT];
+  g->fillSmoothCircle(cx, cy, 50, acc);
+  g->fillSmoothCircle(cx, cy, 42, BG);
+  const NavPoint chk[3] = {{(int16_t)(cx - 20), (int16_t)(cy + 2)}, {(int16_t)(cx - 6), (int16_t)(cy + 16)}, {(int16_t)(cx + 22), (int16_t)(cy - 16)}};
+  navStroke(g, chk, 3, 10, acc);
+  g->setFont(&V_B30.font);
+  g->setTextDatum(middle_center);
+  g->setTextColor(INK, BG);
+  g->drawString("Arrived", cx, 172);
+  if (s.street[0]) {
+    g->setFont(&V_B18V.font);
+    char street[72];
+    snprintf(street, sizeof(street), "%s", s.street);
+    size_t n = strlen(street);
+    if (g->textWidth(street) > NAV_BOTTOM_MAX_W) {
+      const int dotsW = g->textWidth("...");
+      while (n > 0) {
+        n = utf8FitBytes(street, n - 1);
+        street[n] = '\0';
+        if (g->textWidth(street) + dotsW <= NAV_BOTTOM_MAX_W) break;
+      }
+      memcpy(street + n, "...", 4);
+    }
+    g->setTextColor(DIM, BG);
+    g->drawString(street, cx, 210);
+  }
+}
+
+}  // namespace
+
+void uiNav(Display &lcd, const NavScene &s, bool phoneLost, const BatteryView &bat) {
+  g_animating = false;
+  LovyanGFX *g = target(lcd);
+  g->fillScreen(BG);
+  const bool lowBat = !bat.onUsb && bat.pct < 15;
+  const uint16_t amber = g_palette[ACC_AMBER];
+
+  if (s.state == NavState::Arrived) {
+    drawNavArrived(g, s);
+  } else {
+    // Streets, widest last so junctions of big roads stay clean.
+    for (int cls = 3; cls >= 0; cls--) {
+      const uint16_t col = to565(NAV_STREET_RGB[cls]);
+      for (uint8_t i = 0; i < s.nStreets; i++) {
+        if (s.streetCls[i] == cls) navPolyline(g, &s.streetPts[s.streetStart[i]], s.streetLen[i], NAV_STREET_W[cls], col);
+      }
+    }
+    const bool lost = s.state != NavState::Navigating;
+    if (s.nRoute >= 2) navStroke(g, s.route, s.nRoute, 12, lost ? DIM : to565(0x4DA3FF));
+
+    // The rider: a chevron with a black outline, grey when the GPS is weak.
+    const uint16_t arrow = (s.flags & 1) ? DIM : INK;
+    const int tip[2] = {120, 180}, bl[2] = {104, 220}, nt[2] = {120, 210}, br[2] = {136, 220};
+    g->fillTriangle(tip[0], tip[1], bl[0], bl[1], nt[0], nt[1], BG);
+    g->fillTriangle(tip[0], tip[1], nt[0], nt[1], br[0], br[1], BG);
+    g->drawWideLine(tip[0], tip[1], bl[0], bl[1], 3.0f, BG);
+    g->drawWideLine(bl[0], bl[1], nt[0], nt[1], 3.0f, BG);
+    g->drawWideLine(nt[0], nt[1], br[0], br[1], 3.0f, BG);
+    g->drawWideLine(br[0], br[1], tip[0], tip[1], 3.0f, BG);
+    g->fillSmoothCircle(tip[0], tip[1], 3, BG);
+    g->fillSmoothCircle(bl[0], bl[1], 3, BG);
+    g->fillSmoothCircle(br[0], br[1], 3, BG);
+    g->fillTriangle(tip[0], tip[1], bl[0], bl[1], nt[0], nt[1], arrow);
+    g->fillTriangle(tip[0], tip[1], nt[0], nt[1], br[0], br[1], arrow);
+
+    // The banner.
+    const uint16_t bannerBg = to565(0x0B0D12);
+    g->fillRect(0, 0, LCD_WIDTH, NAV_BANNER_H, bannerBg);
+    drawNavTurn(g, s.turn, s.exit, s.dir, INK);
+    g->setTextDatum(middle_left);
+    g->setTextColor(INK, bannerBg);
+    if (s.state == NavState::Rerouting) {
+      g->setFont(&V_B24.font);
+      g->drawString("Rerouting", NAV_TEXT_X, 31);
+    } else if (s.state == NavState::OffRouteNoSignal) {
+      g->setFont(&V_B30.font);
+      g->drawString(s.dist, NAV_TEXT_X, 23);
+      g->setFont(&V_S12V.font);
+      g->setTextColor(amber, bannerBg);
+      g->drawString("OFF ROUTE \xC2\xB7 NO SIGNAL", NAV_TEXT_X, 49);
+    } else {
+      g->setFont(&V_B30.font);
+      g->drawString(s.dist, NAV_TEXT_X, 31);
+    }
+    if (phoneLost) {
+      g->setFont(&V_S12V.font);
+      g->setTextDatum(middle_right);
+      g->setTextColor(amber, bannerBg);
+      g->drawString("NO PHONE", 232, 12);
+    }
+
+    g->fillRect(0, NAV_BOTTOM_Y - 16, LCD_WIDTH, LCD_HEIGHT - (NAV_BOTTOM_Y - 16), BG);
+    drawNavBottom(g, s);
+  }
+
+  if (lowBat) {
+    char txt[8];
+    snprintf(txt, sizeof(txt), "%u%%", (unsigned)bat.pct);
+    g->setFont(&V_S12.font);
+    g->setTextDatum(middle_right);
+    g->setTextColor(g_palette[ACC_RED], BG);
+    g->drawString(txt, 232, 276);
+  }
   present(lcd);
 }
 

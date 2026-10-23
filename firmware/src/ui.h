@@ -2,6 +2,7 @@
 #include "battery_util.h"
 #include "device_settings.h"
 #include "display.h"
+#include "nav_frame.h"
 #include "payload.h"
 #include "volume_slider.h"
 
@@ -55,6 +56,11 @@ void uiBlePair(Display &lcd, uint32_t passkey);
 // The Mac is locked: a tap asks it to unlock (unlock_prompt.h). `waiting`: a
 // tap was sent and the Mac has not answered yet.
 void uiUnlock(Display &lcd, bool waiting);
+
+// The navigation map: streets, route and rider arrow under a turn banner, the
+// street and ETA at the bottom; `phoneLost` shows NO PHONE. Arrived is a full
+// screen of its own. Battery under 15% shows as red text, not the top bar.
+void uiNav(Display &lcd, const NavScene &s, bool phoneLost, const BatteryView &bat);
 
 // Progress screen while an OTA image is arriving.
 void uiOta(Display &lcd, uint8_t percent);
