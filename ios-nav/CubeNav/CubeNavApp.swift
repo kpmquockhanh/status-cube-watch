@@ -70,10 +70,21 @@ enum DemoScreen: String {
             NavigationStack {
                 PreviewView(place: Place(name: "Chợ Bến Thành", subtitle: "Lê Lợi, Bến Thành, Quận 1",
                                          lat: 10.7725, lon: 106.6980),
-                            demoRoute: Route(points: [Coord(lat: 10.7769, lon: 106.7009), Coord(lat: 10.7757, lon: 106.7019),
-                                                      Coord(lat: 10.7741, lon: 106.6998), Coord(lat: 10.7733, lon: 106.6990),
-                                                      Coord(lat: 10.7725, lon: 106.6980)],
-                                             distance: 1240, time: 312, instructions: []))
+                            demoRoutes: [
+                                .calm: Route(points: [Coord(lat: 10.7769, lon: 106.7009), Coord(lat: 10.7781, lon: 106.6990),
+                                                      Coord(lat: 10.7752, lon: 106.6962), Coord(lat: 10.7725, lon: 106.6980)],
+                                             distance: 1420, time: 372, instructions: [],
+                                             stats: RouteStats(turns: 6, lights: 2, mainRoadShare: 0.08)),
+                                .fastest: Route(points: [Coord(lat: 10.7769, lon: 106.7009), Coord(lat: 10.7757, lon: 106.7019),
+                                                         Coord(lat: 10.7741, lon: 106.6998), Coord(lat: 10.7733, lon: 106.6990),
+                                                         Coord(lat: 10.7725, lon: 106.6980)],
+                                                distance: 1240, time: 312, instructions: [],
+                                                stats: RouteStats(turns: 4, lights: 5, mainRoadShare: 0.62)),
+                                .fewestTurns: Route(points: [Coord(lat: 10.7769, lon: 106.7009), Coord(lat: 10.7745, lon: 106.7032),
+                                                             Coord(lat: 10.7718, lon: 106.6995), Coord(lat: 10.7725, lon: 106.6980)],
+                                                    distance: 1510, time: 345, instructions: [],
+                                                    stats: RouteStats(turns: 2, lights: 4, mainRoadShare: 0.41)),
+                            ])
             }
         default:
             RideScreen(scene: sample, link: ride.cubeLink, location: ride.location, onStop: {})

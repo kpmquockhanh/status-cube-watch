@@ -55,11 +55,11 @@ final class RideController: ObservableObject {
 
     // MARK: planning
 
-    /// The route for the preview map, from the server (not MapKit).
-    func plan(to dest: Coord) async -> Result<Route, StartError> {
+    /// One style's route for the preview, from the server (not MapKit); Calm follows the clock at `date`.
+    func plan(to dest: Coord, style: RouteStyle, at date: Date = Date()) async -> Result<Route, StartError> {
         guard let server = ServerConfig.makeServer() else { return .failure(.badKey) }
         guard let from = location.fix?.coord else { return .failure(.noSignal) }
-        do { return .success(try await server.route(from: from, to: dest, profile: RouteStyle.fastest.profile(rushHour: false))) }
+        do { return .success(try await server.route(from: from, to: dest, profile: style.profile(rushHour: isRushHour(date)))) }
         catch let e as StartError { return .failure(e) }
         catch { return .failure(.noSignal) }
     }
@@ -74,19 +74,18 @@ final class RideController: ObservableObject {
 
     // MARK: ride
 
-    /// Starts a ride: downloads the route and its map, then switches to the ride screen. Background
-    /// location goes on at once, so the download carries on with the phone pocketed. `cancelStart`
-    /// (leaving the preview) abandons it.
-    func start(to dest: Coord) {
+    /// Starts a ride on the picked preview route: downloads its map, then switches to the ride
+    /// screen; reroutes ask for the same style. Background location goes on at once, so the download
+    /// carries on with the phone pocketed. `cancelStart` (leaving the preview) abandons it.
+    func start(to dest: Coord, option: RouteOption) {
         guard phase == .idle else { return }
         guard let server = ServerConfig.makeServer() else { message = Self.text(for: .badKey); return }
-        guard let from = location.fix?.coord else { message = "Waiting for a GPS fix. Allow location access and try again."; return }
         let token = beginStarting()
         let e = RideEngine(server: server, cache: cache)
         e.frameBudget = cubeLink.frameBudget
         startTask = Task {
             var failure: StartError?
-            do { try await e.start(from: from, to: dest) }
+            do { try await e.start(route: option.route, to: dest, style: option.style) }
             catch let err as StartError { failure = err }
             catch { failure = .noSignal }
             guard token == startToken, phase == .starting else { return }   // cancelled
