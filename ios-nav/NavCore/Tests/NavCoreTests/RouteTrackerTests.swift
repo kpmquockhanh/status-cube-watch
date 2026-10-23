@@ -102,3 +102,70 @@ private func fix(_ c: Coord, acc: Double = 5, speed: Double = 10, course: Double
     #expect(p.arrived)
     #expect(!p.gpsWeak)
 }
+
+private func pathRoute(_ pts: [Coord]) -> Route {
+    Route(points: pts, distance: 0, time: 100, instructions: [
+        Instruction(turn: .straight, streetName: "", distance: 0, time: 0, interval: 0...0),
+        Instruction(turn: .arrive, streetName: "", distance: 0, time: 0, interval: (pts.count - 1)...(pts.count - 1)),
+    ])
+}
+
+@Test func loopRouteDoesNotArriveAtStart() {
+    // 400 m north, 200 m east, 400 m south, ending 10 m short of the start.
+    var pts = (0...4).map { north(Double($0) * 100) }
+    pts.append(north(400, east: 200))
+    pts.append(north(0, east: 200))
+    pts.append(north(0, east: 10))
+    let t = RouteTracker(route: pathRoute(pts))
+    for m in [0.0, 5, 10] {
+        let p = t.update(fix(north(m), speed: 5))
+        #expect(!p.arrived)
+    }
+    var last = t.update(fix(north(300)))
+    #expect(!last.arrived)
+    last = t.update(fix(north(0, east: 200)))
+    #expect(!last.arrived)
+    last = t.update(fix(north(0, east: 15)))
+    #expect(last.arrived)
+}
+
+@Test func weakFixNearEndDoesNotLatchArrival() {
+    let t = RouteTracker(route: lRoute())
+    let end = lRoute().points[8]
+    _ = t.update(fix(north(0, east: -250, from: end)))
+    #expect(!t.update(fix(north(0, east: -10, from: end), acc: 50)).arrived)
+    #expect(!t.update(fix(north(0, east: -100, from: end))).arrived)
+}
+
+@Test func outAndBackStaysOnOutboundLeg() {
+    // 500 m north, then 500 m back south on a line 8 m east.
+    var pts = (0...5).map { north(Double($0) * 100) }
+    pts += (0...5).map { north(Double(5 - $0) * 100, east: 8) }
+    let route = Route(points: pts, distance: 1000, time: 100, instructions: [
+        Instruction(turn: .straight, streetName: "", distance: 500, time: 0, interval: 0...5),
+        Instruction(turn: .uTurn, streetName: "", distance: 500, time: 0, interval: 5...10),
+        Instruction(turn: .arrive, streetName: "", distance: 0, time: 0, interval: 11...11),
+    ])
+    let t = RouteTracker(route: route)
+    let jitter: [Double] = [-6, 5, 6, -4, 3, -6, 6, 2]
+    var lastNext = 0, lastAlong = -1.0
+    for (i, m) in stride(from: 5.0, through: 480, by: 15).enumerated() {
+        let p = t.update(fix(north(m, east: jitter[i % jitter.count]), acc: 8))
+        #expect(p.distanceAlong < 520)
+        #expect(p.nextInstruction >= lastNext)
+        #expect(p.distanceAlong > lastAlong - 40)
+        lastNext = p.nextInstruction; lastAlong = p.distanceAlong
+    }
+}
+
+@Test func singleFarFixDoesNotJumpToLaterLeg() {
+    // U-shaped: 500 m north, 70 m east, 500 m south. A fix 60 m east of the first leg is
+    // 10 m from the return leg (later in the route) but must not snap there.
+    var pts = (0...5).map { north(Double($0) * 100) }
+    pts += (0...5).map { north(Double(5 - $0) * 100, east: 70) }
+    let t = RouteTracker(route: pathRoute(pts))
+    _ = t.update(fix(north(240)))
+    let p = t.update(fix(north(250, east: 60)))
+    #expect(p.distanceAlong < 300)
+    #expect(!p.offRoute)
+}

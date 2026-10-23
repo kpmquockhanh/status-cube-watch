@@ -46,6 +46,9 @@ public final class RouteTracker {
     static let arriveDistance = 30.0
     static let backWindow = 100.0
     static let forwardWindow = 2000.0
+    static let backFree = 30.0
+    static let forwardFree = 100.0
+    static let arriveRemaining = 60.0
 
     private let route: Route
     private let cum: [Double]      // cum[i] = meters along the route at points[i]
@@ -54,6 +57,7 @@ public final class RouteTracker {
     private var lastHeading: Double?
     private var badFixes = 0
     private var arrivedLatch = false
+    private var started = false
 
     public init(route: Route) {
         self.route = route
@@ -77,8 +81,11 @@ public final class RouteTracker {
         let ky = 111_194.9266
         func xy(_ c: Coord) -> (Double, Double) { ((c.lon - fix.coord.lon) * kx, (c.lat - fix.coord.lat) * ky) }
 
-        func nearest(_ range: ClosedRange<Int>) -> (seg: Int, t: Double, d: Double) {
-            var best = (seg: range.lowerBound, t: 0.0, d: Double.infinity)
+        // Score = distance to the segment, plus (when `continuity`) a penalty for jumping along
+        // the route relative to the last position: backward beyond 30 m costs 5 per meter, forward
+        // beyond 100 m costs 1 per meter. Keeps out-and-back and looping routes on the right leg.
+        func nearest(_ range: ClosedRange<Int>, continuity: Bool) -> (seg: Int, t: Double, d: Double, score: Double) {
+            var best = (seg: range.lowerBound, t: 0.0, d: Double.infinity, score: Double.infinity)
             for i in range {
                 let (ax, ay) = xy(pts[i]), (bx, by) = xy(pts[i + 1])
                 let dx = bx - ax, dy = by - ay
@@ -87,7 +94,13 @@ public final class RouteTracker {
                 let t = len2 > 0 ? min(1, max(0, -(ax * dx + ay * dy) / len2)) : 0
                 let px = ax + t * dx, py = ay + t * dy
                 let d = (px * px + py * py).squareRoot()
-                if d < best.d { best = (i, t, d) }   // strict: ties keep the earlier segment
+                var score = d
+                if continuity {
+                    let delta = cum[i] + t * (cum[i + 1] - cum[i]) - lastAlong
+                    if delta < -Self.backFree { score += (-delta - Self.backFree) * 5 }
+                    else if delta > Self.forwardFree { score += delta - Self.forwardFree }
+                }
+                if score < best.score { best = (i, t, d, score) }   // strict: ties keep the earlier segment
             }
             return best
         }
@@ -97,10 +110,21 @@ public final class RouteTracker {
         while lo > 0 && lastAlong - cum[lo] < Self.backWindow { lo -= 1 }
         var hi = segment
         while hi < lastSeg && cum[hi + 1] - lastAlong < Self.forwardWindow { hi += 1 }
-        var best = nearest(lo...hi)
-        if best.d > Self.offRouteDistance { // lost: look at the whole route
-            let all = nearest(0...lastSeg)
-            if all.d < best.d { best = all }
+        // The first fix has no history: search the whole route by plain distance.
+        var best = started ? nearest(lo...hi, continuity: true) : nearest(0...lastSeg, continuity: false)
+        started = true
+
+        let weak = fix.accuracy > Self.goodAccuracy
+        if !weak {
+            badFixes = best.d > Self.offRouteDistance ? badFixes + 1 : 0
+        }
+        // Only once off-route has tripped may the snap leave the continuity window.
+        if badFixes >= Self.offRouteFixes {
+            let all = nearest(0...lastSeg, continuity: false)
+            if all.d < best.d {
+                best = all
+                if !weak && best.d <= Self.offRouteDistance { badFixes = 0 }
+            }
         }
 
         let a = pts[best.seg], b = pts[best.seg + 1]
@@ -122,11 +146,6 @@ public final class RouteTracker {
             toTurn = max(0, cum[min(route.instructions[next].interval.lowerBound, lastSeg + 1)] - along)
         }
 
-        let weak = fix.accuracy > Self.goodAccuracy
-        if !weak {
-            badFixes = best.d > Self.offRouteDistance ? badFixes + 1 : 0
-        }
-
         let heading: Double
         if fix.speed >= Self.minHeadingSpeed && fix.course >= 0 {
             heading = fix.course
@@ -137,7 +156,8 @@ public final class RouteTracker {
         }
         lastHeading = heading
 
-        if distanceMeters(fix.coord, pts[lastSeg + 1]) <= Self.arriveDistance { arrivedLatch = true }
+        if !weak, remaining <= Self.arriveRemaining,
+           distanceMeters(fix.coord, pts[lastSeg + 1]) <= Self.arriveDistance { arrivedLatch = true }
 
         return Progress(
             snapped: snapped, heading: heading, distanceAlong: along,
