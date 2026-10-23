@@ -119,7 +119,8 @@ final class RideController: ObservableObject {
     /// Once a second without a new fix, runs the engine again on the last one (marked weak once it is
     /// older than 5 s), so the arrival hold and reroute retries go on while standing still.
     private func tick() {
-        if phase == .riding, let f = lastFix, Date().timeIntervalSince(lastUpdate) >= 1 {
+        if phase == .riding, let f = lastFix, Date().timeIntervalSince(lastUpdate) >= 1,
+           Date().timeIntervalSince(lastFixAt) >= 1.5 {
             var g = f
             if Date().timeIntervalSince(lastFixAt) > 5 { g.accuracy = max(g.accuracy, 100) }
             run(g)

@@ -21,7 +21,7 @@ enum ServerConfig {
             return read(service, account)
         }
         set {
-            write(newValue, service, account)
+            _ = write(newValue, service, account)
         }
     }
 
@@ -29,8 +29,9 @@ enum ServerConfig {
     private static func migrateOldKey() {
         let old = read(oldService, oldAccount)
         guard !old.isEmpty else { return }
-        if read(service, account).isEmpty { write(old, service, account) }
-        write("", oldService, oldAccount)
+        if read(service, account).isEmpty { _ = write(old, service, account) }
+        // Delete the old item only once the new one reads back the same.
+        if read(service, account) == old { _ = write("", oldService, oldAccount) }
     }
 
     private static func read(_ service: String, _ account: String) -> String {
@@ -44,17 +45,18 @@ enum ServerConfig {
         }
     }
 
-    private static func write(_ newValue: String, _ service: String, _ account: String) {
+    @discardableResult
+    private static func write(_ newValue: String, _ service: String, _ account: String) -> Bool {
         do {
             let base: [String: Any] = [kSecClass as String: kSecClassGenericPassword, kSecAttrService as String: service,
                                        kSecAttrAccount as String: account]
             SecItemDelete(base as CFDictionary)
             let k = newValue.trimmingCharacters(in: .whitespacesAndNewlines)
-            guard !k.isEmpty else { return }
+            guard !k.isEmpty else { return true }
             var add = base
             add[kSecValueData as String] = Data(k.utf8)
             add[kSecAttrAccessible as String] = kSecAttrAccessibleAfterFirstUnlock   // readable while the phone is locked
-            SecItemAdd(add as CFDictionary, nil)
+            return SecItemAdd(add as CFDictionary, nil) == errSecSuccess
         }
     }
 
