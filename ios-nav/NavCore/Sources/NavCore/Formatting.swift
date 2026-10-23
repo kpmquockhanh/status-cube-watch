@@ -14,3 +14,12 @@ public func formatETA(_ seconds: Double) -> String {
     if minutes < 60 { return "\(minutes) min" }
     return String(format: "%d h %02d min", minutes / 60, minutes % 60)
 }
+
+/// "5 turns · 3 lights · main roads 20%"; the lights part is left out when unknown.
+public func routeFacts(_ s: RouteStats) -> String {
+    func count(_ n: Int, _ word: String) -> String { "\(n) \(word)\(n == 1 ? "" : "s")" }
+    var parts = [count(s.turns, "turn")]
+    if let lights = s.lights { parts.append(count(lights, "light")) }
+    parts.append("main roads \(Int((s.mainRoadShare * 100).rounded()))%")
+    return parts.joined(separator: " · ")
+}
