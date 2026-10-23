@@ -1,0 +1,23 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="1024" height="1024" viewBox="0 0 1024 1024">
+  <defs>
+    <linearGradient id="bg" x1="0" y1="0" x2="0" y2="1">
+      <stop offset="0" stop-color="#232A38"/><stop offset="1" stop-color="#0B0D12"/>
+    </linearGradient>
+    <linearGradient id="bezel" x1="0" y1="0" x2="1" y2="1">
+      <stop offset="0" stop-color="#4A5466"/><stop offset="1" stop-color="#1E2430"/>
+    </linearGradient>
+    <clipPath id="scr"><rect x="282" y="190" width="460" height="644" rx="64"/></clipPath>
+  </defs>
+  <rect width="1024" height="1024" fill="url(#bg)"/>
+  <rect x="246" y="154" width="532" height="716" rx="100" fill="url(#bezel)"/>
+  <rect x="282" y="190" width="460" height="644" rx="64" fill="#0B0D12"/>
+  <g clip-path="url(#scr)">
+    <g stroke="#262D3A" stroke-width="18" stroke-linecap="round" fill="none">
+      <path d="M260 360 L760 330"/><path d="M260 640 L760 680"/>
+      <path d="M400 170 L440 860"/><path d="M640 170 L620 860"/>
+    </g>
+    <path d="M512 600 L512 500 Q512 440 570 428 L640 412 Q700 398 706 340 L716 170"
+          stroke="#4DA3FF" stroke-width="40" stroke-linecap="round" stroke-linejoin="round" fill="none"/>
+  </g>
+  <path d="M512 540 L580 716 L512 676 L444 716 Z" fill="#FF8A5B" stroke="#0B0D12" stroke-width="16" stroke-linejoin="round"/>
+</svg>

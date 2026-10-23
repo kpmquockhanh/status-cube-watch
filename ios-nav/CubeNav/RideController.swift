@@ -48,6 +48,7 @@ final class RideController: ObservableObject {
 
     /// Called at launch and whenever the app becomes active.
     func appBecameActive() {
+        if DemoFlags.cubeConnected { return }  // DEBUG screenshots: no Bluetooth or location prompts
         cubeLink.connect()
         location.begin()
     }

@@ -1,30 +1,52 @@
 import SwiftUI
 
-/// The cube link in plain words, with the fix where there is one.
+/// The cube link in plain words. Connected (or still looking) is a quiet pill; anything the user
+/// has to act on becomes a card with the fix and the buttons.
 struct CubeStatusView: View {
     @ObservedObject var link: CubeLink
+    private var status: CubeLink.Status { DemoFlags.cubeConnected ? .connected : link.status }
+    /// Where a pill is shown elsewhere on the screen, show only the card (nothing when fine).
+    var cardOnly = false
 
     var body: some View {
-        VStack(alignment: .leading, spacing: 6) {
-            Label(headline, systemImage: icon).font(.headline).foregroundStyle(color)
-            if let d = detail { Text(d).font(.subheadline).foregroundStyle(.secondary) }
-            HStack {
-                if needsSettings {
-                    Button("Open Settings") {
-                        if let u = URL(string: UIApplication.openSettingsURLString) { UIApplication.shared.open(u) }
-                    }
-                }
-                if link.status != .connected && link.status != .searching {
-                    Button("Try again") { link.connect() }
-                }
-            }.buttonStyle(.bordered)
+        if needsAction {
+            card
+        } else if !cardOnly {
+            StatusPill(text: headline, color: color)
         }
     }
 
-    private var needsSettings: Bool { link.status == .unauthorized || link.status == .forgetCube || link.status == .off }
+    private var card: some View {
+        Panel {
+            VStack(alignment: .leading, spacing: 10) {
+                Label {
+                    Text(headline).font(.headline).foregroundStyle(Theme.ink)
+                } icon: {
+                    Image(systemName: icon).foregroundStyle(color)
+                }
+                if let d = detail { Text(d).font(.subheadline).foregroundStyle(Theme.dim) }
+                HStack(spacing: 10) {
+                    if needsSettings {
+                        Button("Open Settings") {
+                            if let u = URL(string: UIApplication.openSettingsURLString) { UIApplication.shared.open(u) }
+                        }
+                        .buttonStyle(SecondaryButtonStyle())
+                    }
+                    if status != .connected && status != .searching {
+                        Button("Try again") { link.connect() }
+                            .buttonStyle(SecondaryButtonStyle(tint: Theme.accent))
+                    }
+                }
+            }
+        }
+    }
+
+    private var needsAction: Bool { status != .connected && status != .searching }
+
+    private var needsSettings: Bool { status == .unauthorized || status == .forgetCube || status == .off }
 
     private var headline: String {
-        switch link.status {
+        switch status {
         case .off: return "Bluetooth is off"
         case .unauthorized: return "Bluetooth is not allowed"
         case .searching: return "Looking for the cube"
@@ -37,7 +59,7 @@ struct CubeStatusView: View {
     }
 
     private var detail: String? {
-        switch link.status {
+        switch status {
         case .off: return "Turn Bluetooth on (Control Center or Settings), then try again."
         case .unauthorized: return "Allow CubeNav under Settings > Privacy & Security > Bluetooth."
         case .searching: return "Keep the cube powered and close to the phone."
@@ -50,7 +72,7 @@ struct CubeStatusView: View {
     }
 
     private var icon: String {
-        switch link.status {
+        switch status {
         case .connected: return "checkmark.circle.fill"
         case .searching, .pairing: return "antenna.radiowaves.left.and.right"
         default: return "exclamationmark.triangle.fill"
@@ -58,11 +80,23 @@ struct CubeStatusView: View {
     }
 
     private var color: Color {
-        switch link.status {
-        case .connected: return .green
-        case .searching, .pairing: return .primary
-        default: return .orange
+        switch status {
+        case .connected: return Theme.good
+        case .searching, .pairing: return Theme.route
+        default: return Theme.warn
         }
+    }
+}
+
+/// The cube link as a pill only, whatever its state (screens that show the card elsewhere).
+struct CubeStatusPillOnly: View {
+    @ObservedObject var link: CubeLink
+    var body: some View {
+        let status = DemoFlags.cubeConnected ? .connected : link.status
+        let ok = status == .connected
+        let busy = status == .searching || status == .pairing
+        StatusPill(text: ok ? "Cube connected" : busy ? "Looking for the cube" : "Cube not linked",
+                   color: ok ? Theme.good : busy ? Theme.route : Theme.warn)
     }
 }
 
@@ -73,13 +107,24 @@ struct ExpiryBanner: View {
             let left = exp.timeIntervalSinceNow
             if left < 2 * 86400 {
                 let days = max(0, Int(ceil(left / 86400)))
-                Text(left <= 0 ? "Rebuild the app from Xcode: it has stopped working"
-                               : "Rebuild the app from Xcode: it stops working in \(days) day\(days == 1 ? "" : "s")")
-                    .font(.subheadline.bold())
-                    .foregroundStyle(.white)
-                    .padding(10).frame(maxWidth: .infinity, alignment: .leading)
-                    .background(left < 12 * 3600 ? Color.red : Color.orange, in: RoundedRectangle(cornerRadius: 8))
+                Label(left <= 0 ? "Rebuild the app from Xcode: it has stopped working"
+                                : "Rebuild the app from Xcode: it stops working in \(days) day\(days == 1 ? "" : "s")",
+                      systemImage: "hammer.fill")
+                    .font(.subheadline.weight(.semibold))
+                    .foregroundStyle(Color.black)
+                    .padding(12).frame(maxWidth: .infinity, alignment: .leading)
+                    .background(left < 12 * 3600 ? Theme.bad : Theme.warn,
+                                in: RoundedRectangle(cornerRadius: 16, style: .continuous))
             }
         }
     }
+}
+
+/// DEBUG-only switches for simulator screenshots (the simulator has no Bluetooth).
+enum DemoFlags {
+    #if DEBUG
+    static let cubeConnected = ProcessInfo.processInfo.arguments.contains("-demoCubeConnected")
+    #else
+    static let cubeConnected = false
+    #endif
 }

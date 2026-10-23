@@ -12,17 +12,22 @@ struct SettingsView: View {
     var body: some View {
         NavigationStack {
             Form {
-                Section("Nav server") {
+                Section {
                     TextField("Server URL", text: $url)
                         .textInputAutocapitalization(.never).autocorrectionDisabled().keyboardType(.URL)
                     SecureField("Key", text: $key)
                         .textInputAutocapitalization(.never).autocorrectionDisabled()
                     if saveFailed {
-                        Text("The key could not be saved in the Keychain. The old key is still in use. Try Save again.")
-                            .font(.footnote).foregroundStyle(.red)
+                        Label("The key could not be saved in the Keychain. The old key is still in use. Try Save again.",
+                              systemImage: "exclamationmark.triangle.fill")
+                            .font(.footnote).foregroundStyle(Theme.bad)
                     }
+                } header: {
+                    Text("Nav server")
+                } footer: {
+                    Text("The key is kept in the iPhone Keychain, not in the app.")
                 }
-                Section { Text("The key is kept in the iPhone Keychain, not in the app.").font(.footnote) }
+                .listRowBackground(Theme.surface)
                 Section {
                     Button("Forget cube", role: .destructive) { confirmForget = true }
                         .disabled(ride.phase != .idle)
@@ -32,10 +37,14 @@ struct SettingsView: View {
                 } footer: {
                     Text("After replacing the cube: the app stops reconnecting to the old one and searches for a new one. Also remove the old Claude Cube in iOS Settings > Bluetooth.")
                 }
+                .listRowBackground(Theme.surface)
                 if let exp = ServerConfig.expiry() {
                     Section("App signing") { Text("Stops working on \(exp.formatted(date: .abbreviated, time: .shortened)). Rebuild from Xcode before then.") }
+                        .listRowBackground(Theme.surface)
                 }
             }
+            .scrollContentBackground(.hidden)
+            .background(Theme.bg)
             .navigationTitle("Settings")
             .confirmationDialog("Forget the cube this iPhone links to?", isPresented: $confirmForget, titleVisibility: .visible) {
                 Button("Forget cube", role: .destructive) { ride.cubeLink.forget(); forgotten = true }
