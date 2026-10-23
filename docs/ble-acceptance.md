@@ -44,7 +44,9 @@ Tick an item only when you observed it. Logs: `./install.sh logs` (Mac, from `ma
 - [ ] Replacement: open the window, pair a second iPhone; on its first Nav write serial shows `[ble] new iPhone replaces <addr>: bond deleted`, and the old iPhone's link drops. Same for a second Mac.
 - [ ] Conn params: the iPhone's link reports `interval 15` or `30 ms, latency 0, timeout 4000 ms`; the Mac's still reports `BLE_IDLE_PARAMS`. Note whether iOS honours the request.
 - [ ] Window closed: two minutes after the reboot (or after one new bond), a further pairing is refused and its bond deleted.
-- [ ] Bond store: with 3 bonds stored (window open, replacement not yet identified), check NimBLE's store does not delete the Mac on its own (`ble_store_util_status_rr` evicts the oldest only when a 4th bond is written).
+- [ ] Bond store full: with Mac + iPhone + an unknown bond, open the window and pair another device; serial shows `[ble] bond store full (type 2): dropping unknown bond ...` and the Mac and iPhone still reconnect. With three known bonds, a further pairing logs `write refused` and the Mac and iPhone bonds survive (`StoreCb` in `net_ble.cpp` replaces NimBLE's `ble_store_util_status_rr`). Note whether macOS/iOS report a pairing failure or an unbonded link in that case.
+- [ ] Unidentified new bond: pair a device from nRF Connect in the window and disconnect before writing anything; serial shows `left before saying what it is: deleting it` and the bond count drops back.
+- [ ] Portal "Forget unknown devices" appears only while such a bond exists and deletes only that bond.
 - [ ] Portal "Forget iPhone" deletes only the iPhone's bond; "Forget Mac" only the Mac's.
 - [ ] Nav throughput: frames of the `busy` size (about 4 KB, several chunks) arrive at 5 per second without `[ble] bad nav chunk` lines; the NimBLE host task does not overflow its stack (no `stack overflow` panic) while decoding.
 

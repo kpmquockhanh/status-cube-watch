@@ -50,6 +50,7 @@ struct Link {
   bool dropping;   // bleUnsecuredExpired already asked for the disconnect
   BondKind kind;   // Unknown until secured and identified
   bool kindDirty;  // learned on this link: the main loop stores it and evicts
+  bool newBond;    // pairing on this link stored a bond that was not there before
   NimBLEAddress id;
   int nBefore;  // bonds stored when the link came up, and which
   NimBLEAddress before[MAX_BONDS];
@@ -63,6 +64,11 @@ struct KindEntry {
   BondKind kind;
 };
 KindEntry g_kinds[MAX_BONDS + 1];
+
+// Bonds to delete on the main loop: a new bond whose link dropped before it said
+// what it is (bleDropBondOnDisconnect).
+NimBLEAddress g_dropQueue[MAX_LINKS];
+int g_dropCount = 0;
 
 // The pairing window after a "Pair new device" reboot (NVS ble/pw).
 volatile bool g_pairRequested = false;
@@ -216,9 +222,12 @@ struct ServerCb : NimBLEServerCallbacks {
     const BondKind kind = l ? l->kind : BondKind::Unknown;
     const bool wasSecured = l && l->secured;
     if (l) {
+      const bool drop = bleDropBondOnDisconnect(l->secured, l->newBond, l->kind);
       portENTER_CRITICAL(&g_mux);
+      if (drop && g_dropCount < MAX_LINKS) g_dropQueue[g_dropCount++] = l->id;
       l->used = false;
       portEXIT_CRITICAL(&g_mux);
+      if (drop) Serial.printf("[ble] new bond %s left before saying what it is: deleting it\n", l->id.toString().c_str());
     }
     Serial.printf("[ble] disconnect %u (%s) %d\n", (unsigned)info.getConnHandle(), kindName(kind), reason);
     if (!wasSecured) g_passkey = 0;  // the link that was pairing
@@ -271,6 +280,7 @@ struct ServerCb : NimBLEServerCallbacks {
       l->id = id;
       l->kind = kind;
       l->secured = true;
+      l->newBond = newBond;
       portEXIT_CRITICAL(&g_mux);
       // One device per window: it closes once a new bond beside others is in.
       if (newBond && before > 0) g_pairRequested = false;
@@ -422,6 +432,71 @@ void loadBondState() {
   p.end();
 }
 
+// New bonds whose link dropped before their first write (main loop).
+void dropUnidentifiedBonds() {
+  for (;;) {
+    NimBLEAddress a;
+    bool any = false;
+    portENTER_CRITICAL(&g_mux);
+    if (g_dropCount > 0) {
+      a = g_dropQueue[--g_dropCount];
+      any = true;
+    }
+    portEXIT_CRITICAL(&g_mux);
+    if (!any) return;
+    if (kindOf(a) != BondKind::Unknown) continue;  // it reconnected and identified itself meanwhile
+    kindForget(a);
+    NimBLEDevice::deleteBond(a);
+  }
+}
+
+// NimBLE's bond store is full. Its default (ble_store_util_status_rr) deletes
+// the oldest bond, which may be the Mac. Here only an Unknown bond may make
+// room (bleStoreOverflowVictim); otherwise the write is refused and the new
+// pairing does not bond. NimBLE host task.
+struct StoreCb : NimBLEDeviceCallbacks {
+  int onStoreStatus(struct ble_store_status_event *event, void *) override {
+    // FULL is a warning before a pairing; the real decision comes at OVERFLOW.
+    if (event->event_code != BLE_STORE_EVENT_OVERFLOW) return 0;
+    const int type = event->overflow.obj_type;
+    const ble_addr_t *writing = nullptr;
+    if (type == BLE_STORE_OBJ_TYPE_OUR_SEC || type == BLE_STORE_OBJ_TYPE_PEER_SEC)
+      writing = &event->overflow.value->sec.peer_addr;
+    else if (type == BLE_STORE_OBJ_TYPE_CCCD)
+      writing = &event->overflow.value->cccd.peer_addr;
+    else if (type == BLE_STORE_OBJ_TYPE_CSFC)
+      writing = &event->overflow.value->csfc.peer_addr;
+
+    const int n = min(NimBLEDevice::getNumBonds(), MAX_BONDS + 1);
+    NimBLEAddress addrs[MAX_BONDS + 1];
+    BondKind kinds[MAX_BONDS + 1];
+    uint32_t ages[MAX_BONDS + 1];
+    bool linked[MAX_BONDS + 1];
+    int self = -1;
+    for (int i = 0; i < n; i++) {
+      addrs[i] = NimBLEDevice::getBondedAddress(i);
+      kinds[i] = kindOf(addrs[i]);
+      ages[i] = (uint32_t)(n - i);  // oldest first, as storeLearnedKinds
+      linked[i] = false;
+      for (const Link &l : g_links)
+        if (l.used && l.secured && l.id == addrs[i]) linked[i] = true;
+      if (writing && memcmp(addrs[i].getVal(), writing->val, 6) == 0) self = i;
+    }
+    const int victim = bleStoreOverflowVictim(kinds, ages, linked, n, self);
+    if (victim < 0) {
+      Serial.printf("[ble] bond store full (type %d): no unknown bond to drop, write refused\n", type);
+      return BLE_HS_ESTORE_CAP;
+    }
+    Serial.printf("[ble] bond store full (type %d): dropping unknown bond %s\n", type,
+                  addrs[victim].toString().c_str());
+    portENTER_CRITICAL(&g_mux);
+    for (KindEntry &e : g_kinds)
+      if (e.used && memcmp(e.addr, addrs[victim].getVal(), 6) == 0) e.used = false;
+    portEXIT_CRITICAL(&g_mux);
+    return NimBLEDevice::deleteBond(addrs[victim]) ? 0 : BLE_HS_ESTORE_CAP;
+  }
+};
+
 // A link learned its kind (NimBLE task): store it, and if it replaces an older
 // bond of the same kind, delete that one (ble_gap_unpair also drops its link).
 void storeLearnedKinds() {
@@ -467,11 +542,13 @@ ControlCb g_controlCb;
 SettingsCb g_settingsCb;
 VolumeCb g_volumeCb;
 NavCb g_navCb;
+StoreCb g_storeCb;
 
 }  // namespace
 
 void bleBegin() {
   NimBLEDevice::init("Claude Cube");
+  NimBLEDevice::setDeviceCallbacks(&g_storeCb);
   NimBLEDevice::setSecurityAuth(true, true, true);  // bonding, MITM, secure connections
   NimBLEDevice::setSecurityIOCap(BLE_HS_IO_DISPLAY_ONLY);
 
@@ -544,15 +621,11 @@ bool bleMacBonded() { return bondedKind(BondKind::Mac); }
 
 bool blePhoneBonded() { return bondedKind(BondKind::Phone); }
 
+bool bleUnknownBonded() { return bondedKind(BondKind::Unknown); }
+
 uint32_t bleLastGood() { return g_lastGood; }
 
 void bleForget(BondKind k) {
-  if (k == BondKind::Unknown) {
-    for (int i = NimBLEDevice::getNumBonds() - 1; i >= 0; i--) kindForget(NimBLEDevice::getBondedAddress(i));
-    NimBLEDevice::deleteAllBonds();
-    Serial.println("[ble] all bonds deleted");
-    return;
-  }
   for (int i = NimBLEDevice::getNumBonds() - 1; i >= 0; i--) {
     const NimBLEAddress a = NimBLEDevice::getBondedAddress(i);
     if (kindOf(a) != k) continue;
@@ -602,6 +675,7 @@ bool bleTake(Payload &out) {
     }
   }
   storeLearnedKinds();
+  dropUnidentifiedBonds();
   if (g_sendNow) {
     g_sendNow = false;
     const uint8_t m = BLE_CTRL_SEND_NOW;

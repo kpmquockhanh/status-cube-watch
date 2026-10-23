@@ -52,6 +52,28 @@ inline int bleBondToEvict(const BondKind *kinds, const uint32_t *ages, int n, in
   return best;
 }
 
+// A link that pairing accepted as a new bond and that drops before its first
+// write would leave a bond of Unknown kind behind for good: nothing replaces
+// it and it holds a slot in the store. Delete it when the link goes.
+inline bool bleDropBondOnDisconnect(bool secured, bool newBond, BondKind kind) {
+  return secured && newBond && kind == BondKind::Unknown;
+}
+
+// NimBLE's bond store is full and a write must make room. Its default deletes
+// the oldest bond, which may be the Mac; here only an Unknown bond may go: one
+// with no link up first (`linked`), then the oldest (`ages`: larger = older).
+// `writing`: the bond being written (never its own victim), -1 if none of the
+// n. Returns the index to delete, or -1: refuse the write.
+inline int bleStoreOverflowVictim(const BondKind *kinds, const uint32_t *ages, const bool *linked, int n,
+                                  int writing) {
+  int best = -1;
+  for (int i = 0; i < n; i++) {
+    if (i == writing || kinds[i] != BondKind::Unknown) continue;
+    if (best < 0 || (linked[best] && !linked[i]) || (linked[best] == linked[i] && ages[i] > ages[best])) best = i;
+  }
+  return best;
+}
+
 // The window runs for BLE_PAIR_WINDOW_MS from `openedAt` (millis() when BLE
 // came up after a "Pair new device" reboot). Unsigned: wrap-safe.
 inline bool blePairWindowOpen(bool requestedAtBoot, uint32_t openedAt, uint32_t now) {

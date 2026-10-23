@@ -84,7 +84,13 @@ Payload, Settings or Volume mean a Mac. It is stored in NVS namespace `ble` unde
 address as 12 lowercase hex digits (most significant byte first), value `m` or `p` (one byte). A
 bond left by firmware before fw_rev 8 (which bonded only a Mac) is taken as the Mac. Once a kind is
 learned, an older bond of the same kind is deleted and its link dropped: pairing a new iPhone
-replaces the old one, and likewise for a Mac. The Volume card and the WiFi transport policy follow
+replaces the old one, and likewise for a Mac. A device accepted as a new bond whose link drops before its
+first write would stay of unknown kind for good, so its bond is deleted when that link goes.
+
+**Full bond store.** NimBLE keeps at most 3 bonds. When a write does not fit, NimBLE's default
+would delete the oldest bond, often the Mac. The cube instead deletes a bond of unknown kind (one
+with no link up first, then the oldest) and otherwise refuses the write, so the new pairing does
+not bond; a known Mac or iPhone bond is never removed to make room. The Volume card and the WiFi transport policy follow
 the Mac's bond only; the "Waiting for a Mac" screen at first boot follows any bond.
 
 **Links.** Once secured, the iPhone's link asks for 15-30 ms, latency 0, timeout 4 s
@@ -92,8 +98,8 @@ the Mac's bond only; the "Waiting for a Mac" screen at first boot follows any bo
 `firmware/src/ble_conn.h` and checked against Apple's rules. Control notifications go to every
 subscribed central. Liveness (`bleLastGood`) counts only Payload writes.
 
-**Forgetting.** The setup portal has "Forget Mac" and "Forget iPhone" (each shown only while such a
-bond exists; the cube reboots). Also remove "Claude Cube" in that device's Bluetooth settings
+**Forgetting.** The setup portal has "Forget Mac", "Forget iPhone" and "Forget unknown devices" (each
+shown only while such a bond exists; each deletes only bonds of that kind; the cube reboots). Also remove "Claude Cube" in that device's Bluetooth settings
 before pairing it again.
 
 ## Nav (added in fw_rev 8, protocol still 1)

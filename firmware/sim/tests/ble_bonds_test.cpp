@@ -71,6 +71,35 @@ void testEvict() {
   CHECK(bleBondToEvict(c, ages3, 2, -1) == -1);
 }
 
+// A device accepted as a new bond that drops before its first write would stay
+// Unknown for good, so its bond is deleted when that link goes.
+void testDropUnidentifiedOnDisconnect() {
+  CHECK(bleDropBondOnDisconnect(true, true, K::Unknown));
+  CHECK(!bleDropBondOnDisconnect(true, true, K::Mac));     // identified: kept
+  CHECK(!bleDropBondOnDisconnect(true, true, K::Phone));
+  CHECK(!bleDropBondOnDisconnect(true, false, K::Unknown));  // a stored bond reconnecting
+  CHECK(!bleDropBondOnDisconnect(false, true, K::Unknown));  // never secured: nothing accepted
+}
+
+// The bond store is full (NimBLE overflow): only an Unknown bond may make room,
+// never a known Mac or iPhone; with none, the write is refused.
+void testStoreOverflowVictim() {
+  const uint32_t ages[] = {30, 20, 10, 5};
+  const bool none[] = {false, false, false, false};
+  const K a[] = {K::Mac, K::Phone, K::Unknown};
+  CHECK(bleStoreOverflowVictim(a, ages, none, 3, -1) == 2);
+  const K b[] = {K::Mac, K::Phone, K::Mac};
+  CHECK(bleStoreOverflowVictim(b, ages, none, 3, -1) == -1);  // refuse: Review Focus 4
+  CHECK(bleStoreOverflowVictim(a, ages, none, 3, 2) == -1);    // the peer being written is not its own victim
+  const K c[] = {K::Unknown, K::Mac, K::Unknown};
+  CHECK(bleStoreOverflowVictim(c, ages, none, 3, -1) == 0);  // the oldest Unknown
+  const bool conn0[] = {true, false, false};
+  CHECK(bleStoreOverflowVictim(c, ages, conn0, 3, -1) == 2);  // one with no link first
+  const bool both[] = {true, false, true};
+  CHECK(bleStoreOverflowVictim(c, ages, both, 3, -1) == 0);  // all linked: still the oldest Unknown
+  CHECK(bleStoreOverflowVictim(c, ages, none, 0, -1) == -1);
+}
+
 void testPairWindow() {
   CHECK(BLE_PAIR_WINDOW_MS == 120000);
   CHECK(!blePairWindowOpen(false, 0, 1000));  // not asked for at boot
@@ -113,6 +142,8 @@ int main() {
   testStoredBondReconnects();
   testUnbondedPairingWithBonds();
   testEvict();
+  testDropUnidentifiedOnDisconnect();
+  testStoreOverflowVictim();
   testPairWindow();
   testAdvertise();
   testUnsecuredLinkExpires();

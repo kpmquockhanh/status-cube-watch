@@ -25,7 +25,9 @@ uint32_t blePasskey();  // the 6-digit code while Pairing, else 0
 bool bleBonded();       // any bond (the first-boot "waiting for a Mac" screen)
 bool bleMacBonded();    // a bond known to be a Mac (Volume card, transport policy)
 bool blePhoneBonded();  // a bond known to be an iPhone
-// Forgets the bonds of that kind; Unknown = every bond. The caller reboots.
+bool bleUnknownBonded();  // a bond that never said what it is (no write yet)
+// Forgets the bonds of exactly that kind (Unknown = only the unidentified
+// ones). The caller reboots.
 void bleForget(BondKind k);
 // "Pair new device": sets NVS ble/pw so the next boot opens the pairing window
 // (BLE_PAIR_WINDOW_MS) for a device beside the bonded ones. The caller reboots.

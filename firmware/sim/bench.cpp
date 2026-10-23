@@ -334,6 +334,7 @@ BleState bleState() { return S.bleLive ? BleState::Connected : BleState::Adverti
 uint32_t blePasskey() { return 0; }
 bool bleMacBonded() { return S.bonded; }
 bool blePhoneBonded() { return S.nav != nullptr; }
+bool bleUnknownBonded() { return false; }
 bool bleBonded() { return bleMacBonded() || blePhoneBonded(); }
 void bleForget(BondKind) {}
 void bleRequestPairingAtBoot() {}

@@ -89,6 +89,11 @@ std::string formPage(const Settings &cur, const std::string &error) {
     h += "<form method=post action=/forget>" + token + "<input type=hidden name=k value=phone>" + btn +
          "Forget iPhone</button></form>"
          "<div class=hint>Also forget &ldquo;Claude Cube&rdquo; in the iPhone's Bluetooth settings.</div>";
+  if (bleUnknownBonded())
+    h += "<form method=post action=/forget>" + token + "<input type=hidden name=k value=unknown>" + btn +
+         "Forget unknown devices</button></form>"
+         "<div class=hint>Devices that paired but never sent anything, so the cube cannot tell "
+         "a Mac from an iPhone.</div>";
   h += "</body></html>";
   return h;
 }
@@ -194,6 +199,7 @@ void handleForget() {
   const std::string k = server.arg("k").c_str();
   if (k == "mac") bleForget(BondKind::Mac);
   else if (k == "phone") bleForget(BondKind::Phone);
+  else if (k == "unknown") bleForget(BondKind::Unknown);
   else return sendForm(400, "Nothing to forget.");
   sendRebooting("Forgotten. The cube is rebooting.");
 }

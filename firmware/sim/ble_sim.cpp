@@ -74,11 +74,12 @@ uint32_t blePasskey() { return mode() == Mode::Pair ? 482913u : 0u; }
 bool bleMacBonded() { return mode() == Mode::Live || mode() == Mode::Stale; }
 
 bool blePhoneBonded() { return navName() != nullptr; }
+bool bleUnknownBonded() { return false; }
 
 bool bleBonded() { return bleMacBonded() || blePhoneBonded(); }
 
 void bleForget(BondKind k) {
-  static const char *const names[] = {"all", "Mac", "iPhone"};
+  static const char *const names[] = {"unknown", "Mac", "iPhone"};
   Serial.printf("[ble] (sim) forget %s\n", names[(int)k]);
 }
 
