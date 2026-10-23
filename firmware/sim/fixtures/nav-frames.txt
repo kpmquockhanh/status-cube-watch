@@ -1,0 +1,6 @@
+# turn: Navigating, Right, "150 m", "Lê Lợi", "12 min", route (120,200)(120,90)(200,80), one cls-2 street (0,150)(240,160)
+nav turn 01 01 05 00 00 00 05 31 35 30 20 6d 09 4c c3 aa 20 4c e1 bb a3 69 06 31 32 20 6d 69 6e 03 00 78 00 c8 00 78 00 5a 00 c8 00 50 00 01 02 02 00 00 96 00 f0 00 a0 00
+# arrived: Arrived, Arrive, "", "Bến Thành", "", no route, no streets
+nav arrived 01 04 0b 00 00 00 00 0c 42 e1 ba bf 6e 20 54 68 c3 a0 6e 68 00 00 00 00
+# offroute: OffRouteNoSignal, Rejoin, dir 64 (90° right), GPS weak, "80 m", route (-64,304)(300,-64)
+nav offroute 01 03 0c 00 40 01 04 38 30 20 6d 00 00 02 00 c0 ff 30 01 2c 01 c0 ff 00

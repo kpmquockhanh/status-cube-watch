@@ -9,10 +9,12 @@
 #include <string.h>
 
 constexpr uint8_t BLE_PROTO_VER = 1;
-constexpr uint8_t BLE_FW_REV = 7;  // bumped when behaviour the Mac can see changes
+constexpr uint8_t BLE_FW_REV = 8;  // bumped when behaviour the Mac can see changes
 constexpr size_t BLE_HDR = 4;      // ver, seq, idx, total
 constexpr uint8_t BLE_MAX_CHUNKS = 16;
 constexpr size_t BLE_MAX_PAYLOAD = 2048;
+constexpr uint8_t BLE_NAV_MAX_CHUNKS = 32;   // navigation frames are binary and bigger (nav_frame.h)
+constexpr size_t BLE_NAV_MAX_BYTES = 8192;
 
 constexpr uint8_t BLE_CTRL_SEND_NOW = 0x01;  // cube -> Mac: send the payload now
 constexpr uint8_t BLE_CTRL_ACK = 0x02;       // cube -> Mac: [0x02, seq] payload reassembled
@@ -28,6 +30,7 @@ constexpr char BLE_CONTROL_UUID[] = "6e6d3c10-5d1a-4c1e-9f0b-7c4a2b8e1a03";
 constexpr char BLE_INFO_UUID[] = "6e6d3c10-5d1a-4c1e-9f0b-7c4a2b8e1a04";
 constexpr char BLE_SETTINGS_UUID[] = "6e6d3c10-5d1a-4c1e-9f0b-7c4a2b8e1a05";
 constexpr char BLE_VOLUME_UUID[] = "6e6d3c10-5d1a-4c1e-9f0b-7c4a2b8e1a06";
+constexpr char BLE_NAV_UUID[] = "6e6d3c10-5d1a-4c1e-9f0b-7c4a2b8e1a07";
 
 enum class FrameResult : uint8_t {
   Partial,   // stored; more chunks expected
@@ -40,12 +43,13 @@ enum class FrameResult : uint8_t {
 // must too: a repeated idx is Ignored, a gap or a mid-payload join is Bad. A
 // new seq discards a half-finished payload. json() is only meaningful right
 // after feed() returned Complete.
-class FrameAssembler {
+template <uint8_t MaxChunks, size_t MaxBytes>
+class ChunkAssembler {
  public:
   FrameResult feed(const uint8_t *d, size_t len) {
     if (!d || len <= BLE_HDR) return bad();
     const uint8_t ver = d[0], seq = d[1], idx = d[2], total = d[3];
-    if (ver != BLE_PROTO_VER || total == 0 || total > BLE_MAX_CHUNKS || idx >= total) return bad();
+    if (ver != BLE_PROTO_VER || total == 0 || total > MaxChunks || idx >= total) return bad();
     if (seq == lastDone_) return FrameResult::Ignored;
 
     if (!active_ || seq != seq_) {
@@ -62,7 +66,7 @@ class FrameAssembler {
     }
 
     const size_t n = len - BLE_HDR;
-    if (len_ + n > BLE_MAX_PAYLOAD) return bad();
+    if (len_ + n > MaxBytes) return bad();
     memcpy(buf_ + len_, d + BLE_HDR, n);
     len_ += n;
     next_++;
@@ -76,6 +80,7 @@ class FrameAssembler {
   }
 
   const char *json() const { return buf_; }
+  const uint8_t *data() const { return reinterpret_cast<const uint8_t *>(buf_); }  // binary frames
   size_t size() const { return len_; }
   uint8_t seq() const { return seq_; }
 
@@ -100,9 +105,13 @@ class FrameAssembler {
     return FrameResult::Bad;
   }
 
-  char buf_[BLE_MAX_PAYLOAD + 1] = {0};
+  char buf_[MaxBytes + 1] = {0};
   size_t len_ = 0;
   bool active_ = false;
   uint8_t seq_ = 0, total_ = 0, next_ = 0;
   int lastDone_ = -1;
 };
+
+// The Payload characteristic (JSON, 2 KB) and the Nav characteristic (binary
+// frames, 8 KB, nav_frame.h) use the same chunk rules with different limits.
+using FrameAssembler = ChunkAssembler<BLE_MAX_CHUNKS, BLE_MAX_PAYLOAD>;
