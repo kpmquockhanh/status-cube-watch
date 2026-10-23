@@ -1,0 +1,30 @@
+name: CubeNav
+options:
+  bundleIdPrefix: com.claude-cube
+  deploymentTarget:
+    iOS: "17.0"
+packages:
+  NavCore:
+    path: NavCore
+targets:
+  CubeNav:
+    type: application
+    platform: iOS
+    sources: [CubeNav]
+    dependencies:
+      - package: NavCore
+    settings:
+      base:
+        PRODUCT_BUNDLE_IDENTIFIER: com.claude-cube.nav
+        SWIFT_VERSION: "5.0"
+        GENERATE_INFOPLIST_FILE: YES
+        INFOPLIST_KEY_UILaunchScreen_Generation: YES
+    info:
+      path: CubeNav/Info.plist
+      properties:
+        CFBundleDisplayName: CubeNav
+        UILaunchScreen: {}
+        NSLocationWhenInUseUsageDescription: CubeNav shows your position on the map and follows your route.
+        NSLocationAlwaysAndWhenInUseUsageDescription: CubeNav keeps following your route while the phone is in your pocket.
+        NSBluetoothAlwaysUsageDescription: CubeNav sends map frames to your Claude cube over Bluetooth.
+        UIBackgroundModes: [location, bluetooth-central]
