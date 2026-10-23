@@ -49,6 +49,8 @@ public final class RouteTracker {
     static let backFree = 30.0
     static let forwardFree = 100.0
     static let arriveRemaining = 60.0
+    static let tieMargin = 15.0
+    static let farRemaining = 100.0
 
     private let route: Route
     private let cum: [Double]      // cum[i] = meters along the route at points[i]
@@ -58,6 +60,8 @@ public final class RouteTracker {
     private var badFixes = 0
     private var arrivedLatch = false
     private var started = false
+    private var lostFixes = 0
+    private var sawFar = false
 
     public init(route: Route) {
         self.route = route
@@ -86,6 +90,7 @@ public final class RouteTracker {
         // beyond 100 m costs 1 per meter. Keeps out-and-back and looping routes on the right leg.
         func nearest(_ range: ClosedRange<Int>, continuity: Bool) -> (seg: Int, t: Double, d: Double, score: Double) {
             var best = (seg: range.lowerBound, t: 0.0, d: Double.infinity, score: Double.infinity)
+            var cands: [(seg: Int, t: Double, d: Double)] = []
             for i in range {
                 let (ax, ay) = xy(pts[i]), (bx, by) = xy(pts[i + 1])
                 let dx = bx - ax, dy = by - ay
@@ -100,7 +105,23 @@ public final class RouteTracker {
                     if delta < -Self.backFree { score += (-delta - Self.backFree) * 5 }
                     else if delta > Self.forwardFree { score += delta - Self.forwardFree }
                 }
+                if !continuity { cands.append((i, t, d)) }
                 if score < best.score { best = (i, t, d, score) }   // strict: ties keep the earlier segment
+            }
+            if !continuity {
+                // Whole-route search: among segments within 15 m of the nearest, prefer the one that
+                // runs the way the rider is moving, else the earliest. Keeps round trips and
+                // out-and-back streets from snapping to the wrong leg.
+                let moving = fix.speed >= Self.minHeadingSpeed && fix.course >= 0
+                var pick = cands[0]
+                var pickDiff = Double.infinity
+                for c in cands where c.d <= best.d + Self.tieMargin {
+                    if moving {
+                        let diff = angleDiff(fix.course, bearingDegrees(pts[c.seg], pts[c.seg + 1]))
+                        if diff < pickDiff { pick = c; pickDiff = diff }
+                    } else { pick = c; break }
+                }
+                best = (pick.seg, pick.t, pick.d, pick.d)
             }
             return best
         }
@@ -115,15 +136,19 @@ public final class RouteTracker {
         started = true
 
         let weak = fix.accuracy > Self.goodAccuracy
-        if !weak {
-            badFixes = best.d > Self.offRouteDistance ? badFixes + 1 : 0
-        }
-        // Only once off-route has tripped may the snap leave the continuity window.
-        if badFixes >= Self.offRouteFixes {
+        let far = best.d > Self.offRouteDistance
+        // Off-route itself needs accurate fixes; losing the snap (e.g. after a GPS gap) does not.
+        if !weak { badFixes = far ? badFixes + 1 : 0 }
+        lostFixes = far ? lostFixes + 1 : 0
+        // Only after 3 fixes far from the snap may it leave the continuity window.
+        if lostFixes >= Self.offRouteFixes {
             let all = nearest(0...lastSeg, continuity: false)
             if all.d < best.d {
                 best = all
-                if !weak && best.d <= Self.offRouteDistance { badFixes = 0 }
+                if best.d <= Self.offRouteDistance {
+                    lostFixes = 0
+                    badFixes = 0
+                }
             }
         }
 
@@ -156,8 +181,10 @@ public final class RouteTracker {
         }
         lastHeading = heading
 
-        if !weak, remaining <= Self.arriveRemaining,
+        if !weak, remaining <= Self.arriveRemaining, sawFar || total < Self.farRemaining,
            distanceMeters(fix.coord, pts[lastSeg + 1]) <= Self.arriveDistance { arrivedLatch = true }
+
+        if remaining > Self.farRemaining { sawFar = true }
 
         return Progress(
             snapped: snapped, heading: heading, distanceAlong: along,
@@ -167,4 +194,10 @@ public final class RouteTracker {
             bearingToRoute: bearingDegrees(fix.coord, snapped),
             arrived: arrivedLatch, gpsWeak: weak)
     }
+}
+
+/// Smallest absolute angle between two bearings, degrees in [0, 180].
+private func angleDiff(_ a: Double, _ b: Double) -> Double {
+    let d = abs(a - b).truncatingRemainder(dividingBy: 360)
+    return d > 180 ? 360 - d : d
 }

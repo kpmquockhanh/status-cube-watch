@@ -97,7 +97,9 @@ private func fix(_ c: Coord, acc: Double = 5, speed: Double = 10, course: Double
 @Test func arrivesWithin30mOfEnd() {
     let t = RouteTracker(route: lRoute())
     let end = lRoute().points[8]
-    #expect(!t.update(fix(north(0, east: -100, from: end))).arrived)
+    #expect(!t.update(fix(north(0, east: -200, from: end))).arrived)
+    #expect(!t.update(fix(north(0, east: -110, from: end))).arrived)
+    #expect(!t.update(fix(north(0, east: -50, from: end))).arrived)
     let p = t.update(fix(north(0, east: -20, from: end)))
     #expect(p.arrived)
     #expect(!p.gpsWeak)
@@ -123,8 +125,14 @@ private func pathRoute(_ pts: [Coord]) -> Route {
     }
     var last = t.update(fix(north(300)))
     #expect(!last.arrived)
-    last = t.update(fix(north(0, east: 200)))
-    #expect(!last.arrived)
+    for m in [400.0, 500, 600] {   // corner then the east leg, as ridden
+        last = t.update(fix(north(400, east: m - 400), speed: 8))
+        #expect(!last.arrived)
+    }
+    for m in [350.0, 250, 150, 50] {
+        last = t.update(fix(north(m, east: 200), speed: 8))
+        #expect(!last.arrived)
+    }
     last = t.update(fix(north(0, east: 15)))
     #expect(last.arrived)
 }
@@ -168,4 +176,51 @@ private func pathRoute(_ pts: [Coord]) -> Route {
     let p = t.update(fix(north(250, east: 60)))
     #expect(p.distanceAlong < 300)
     #expect(!p.offRoute)
+}
+
+@Test func roundTripFirstFixSnapsToStartAndDoesNotArrive() {
+    // Out 400 m north, 100 m east, 400 m back south; the end is 3 m from the start.
+    var pts = (0...4).map { north(Double($0) * 100) }
+    pts.append(north(400, east: 100))
+    pts.append(north(0, east: 100))
+    pts.append(north(0, east: 3))
+    let t = RouteTracker(route: pathRoute(pts))
+    let p = t.update(fix(north(0, east: 6), speed: 0))
+    #expect(!p.arrived)
+    #expect(p.distanceAlong < 10)
+    #expect(!t.update(fix(north(20), speed: 5, course: 0)).arrived)
+    for m in stride(from: 100.0, through: 400, by: 50) { #expect(!t.update(fix(north(m), course: 0)).arrived) }
+    _ = t.update(fix(north(400, east: 100), course: 90))
+    #expect(!t.update(fix(north(200, east: 100), course: 180)).arrived)
+    _ = t.update(fix(north(100, east: 100), course: 180))
+    _ = t.update(fix(north(0, east: 100), course: 270))
+    #expect(t.update(fix(north(0, east: 10), course: 270)).arrived)
+}
+
+@Test func outAndBackFirstFixUsesCourse() {
+    var pts = (0...5).map { north(Double($0) * 100) }
+    pts += (0...5).map { north(Double(5 - $0) * 100, east: 8) }
+    let route = pathRoute(pts)
+    let up = RouteTracker(route: route).update(fix(north(250, east: 4), course: 0))
+    #expect(up.distanceAlong < 300)
+    let down = RouteTracker(route: route).update(fix(north(250, east: 4), course: 180))
+    #expect(down.distanceAlong > 700)
+}
+
+@Test func recoversAfterGpsGapWithoutOffRouteFlash() {
+    // U: 500 m north, 60 m east, 500 m south. Rider is at 50 m, then reappears on the return leg.
+    var pts = (0...5).map { north(Double($0) * 100) }
+    pts += (0...5).map { north(Double(5 - $0) * 100, east: 60) }
+    let t = RouteTracker(route: pathRoute(pts))
+    _ = t.update(fix(north(50)))
+    let there = north(450, east: 60)
+    var last = t.update(fix(there, acc: 50))
+    #expect(!last.offRoute)
+    #expect(last.distanceAlong < 200)
+    last = t.update(fix(there, acc: 50)); #expect(!last.offRoute)
+    last = t.update(fix(there, acc: 50)); #expect(!last.offRoute)
+    #expect(last.distanceAlong > 600)
+    last = t.update(fix(there, acc: 10))
+    #expect(!last.offRoute)
+    #expect(last.distanceAlong > 600)
 }
