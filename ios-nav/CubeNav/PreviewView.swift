@@ -47,7 +47,7 @@ struct PreviewView: View {
     }
 
     private func load() async {
-        loading = true; error = nil
+        loading = true; error = nil; ride.clearMessage()
         // The first GPS fix can take a moment.
         for _ in 0..<10 where ride.location.fix == nil { try? await Task.sleep(nanoseconds: 500_000_000) }
         switch await ride.plan(to: place.coord) {

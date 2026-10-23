@@ -25,7 +25,10 @@ final class RideController: ObservableObject {
     private var latest: NavScene?
     private var dirty = false
     private var lastSent = Date.distantPast
-    private var timer: Timer?
+    private var timer: DispatchSourceTimer?
+    private var lastFix: Fix?
+    private var lastFixAt = Date.distantPast
+    private var lastUpdate = Date.distantPast
     private var bag = Set<AnyCancellable>()
     private let cache = RideCache(directory: FileManager.default.urls(for: .cachesDirectory, in: .userDomainMask)[0]
         .appendingPathComponent("ride"))
@@ -37,6 +40,8 @@ final class RideController: ObservableObject {
         location.objectWillChange.sink { [weak self] in self?.objectWillChange.send() }.store(in: &bag)
         location.onFix = { [weak self] f in self?.handle(f) }
     }
+
+    func clearMessage() { message = nil }
 
     /// Called at launch and whenever the app becomes active.
     func appBecameActive() {
@@ -80,9 +85,11 @@ final class RideController: ObservableObject {
         location.startRide()
         phase = .riding
         if let f = location.fix { handle(f) }
-        timer = Timer.scheduledTimer(withTimeInterval: Self.minFrameGap, repeats: true) { [weak self] _ in
-            MainActor.assumeIsolated { self?.tick() }
-        }
+        let t = DispatchSource.makeTimerSource(queue: .main)   // not a run-loop Timer: keeps firing in the background
+        t.schedule(deadline: .now() + Self.minFrameGap, repeating: Self.minFrameGap)
+        t.setEventHandler { [weak self] in MainActor.assumeIsolated { self?.tick() } }
+        timer = t
+        t.resume()
     }
 
     /// Always sends an `.ended` scene first; `CubeLink` keeps it for a cube that is not connected now.
@@ -90,20 +97,35 @@ final class RideController: ObservableObject {
         guard let e = engine else { phase = .idle; return }
         let ended = e.stop()
         cubeLink.send(ended)
-        timer?.invalidate(); timer = nil
+        timer?.cancel(); timer = nil; lastFix = nil
         location.endRide()
         engine = nil; latest = nil; dirty = false; scene = nil; phase = .idle
     }
 
     private func handle(_ f: Fix) {
+        lastFix = f; lastFixAt = Date()
+        run(f)
+    }
+
+    private func run(_ f: Fix) {
         guard phase == .riding, let e = engine else { return }
+        lastUpdate = Date()
         let s = e.update(f)
         latest = s; scene = s; dirty = true
         if s.state == .ended { stop(); return }   // arrival hold over
         flush()
     }
 
-    private func tick() { flush() }
+    /// Once a second without a new fix, runs the engine again on the last one (marked weak once it is
+    /// older than 5 s), so the arrival hold and reroute retries go on while standing still.
+    private func tick() {
+        if phase == .riding, let f = lastFix, Date().timeIntervalSince(lastUpdate) >= 1 {
+            var g = f
+            if Date().timeIntervalSince(lastFixAt) > 5 { g.accuracy = max(g.accuracy, 100) }
+            run(g)
+        }
+        flush()
+    }
 
     private func flush() {
         guard phase == .riding, let s = latest else { return }

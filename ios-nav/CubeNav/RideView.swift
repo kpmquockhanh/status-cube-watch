@@ -8,6 +8,15 @@ struct RideView: View {
         VStack(alignment: .leading, spacing: 20) {
             CubeStatusView(link: ride.cubeLink)
             Divider()
+            if let p = ride.location.problem { Text(p).font(.subheadline).foregroundStyle(.red) }
+            if ride.location.authorization != .authorizedAlways {
+                VStack(alignment: .leading, spacing: 6) {
+                    Text("Allow location Always so the cube keeps updating with the phone locked.").font(.subheadline).foregroundStyle(.orange)
+                    Button("Open Settings") {
+                        if let u = URL(string: UIApplication.openSettingsURLString) { UIApplication.shared.open(u) }
+                    }.buttonStyle(.bordered)
+                }
+            }
             if let s = ride.scene {
                 Text(stateText(s)).font(.title2.bold()).foregroundStyle(s.state == .navigating ? Color.primary : .orange)
                 if !s.dist.isEmpty { Text(s.dist).font(.system(size: 56, weight: .bold, design: .rounded)) }

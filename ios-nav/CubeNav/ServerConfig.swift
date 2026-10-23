@@ -7,7 +7,8 @@ import Security
 enum ServerConfig {
     static let defaultURL = "https://nav.devxdev.site"
     private static let urlKey = "serverURL"
-    private static let service = "com.claude-cube.nav", account = "nav-key"
+    private static let service = "cube-nav", account = "key"
+    private static let oldService = "com.claude-cube.nav", oldAccount = "nav-key"
 
     static var urlString: String {
         get { UserDefaults.standard.string(forKey: urlKey) ?? defaultURL }
@@ -16,6 +17,24 @@ enum ServerConfig {
 
     static var key: String {
         get {
+            migrateOldKey()
+            return read(service, account)
+        }
+        set {
+            write(newValue, service, account)
+        }
+    }
+
+    /// One-time move of a key typed into an earlier build.
+    private static func migrateOldKey() {
+        let old = read(oldService, oldAccount)
+        guard !old.isEmpty else { return }
+        if read(service, account).isEmpty { write(old, service, account) }
+        write("", oldService, oldAccount)
+    }
+
+    private static func read(_ service: String, _ account: String) -> String {
+        do {
             let q: [String: Any] = [kSecClass as String: kSecClassGenericPassword, kSecAttrService as String: service,
                                     kSecAttrAccount as String: account, kSecReturnData as String: true,
                                     kSecMatchLimit as String: kSecMatchLimitOne]
@@ -23,7 +42,10 @@ enum ServerConfig {
             guard SecItemCopyMatching(q as CFDictionary, &out) == errSecSuccess, let d = out as? Data else { return "" }
             return String(decoding: d, as: UTF8.self)
         }
-        set {
+    }
+
+    private static func write(_ newValue: String, _ service: String, _ account: String) {
+        do {
             let base: [String: Any] = [kSecClass as String: kSecClassGenericPassword, kSecAttrService as String: service,
                                        kSecAttrAccount as String: account]
             SecItemDelete(base as CFDictionary)
