@@ -4,6 +4,10 @@
 // the WiFi radio stays off. When BLE goes stale, WiFi comes up and polls the
 // bridge; it drops again only after BLE has been live for BLE_HOLD_MS in a
 // row, so a flaky link does not flap the radio.
+//
+// While a ride runs WiFi stays off whatever BLE does (unless keepWifi): the S3
+// has one 2.4 GHz radio, and WiFi scans and joins take airtime from the
+// phone's navigation link. When the ride ends the rules above apply again.
 
 #include <stdint.h>
 
@@ -24,15 +28,21 @@ class TransportPolicy {
   // bleLastGood: millis() of the last valid BLE payload, 0 if none yet.
   // bonded: a Mac is bonded. wifiConfigured: there is an SSID to join.
   // keepWifi: keep WiFi up even while BLE is live (OTA needs it).
-  TransportDecision update(uint32_t now, uint32_t bleLastGood, bool bonded, bool wifiConfigured, bool keepWifi) {
+  // rideActive: a navigation ride owns the screen (NavSession::active()).
+  TransportDecision update(uint32_t now, uint32_t bleLastGood, bool bonded, bool wifiConfigured, bool keepWifi,
+                           bool rideActive = false) {
     const bool live = bleLastGood != 0 && (uint32_t)(now - bleLastGood) < BLE_LIVE_MS;
     if (live && !wasLive_) liveSince_ = now;
     wasLive_ = live;
 
     if (!wifiConfigured) {
       wifiOn_ = false;
-    } else if (keepWifi || !bonded) {
-      wifiOn_ = true;  // nobody to wait for, or WiFi explicitly wanted
+    } else if (keepWifi) {
+      wifiOn_ = true;  // WiFi explicitly wanted, ride or not
+    } else if (rideActive) {
+      wifiOn_ = false;  // the radio belongs to the phone's link
+    } else if (!bonded) {
+      wifiOn_ = true;  // no Mac to wait for
     } else if (live) {
       if (wifiOn_ && (uint32_t)(now - liveSince_) >= BLE_HOLD_MS) wifiOn_ = false;
     } else {
@@ -50,9 +60,25 @@ class TransportPolicy {
 };
 
 // A failed WiFi join opens the setup portal by itself only when there is no
-// bond: without a Mac the cube has no other way to get data. With a bond the
-// portal is still reachable by holding the screen at boot.
-inline bool portalOnJoinFail(bool bonded) { return !bonded; }
+// bond of any kind: without one the cube has no other way to get data. With a
+// bond the portal is still reachable by holding the screen at boot.
+inline bool portalOnJoinFail(bool anyBond) { return !anyBond; }
+
+// What setup() does about WiFi. `join`: join the stored network now, blocking
+// (up to ~20 s). `portalOnFail`: a failed join opens the setup portal, which
+// does not return. A Mac or an iPhone bond skips the boot join: the loop's
+// TransportPolicy brings WiFi up when it is wanted, so a phone-only cube booted
+// away from its network reaches the deck (and a ride) at once.
+struct BootWifiPlan {
+  bool join;
+  bool portalOnFail;
+};
+
+inline BootWifiPlan bootWifiPlan(bool anyBond, bool macBonded, bool phoneBonded, bool haveWifi) {
+  const bool join = haveWifi && !macBonded && !phoneBonded;
+  const BootWifiPlan p = {join, join && portalOnJoinFail(anyBond)};
+  return p;
+}
 
 // First boot of a cube that has neither a Mac nor a network: show the "pair
 // with Mac" screen instead of the empty deck.

@@ -81,6 +81,20 @@ IdleSleep idle;
 // lives here and not on the loop's stack.
 NavSession navSession;
 NavScene navScene;
+bool navPhoneLost = false;  // what the map last showed: a change redraws at once
+
+// While riding, the time one map frame takes to compose and send (ms), logged
+// every NAV_LOG_MS: the last frame's and the slowest since the previous line.
+constexpr uint32_t NAV_LOG_MS = 10000;
+uint32_t navLogAt = 0, navComposeMax = 0;
+void logNavCompose(uint32_t now, uint32_t ms) {
+  if (ms > navComposeMax) navComposeMax = ms;
+  if (navLogAt == 0) navLogAt = now;
+  if (now - navLogAt < NAV_LOG_MS) return;
+  Serial.printf("[nav] compose %u ms (max %u)\n", (unsigned)ms, (unsigned)navComposeMax);
+  navLogAt = now;
+  navComposeMax = 0;
+}
 bool screenOn = true;
 CpuPolicy cpuPolicy;  // fast clock for touch and animation, slow otherwise (cpu_policy.h)
 uint32_t cpuMhz = CPU_MHZ_FAST;  // the clock last set; the board boots at board_build.f_cpu
@@ -401,24 +415,24 @@ void setup() {
 
   // BLE first: the stack must be up before bleBonded() means anything. The
   // setup portal is asked for by holding the screen; WiFi is joined at boot
-  // only when there is no Mac to wait for (the old behaviour, and the old
-  // fallback to the portal). With a bond, WiFi comes up later and only if BLE
-  // goes quiet (see transport_policy.h).
+  // only when neither a Mac nor an iPhone is bonded (the old behaviour), and a
+  // failed join opens the portal only with no bond at all (bootWifiPlan in
+  // transport_policy.h). Otherwise WiFi comes up later, from the loop, when the
+  // transport policy wants it.
   bleBegin();
   if (setupHoldRequested()) portalRun(lcd, false);
 
-  if (!bleMacBonded()) {
-    if (settingsHaveWifi()) {
-      uiMessage(lcd, "CONNECTING", settings().ssid);
-      const bool joined = netBegin();
-      wifiUp = true;
-      if (!joined && portalOnJoinFail(false)) portalRun(lcd, true);
-      if (joined) {
-        otaBegin(lcd);
-        otaUp = true;
-      }
+  const BootWifiPlan boot = bootWifiPlan(bleBonded(), bleMacBonded(), blePhoneBonded(), settingsHaveWifi());
+  if (boot.join) {
+    uiMessage(lcd, "CONNECTING", settings().ssid);
+    const bool joined = netBegin();
+    wifiUp = true;
+    if (!joined && boot.portalOnFail) portalRun(lcd, true);
+    if (joined) {
+      otaBegin(lcd);
+      otaUp = true;
     }
-  } else if (!settingsHaveWifi()) {
+  } else if (bleMacBonded() && !settingsHaveWifi()) {
     uiMessage(lcd, "NO MAC", "WAITING FOR LINK");
   }
 
@@ -445,8 +459,9 @@ void loop() {
 
   // Which transport feeds the cube (transport_policy.h): BLE while the Mac is
   // delivering, WiFi when it is not.
-  const TransportDecision td =
-      policy.update(now, bleLastGood(), bleMacBonded(), settingsHaveWifi(), WIFI_ALWAYS_ON != 0);
+  // During a ride WiFi stays off (one radio: it would take airtime from the phone's link).
+  const TransportDecision td = policy.update(now, bleLastGood(), bleMacBonded(), settingsHaveWifi(),
+                                             WIFI_ALWAYS_ON != 0, navSession.active());
   if (td.wifiOn && !wifiUp) {
     netStart();
     wifiUp = true;
@@ -482,8 +497,15 @@ void loop() {
     dirty = true;
   }
   navSession.tick(now);
+  // NO PHONE shows the moment the phone counts as lost, not on the next once-a-second redraw.
+  const bool phoneLost = navSession.phoneLost(now);
+  if (phoneLost != navPhoneLost) {
+    navPhoneLost = phoneLost;
+    dirty = true;
+  }
   if (navSession.takeStarted()) {
     Serial.println("[nav] ride started");
+    navLogAt = navComposeMax = 0;  // the first compose line comes NAV_LOG_MS into the ride
     if (editing) {  // closed without saving: the map cannot wait for DONE
       editing = false;
       uiDeviceSlide(false, editDevice);
@@ -585,7 +607,11 @@ void loop() {
     const bool navOn = navSession.active();
     const UnlockScreen us = editing ? UnlockScreen::Hidden : unlock.screen(now);
     if (pairing) uiBlePair(lcd, blePasskey());  // the code must be seen
-    else if (navOn) uiNav(lcd, navScene, navSession.phoneLost(now), bv);
+    else if (navOn) {
+      const uint32_t t0 = millis();
+      uiNav(lcd, navScene, navPhoneLost, bv);
+      logNavCompose(now, millis() - t0);
+    }
     else if (pairingMsgUp()) uiMessage(lcd, "PAIRING OPEN", "PAIR FROM THE APP OR MAC");
     else if (waiting) uiBlePair(lcd, 0);
     else if (editorUp) uiDeviceEditor(lcd, editDevice);
@@ -612,6 +638,7 @@ void loop() {
 }
 
 #ifdef SIM_BENCH
-// The bench checks that a ride leaves the deck where it was.
+// The bench checks that a ride leaves the deck where it was, and that WiFi stays off during it.
 uint8_t benchCardIndex() { return cardIndex; }
+bool benchNavActive() { return navSession.active(); }
 #endif

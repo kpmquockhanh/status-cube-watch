@@ -96,9 +96,71 @@ void testBootDecisions() {
   CHECK(!pairWaitAtBoot(true, false));
 }
 
+// A ride keeps WiFi off: the Mac away (BLE stale) would otherwise bring it up.
+void testRideKeepsWifiOff() {
+  TransportPolicy p;
+  p.begin(0);
+  for (uint32_t t = 0; t <= 600000; t += 1000) CHECK(!p.update(t, 0, true, true, false, true).wifiOn);
+  // The ride ends: the normal rule (BLE stale for 15 s) applies at once.
+  CHECK(p.update(601000, 0, true, true, false, false).wifiOn);
+}
+
+void testRideTurnsWifiOffWhenItStarts() {
+  TransportPolicy p;
+  p.begin(0);
+  CHECK(p.update(20000, 0, true, true, false).wifiOn);  // Mac away: WiFi up
+  CHECK(!p.update(21000, 0, true, true, false, true).wifiOn);  // ride starts: off
+  CHECK(p.update(60000, 0, true, true, false, false).wifiOn);  // ride over
+}
+
+void testRidePhoneOnly() {  // no Mac bond: WiFi on until a ride starts, off during it, on after
+  TransportPolicy p;
+  p.begin(0);
+  CHECK(p.update(0, 0, false, true, false).wifiOn);
+  CHECK(!p.update(1000, 0, false, true, false, true).wifiOn);
+  CHECK(!p.update(300000, 0, false, true, false, true).wifiOn);
+  CHECK(p.update(301000, 0, false, true, false, false).wifiOn);
+}
+
+void testRideWithWifiAlwaysOn() {  // WIFI_ALWAYS_ON wins over a ride
+  TransportPolicy p;
+  p.begin(0);
+  CHECK(p.update(0, 0, true, true, true, true).wifiOn);
+  CHECK(p.update(60000, 0, false, true, true, true).wifiOn);
+  CHECK(!p.update(60000, 0, false, false, true, true).wifiOn);  // still nothing to join
+}
+
+void testBootWifiPlan() {
+  // No bond, a network: join at boot, and the portal if the join fails.
+  BootWifiPlan b = bootWifiPlan(false, false, false, true);
+  CHECK(b.join && b.portalOnFail);
+  // No bond, no network: nothing to join (the "waiting for a Mac" screen).
+  b = bootWifiPlan(false, false, false, false);
+  CHECK(!b.join && !b.portalOnFail);
+  // A Mac: no boot join; the policy decides later.
+  b = bootWifiPlan(true, true, false, true);
+  CHECK(!b.join && !b.portalOnFail);
+  // An iPhone and no Mac: no boot join, never the portal.
+  b = bootWifiPlan(true, false, true, true);
+  CHECK(!b.join && !b.portalOnFail);
+  b = bootWifiPlan(true, false, true, false);
+  CHECK(!b.join && !b.portalOnFail);
+  // Both.
+  b = bootWifiPlan(true, true, true, true);
+  CHECK(!b.join && !b.portalOnFail);
+  // Only a bond that never said what it is: join, but a failed join is no reason for the portal.
+  b = bootWifiPlan(true, false, false, true);
+  CHECK(b.join && !b.portalOnFail);
+}
+
 }  // namespace
 
 int main() {
+  testRideKeepsWifiOff();
+  testRideTurnsWifiOffWhenItStarts();
+  testRidePhoneOnly();
+  testRideWithWifiAlwaysOn();
+  testBootWifiPlan();
   testNoWifiConfiguredNeverTurnsWifiOn();
   testNoBondMeansWifiAtOnce();
   testNeverLiveUsesStart();

@@ -16,7 +16,7 @@
 // backlight LEDs are not in that figure; the backlight is reported on its own
 // as a duty cycle.
 //
-//   ./build/cube-bench <desk|linked|browse|editor|sleep|volume|render> [slowdown]
+//   ./build/cube-bench <desk|linked|browse|editor|sleep|volume|nav|ride|render> [slowdown]
 
 #include <ArduinoJson.h>
 
@@ -51,6 +51,7 @@ uint64_t g_simUs = 100000;  // the board has been up a moment when setup() runs
 Display *g_simDisplay = nullptr;
 
 uint8_t benchCardIndex();  // main.cpp
+bool benchNavActive();     // main.cpp
 
 namespace {
 
@@ -195,6 +196,11 @@ Scenario makeScenario(const std::string &name) {
     s.seconds = 600;
     s.nav = "busy";
     s.rotateSec = 5;  // auto-advance is on: it must not move the deck during the ride
+  } else if (name == "ride") {
+    s.what = "navigation, Mac bonded but away: busy frames every 200 ms, WiFi configured must stay off";
+    s.seconds = 600;
+    s.nav = "busy";
+    s.bleLive = false;
   } else if (name == "sleep") {
     s.what = "Mac gone: WiFi fetches fail, screen sleeps after the timeout (2 min)";
     s.seconds = 600;
@@ -446,10 +452,19 @@ constexpr uint32_t FETCH_REFUSED_MS = 20;
 bool g_wifi = false;
 uint32_t g_fetchAt = 0;
 bool g_fetching = false;
-bool netBegin() { return g_wifi = true; }
+uint32_t g_wifiRideStarts = 0;  // WiFi brought up while a ride ran
+uint64_t g_wifiRidePasses = 0;  // loop passes that ended with a ride running and WiFi up
+void wifiUp() {
+  if (g_running && benchNavActive()) g_wifiRideStarts++;
+  g_wifi = true;
+}
+bool netBegin() {
+  wifiUp();
+  return true;
+}
 bool netOnline() { return g_wifi; }
-void netStart() { g_wifi = true; }
-void netJoinSaved() { g_wifi = true; }
+void netStart() { wifiUp(); }
+void netJoinSaved() { wifiUp(); }
 void netStop() {
   g_wifi = false;
   g_fetching = false;
@@ -502,6 +517,11 @@ void runScenario() {
   d.rotateSec = S.rotateSec;
   deviceSettingsSave(d);
   publishSettings();  // as if stored before boot
+  if (!settingsHaveWifi()) {  // the scenarios assume a network is configured, whoever's config.h this is
+    Settings w = settings();
+    snprintf(w.ssid, sizeof(w.ssid), "bench");
+    settingsSave(w);
+  }
   resetCounters();
   g_start = millis();
   g_running = true;
@@ -514,6 +534,7 @@ void runScenario() {
     // The display panel saves on the cube itself; by the end of that pass the
     // Mac's next Settings read must see what it saved.
     if (g_pubDevice != deviceSettings()) g_unpublished++;
+    if (benchNavActive() && g_wifi) g_wifiRidePasses++;
     double ns = hostNs(t0, Clock::now()) - (double)g_panelNs;
     if (ns > HOST_PASS_CAP_NS) {
       ns = HOST_PASS_CAP_NS;
@@ -647,6 +668,22 @@ int main(int argc, char **argv) {
   if (S.nav && g_endCard != 0) {
     fprintf(stderr, "%s: the ride moved the deck to card %u (auto-advance must freeze during navigation)\n", S.name,
             (unsigned)g_endCard);
+    return 1;
+  }
+  // A ride: frames keep coming (a busy frame every 200 ms is 300/min), the
+  // screen stays on, and WiFi stays off (one radio, shared with the phone's link).
+  const double framesPerMin = g_frames / (S.seconds / 60.0);
+  if (S.nav && framesPerMin < 240) {
+    fprintf(stderr, "%s: %.0f frames/min during the ride, expected at least 240\n", S.name, framesPerMin);
+    return 1;
+  }
+  if (S.nav && g_backlight == 0) {
+    fprintf(stderr, "%s: the screen was off at the end of the ride\n", S.name);
+    return 1;
+  }
+  if (S.nav && (g_wifiRideStarts || g_wifiRidePasses)) {
+    fprintf(stderr, "%s: WiFi came up %u times during the ride (%llu passes with it on)\n", S.name,
+            (unsigned)g_wifiRideStarts, (unsigned long long)g_wifiRidePasses);
     return 1;
   }
   if (S.mustSleep && g_backlight != 0) {
