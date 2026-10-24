@@ -30,6 +30,10 @@ constexpr uint16_t NAV_MAX_STREET_PTS = 640;
 constexpr int16_t NAV_CLIP_MIN_X = -64, NAV_CLIP_MAX_X = 304;
 constexpr int16_t NAV_CLIP_MIN_Y = -64, NAV_CLIP_MAX_Y = 344;
 
+// How far the rider may drag the map, either way (nav_pan.h); a frame's pan
+// beyond it rejects the frame.
+constexpr int16_t NAV_PAN_MAX = 1000;
+
 inline bool navPointInClip(int16_t x, int16_t y) {
   return x >= NAV_CLIP_MIN_X && x <= NAV_CLIP_MAX_X && y >= NAV_CLIP_MIN_Y && y <= NAV_CLIP_MAX_Y;
 }
@@ -40,6 +44,7 @@ struct NavScene {
   NavState state;
   NavTurn turn;
   uint8_t exit, dir, flags;
+  int16_t panX, panY;  // the map offset this frame was built around (version 2; 0 in version 1)
   char dist[16], street[64], eta[24];  // NUL-terminated
   uint16_t nRoute;
   NavPoint route[NAV_MAX_ROUTE];
@@ -93,15 +98,24 @@ struct Reader {
 inline bool parse(const uint8_t *data, size_t len, NavScene *out) {
   if (!data) return false;
   Reader r = {data, len, true};
-  if (r.u8() != 1) return false;
+  const uint8_t version = r.u8();
+  if (version != 1 && version != 2) return false;
   const uint8_t state = r.u8(), turn = r.u8(), exit = r.u8(), dir = r.u8(), flags = r.u8();
   if (!r.ok || state > (uint8_t)NavState::Arrived || turn > (uint8_t)NavTurn::Rejoin) return false;
+  int16_t panX = 0, panY = 0;
+  if (version == 2) {
+    panX = r.i16();
+    panY = r.i16();
+    if (!r.ok || panX < -NAV_PAN_MAX || panX > NAV_PAN_MAX || panY < -NAV_PAN_MAX || panY > NAV_PAN_MAX) return false;
+  }
   if (out) {
     out->state = (NavState)state;
     out->turn = (NavTurn)turn;
     out->exit = exit;
     out->dir = dir;
     out->flags = flags;
+    out->panX = panX;
+    out->panY = panY;
   }
   r.str(out ? out->dist : nullptr, sizeof(NavScene::dist));
   r.str(out ? out->street : nullptr, sizeof(NavScene::street));
@@ -144,7 +158,7 @@ inline bool parse(const uint8_t *data, size_t len, NavScene *out) {
 
 // Decodes one reassembled frame into `out`. Returns false, leaving `out`
 // untouched, for anything malformed (wrong version, enum or length out of
-// range, a coordinate outside the clip box, truncated body, trailing bytes). Two passes, validate then fill, so
+// range, a pan beyond NAV_PAN_MAX, a coordinate outside the clip box, truncated body, trailing bytes). Two passes, validate then fill, so
 // no NavScene is ever built on the stack.
 inline bool navDecode(const uint8_t *data, size_t len, NavScene &out) {
   if (!nav_detail::parse(data, len, nullptr)) return false;

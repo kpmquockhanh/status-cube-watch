@@ -42,6 +42,33 @@ private func allPoints(_ s: NavScene) -> [ScreenPoint] { s.route + s.streets.fla
         #expect(s.dist == "500 m" && s.street == "Lê Lợi" && s.eta == "12 min" && s.turn == .right)
     }
 
+    @Test func panMovesEverything() {
+        let route = straightRoute(length: 100)
+        let street = StreetLine(cls: 0, points: [north(0, east: 50), north(0, east: 60)])
+        let a = buildScene(progress: progress(), route: route, streets: [street], state: .navigating)
+        let b = buildScene(progress: progress(), route: route, streets: [street], state: .navigating, pan: ScreenPoint(x: -30, y: 25))
+        #expect(a.pan == .zero && b.pan == ScreenPoint(x: -30, y: 25))
+        #expect(b.route.first == ScreenPoint(x: 90, y: 225))
+        #expect(b.route.count == a.route.count && b.streets.count == a.streets.count)
+        for (p, q) in zip(a.route + a.streets.flatMap(\.points), b.route + b.streets.flatMap(\.points)) {
+            #expect(q.x == p.x - 30 && q.y == p.y + 25)
+        }
+    }
+
+    @Test func panReachesStreetsAhead() {
+        // A street 1.5 km ahead is culled at rest and drawn once the map is dragged down to it.
+        let route = straightRoute(length: 2000)
+        let mpp = metersPerPixel(distanceToTurn: 500, speed: 0)
+        let far = StreetLine(cls: 0, points: [north(1500, east: -20), north(1500, east: 20)])
+        let rest = buildScene(progress: progress(), route: route, streets: [far], state: .navigating)
+        #expect(rest.streets.isEmpty)
+        let dy = Int16((1500 / mpp).rounded())   // 1000 at 1.5 m/px: the most a drag can move
+        #expect(Int(dy) <= NavLimits.maxPan)
+        let dragged = buildScene(progress: progress(), route: route, streets: [far], state: .navigating, pan: ScreenPoint(x: 0, y: dy))
+        #expect(dragged.streets.count == 1)
+        #expect(!dragged.route.isEmpty)
+    }
+
     @Test func headingUpRotates() {
         // Heading east: a route running east goes straight up the screen.
         let pts = stride(from: 0.0, through: 500, by: 10).map { north(0, east: $0) }

@@ -8,9 +8,10 @@ import os
 /// Flow (`docs/ble-protocol.md`): reconnect by the remembered identifier, else scan for the service
 /// -> connect -> discover Info + Nav -> READ Info (encrypted, so this is what makes iOS ask for the
 /// passkey the first time) -> check `[proto 1, fw_rev >= 8]` -> connected. Frames go to Nav written
-/// without response, with flow control and "latest wins" (`NavChunkQueue`). Control is never
-/// subscribed: its messages (acks, volume, unlock) are the Mac's business. What happens after a
-/// link drops is `NavLinkPolicy.onDrop` (pure, tested).
+/// without response, with flow control and "latest wins" (`NavChunkQueue`). Control is subscribed
+/// once connected for one message, `08` (the rider dragged the map, fw_rev 9), handed to `onPan`;
+/// the rest (acks, volume, unlock) are the Mac's business and ignored. What happens after a link
+/// drops is `NavLinkPolicy.onDrop` (pure, tested).
 @MainActor
 final class CubeLink: NSObject, ObservableObject {
     enum Status: Equatable {
@@ -36,6 +37,8 @@ final class CubeLink: NSObject, ObservableObject {
     /// Largest encoded frame that fits in 32 chunks at the negotiated write length. The ride
     /// controller copies it into `RideEngine.frameBudget` (set whenever the link is connected).
     @Published private(set) var frameBudget: Int = NavLimits.maxFrameBytes
+    /// The rider dragged the map on the cube to this offset (Control `08`).
+    var onPan: ((ScreenPoint) -> Void)?
 
     private static let restoreID = "cube-nav"
     private static let idKey = "cubeNavPeripheral"
@@ -43,12 +46,14 @@ final class CubeLink: NSObject, ObservableObject {
     private let serviceID = CBUUID(string: CubeBLE.service)
     private let infoID = CBUUID(string: CubeBLE.info)
     private let navID = CBUUID(string: CubeBLE.nav)
+    private let controlID = CBUUID(string: CubeBLE.control)
     private let log = Logger(subsystem: "com.claude-cube.nav", category: "ble")
 
     private var central: CBCentralManager!
     private var peripheral: CBPeripheral?
     private var infoChar: CBCharacteristic?
     private var navChar: CBCharacteristic?
+    private var controlChar: CBCharacteristic?
     private var queue = NavChunkQueue()
     private var lastScene: NavScene?
     private var lastSceneAt = Date.distantPast
@@ -113,6 +118,7 @@ final class CubeLink: NSObject, ObservableObject {
         }
         infoChar = nil
         navChar = nil
+        controlChar = nil
         queue.reset()
         wanted = true
         guard central.state == .poweredOn else { return }
@@ -167,6 +173,7 @@ final class CubeLink: NSObject, ObservableObject {
         if resetQueue { queue.reset() }  // the cube clears its frame state on every connection
         infoChar = nil
         navChar = nil
+        controlChar = nil
         p.discoverServices([serviceID])
     }
 
@@ -191,6 +198,7 @@ final class CubeLink: NSObject, ObservableObject {
     private func linkLost() {
         infoChar = nil
         navChar = nil
+        controlChar = nil
         queue.reset()
         setTransient(central.state == .poweredOn ? .searching : .off)
     }
@@ -264,6 +272,7 @@ final class CubeLink: NSObject, ObservableObject {
         updateBudget(p.maximumWriteValueLength(for: .withoutResponse))
         status = .connected
         log.info("connected (first pairing: \(firstTime)), frame budget \(self.frameBudget) B")
+        if let control = controlChar, !control.isNotifying { p.setNotifyValue(true, for: control) }
         // A new bond's kind is learned from its first write, and a new bond whose link drops before
         // that write is deleted: identify as the iPhone at once. On a reconnect, resend a fresh
         // last scene; a stale one could start a ghost ride, so that becomes Ended.
@@ -275,6 +284,7 @@ final class CubeLink: NSObject, ObservableObject {
     private func findCharacteristics(_ p: CBPeripheral, in svc: CBService) {
         for ch in svc.characteristics ?? [] {
             if ch.uuid == infoID { infoChar = ch } else if ch.uuid == navID { navChar = ch }
+            else if ch.uuid == controlID { controlChar = ch }
         }
         guard let info = infoChar else {
             log.error("cube has no Info characteristic")
@@ -314,6 +324,7 @@ extension CubeLink: @preconcurrency CBCentralManagerDelegate {
             log.info("Bluetooth unavailable (state \(c.state.rawValue))")
             infoChar = nil
             navChar = nil
+            controlChar = nil
             queue.reset()
             cancelPairingHint()
             status = c.state == .unauthorized ? .unauthorized : .off
@@ -396,7 +407,7 @@ extension CubeLink: @preconcurrency CBPeripheralDelegate {
         if svc.characteristics?.contains(where: { $0.uuid == infoID }) == true {
             findCharacteristics(p, in: svc)
         } else {
-            p.discoverCharacteristics([infoID, navID], for: svc)
+            p.discoverCharacteristics([infoID, navID, controlID], for: svc)
         }
     }
 
@@ -419,7 +430,12 @@ extension CubeLink: @preconcurrency CBPeripheralDelegate {
     }
 
     func peripheral(_ p: CBPeripheral, didUpdateValueFor ch: CBCharacteristic, error: Error?) {
-        guard p.identifier == peripheral?.identifier, ch.uuid == infoID else { return }  // Control is ignored
+        guard p.identifier == peripheral?.identifier else { return }
+        if ch.uuid == controlID {
+            if error == nil, let pan = CubeBLE.parsePan([UInt8](ch.value ?? Data())) { onPan?(pan) }
+            return
+        }
+        guard ch.uuid == infoID else { return }
         if let error {
             log.error("Info read failed (pairing cancelled or wrong code?): \(error.localizedDescription)")
             drop(p)

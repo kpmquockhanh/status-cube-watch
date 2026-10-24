@@ -5,6 +5,7 @@ public enum CubeBLE {
     public static let service = "6e6d3c10-5d1a-4c1e-9f0b-7c4a2b8e1a01"
     public static let info = "6e6d3c10-5d1a-4c1e-9f0b-7c4a2b8e1a04"
     public static let nav = "6e6d3c10-5d1a-4c1e-9f0b-7c4a2b8e1a07"
+    public static let control = "6e6d3c10-5d1a-4c1e-9f0b-7c4a2b8e1a03"
     public static let protocolVersion: UInt8 = 1
     /// First firmware with the Nav characteristic and the second (iPhone) bond.
     public static let minNavFwRev: UInt8 = 8
@@ -12,6 +13,17 @@ public enum CubeBLE {
     /// Info is `[proto_ver, fw_rev]`. True when that cube can take Nav frames from this app.
     public static func infoSupportsNav(_ info: [UInt8]) -> Bool {
         info.count >= 2 && info[0] == protocolVersion && info[1] >= minNavFwRev
+    }
+
+    /// Control `08 <x i16> <y i16>` (fw_rev 9): the rider dragged the map on the cube; frames are
+    /// built around this offset until the next one. nil for any other Control message (acks and
+    /// the like are the Mac's) or an offset beyond `NavLimits.maxPan`.
+    public static func parsePan(_ msg: [UInt8]) -> ScreenPoint? {
+        guard msg.count >= 5, msg[0] == 0x08 else { return nil }
+        let x = Int16(bitPattern: UInt16(msg[1]) | UInt16(msg[2]) << 8)
+        let y = Int16(bitPattern: UInt16(msg[3]) | UInt16(msg[4]) << 8)
+        guard abs(Int(x)) <= NavLimits.maxPan, abs(Int(y)) <= NavLimits.maxPan else { return nil }
+        return ScreenPoint(x: x, y: y)
     }
 }
 

@@ -6,6 +6,7 @@ public struct ScreenPoint: Equatable, Sendable {
     public var x: Int16
     public var y: Int16
     public init(x: Int16, y: Int16) { self.x = x; self.y = y }
+    public static let zero = ScreenPoint(x: 0, y: 0)
 }
 
 public struct SceneStreet: Equatable, Sendable {
@@ -26,10 +27,15 @@ public struct NavScene: Equatable, Sendable {
     public var eta: String
     public var route: [ScreenPoint]
     public var streets: [SceneStreet]
+    /// The offset the rider dragged the map to on the cube (Control `08`): the frame is built
+    /// around it and carries it, so the cube can shift the frame by what it has moved since.
+    public var pan: ScreenPoint
     public init(state: NavState, turn: NavTurn, exit: UInt8, dir: UInt8, gpsWeak: Bool,
-                dist: String, street: String, eta: String, route: [ScreenPoint], streets: [SceneStreet]) {
+                dist: String, street: String, eta: String, route: [ScreenPoint], streets: [SceneStreet],
+                pan: ScreenPoint = .zero) {
         self.state = state; self.turn = turn; self.exit = exit; self.dir = dir; self.gpsWeak = gpsWeak
         self.dist = dist; self.street = street; self.eta = eta; self.route = route; self.streets = streets
+        self.pan = pan
     }
 }
 
@@ -39,6 +45,8 @@ public enum NavLimits {
     public static let maxRoute = 256, maxStreets = 96, maxStreetPoints = 640
     public static let maxFrameBytes = 8192, maxChunks = 32
     public static let minX = -64, maxX = 304, minY = -64, maxY = 344
+    /// How far the map may be dragged either way (`NAV_PAN_MAX`).
+    public static let maxPan = 1000
 }
 
 /// NFC-normalised UTF-8, cut to at most `limit` bytes on a character boundary.
@@ -53,15 +61,19 @@ func wireString(_ s: String, limit: Int) -> [UInt8] {
 }
 
 /// Plan 2 layout, little-endian. Callers keep route/street counts within `NavLimits`.
+/// Version 2 (the pan after the flags) only for a dragged map, so a cube that never sent
+/// Control `08` keeps getting version 1.
 public func encode(_ scene: NavScene) -> Data {
     var d = Data()
     func u8(_ v: UInt8) { d.append(v) }
     func u16(_ v: Int) { d.append(UInt8(v & 0xff)); d.append(UInt8((v >> 8) & 0xff)) }
     func i16(_ v: Int16) { u16(Int(UInt16(bitPattern: v))) }
     func str(_ s: String, _ limit: Int) { let b = wireString(s, limit: limit); u8(UInt8(b.count)); d.append(contentsOf: b) }
-    u8(1)
+    let panned = scene.pan != .zero
+    u8(panned ? 2 : 1)
     u8(scene.state.rawValue); u8(scene.turn.rawValue); u8(scene.exit); u8(scene.dir)
     u8(scene.gpsWeak ? 1 : 0)
+    if panned { i16(scene.pan.x); i16(scene.pan.y) }
     str(scene.dist, NavLimits.maxDist)
     str(scene.street, NavLimits.maxStreet)
     str(scene.eta, NavLimits.maxETA)

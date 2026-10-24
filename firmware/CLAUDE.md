@@ -32,7 +32,7 @@ Run tests from `sim/`, because `ble_frame_test` opens `fixtures/ble-frames.txt` 
 
 The sources fall into three kinds. This split is what makes host tests and the simulator possible, so keep new code in the right kind.
 
-- **Pure logic.** Header-only (`transport_policy.h`, `idle_sleep.h`, `readings_key.h`, `cpu_policy.h`, `touch_gate.h`, `ble_conn.h`, `orientation.h`, `ble_bonds.h`, `ble_frame.h`, `age_label.h`, `touch_map.h`, `melody.h`, `deck_util.h`, `volume_frame.h`, `volume_slider.h`, `unlock_prompt.h`, `nav_frame.h`, `nav_session.h`, `battery_util.h`, `portal_util.h`, `*_settings.h`) or a small `.cpp` (`gesture`, `editor_layout`, `dev_editor`, `settings_json`). These files make no Arduino or hardware calls and never read `millis()`. The caller passes `now`, and elapsed time is computed by unsigned subtraction so a `millis()` wrap is harmless. Each one has a `sim/tests/<name>_test.cpp`.
+- **Pure logic.** Header-only (`transport_policy.h`, `idle_sleep.h`, `readings_key.h`, `cpu_policy.h`, `touch_gate.h`, `ble_conn.h`, `orientation.h`, `ble_bonds.h`, `ble_frame.h`, `age_label.h`, `touch_map.h`, `melody.h`, `deck_util.h`, `volume_frame.h`, `volume_slider.h`, `unlock_prompt.h`, `nav_frame.h`, `nav_session.h`, `nav_pan.h`, `battery_util.h`, `portal_util.h`, `*_settings.h`) or a small `.cpp` (`gesture`, `editor_layout`, `dev_editor`, `settings_json`). These files make no Arduino or hardware calls and never read `millis()`. The caller passes `now`, and elapsed time is computed by unsigned subtraction so a `millis()` wrap is harmless. Each one has a `sim/tests/<name>_test.cpp`.
 - **Hardware layers.** `net.cpp`, `net_ble.cpp`, `touch.cpp`, `imu.cpp`, `battery.cpp`, `buzzer.cpp`, `settings.cpp` (NVS), `portal.cpp`, `ota.cpp`. Each one implements a header (`net.h`, `ble.h`, `settings.h`, ...) that `sim/` implements again as a `*_sim.cpp` stand-in, and `sim/bench.cpp` once more for the bench. When you change one of these headers, update both. `net_sim.cpp` also exports the blocking `simFetch()`, which `ble_sim.cpp` uses for its payload.
 - **Shared app code.** `main.cpp`, `ui.cpp` and `payload.cpp` compile unchanged for both the board and the SDL simulator. They may only use what `sim/Arduino.h` provides: `millis`, `delay`, `Serial.print/println/printf`, `min/max/constrain`, `ESP.restart` and `setCpuFrequencyMhz`. `display.h` picks the panel with `#ifdef LGFX_SDL`.
 
@@ -46,7 +46,7 @@ PlatformIO compiles everything in `src/`, but the simulator compiles only the fi
 The firmware runs as one cooperative loop. Its one task of its own is the WiFi fetch in `net.cpp`: `netRequest()` starts a GET there and returns at once, and `netTake()` hands the result to the loop on a later pass. NimBLE runs its callbacks on its own task, and `bleTake()` / `bleTakeSettings()` hand those results to the loop. `netTake()`, `bleTake()` and `bleTakeSettings()` must all be called on every pass. Each pass runs these steps in order:
 
 1. `buzzerUpdate`
-2. Touch and gestures (ignored while navigation owns the screen)
+2. Touch and gestures (while navigation owns the screen, only the map's drag and tap, into `NavPan`)
 3. IMU (not read while navigation is active)
 4. Battery
 5. Transport policy (start or stop WiFi and OTA)

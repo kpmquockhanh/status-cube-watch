@@ -43,6 +43,7 @@ final class RideController: ObservableObject {
         location.objectWillChange.sink { [weak self] in self?.objectWillChange.send() }.store(in: &bag)
         location.onFix = { [weak self] f in self?.handle(f) }
         location.onHeading = { [weak self] h in self?.heading(h) }
+        cubeLink.onPan = { [weak self] p in self?.pan(p) }
     }
 
     func clearMessage() { message = nil; savedRouteAvailable = false }
@@ -173,6 +174,14 @@ final class RideController: ObservableObject {
     private func heading(_ deg: Double) {
         guard phase == .riding, let e = engine else { return }
         if let s = e.compass(deg) { apply(s) }
+    }
+
+    /// The rider dragged the map on the cube: rebuild around the new offset now (from the last fix,
+    /// like `tick`); it goes out within `minFrameGap`.
+    private func pan(_ p: ScreenPoint) {
+        guard phase == .riding, let e = engine, e.pan != p else { return }
+        e.pan = p
+        if let s = e.tick() { apply(s) }
     }
 
     /// Once a second without a new fix, lets the engine move on with time alone (arrival hold,

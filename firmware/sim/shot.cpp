@@ -173,10 +173,13 @@ bool volumeShot(Display &lcd, const char *state) {
 }
 
 // A navigation scene by name (nav_samples.h); `lost` also shows NO PHONE.
+// CUBE_NAV_PAN=<x>,<y> draws it dragged that far (the frame itself unpanned).
 bool navShot(Display &lcd, const char *name) {
   static NavScene scene;
   if (!navSample(name, scene)) return false;
-  uiNav(lcd, scene, !strcmp(name, "lost"), batteryViewFromEnv());
+  int px = 0, py = 0;
+  if (const char *e = getenv("CUBE_NAV_PAN")) sscanf(e, "%d,%d", &px, &py);
+  uiNav(lcd, scene, !strcmp(name, "lost"), batteryViewFromEnv(), (int16_t)px, (int16_t)py);
   return true;
 }
 

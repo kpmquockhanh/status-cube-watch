@@ -14,6 +14,7 @@
 #include "display.h"
 #include "gesture.h"
 #include "idle_sleep.h"
+#include "nav_pan.h"
 #include "nav_session.h"
 #include "imu.h"
 #include "net.h"
@@ -81,6 +82,7 @@ IdleSleep idle;
 // lives here and not on the loop's stack.
 NavSession navSession;
 NavScene navScene;
+NavPan navPan;  // the dragged map (nav_pan.h)
 bool navPhoneLost = false;  // what the map last showed: a change redraws at once
 
 // While riding, the time one map frame takes to compose and send (ms), logged
@@ -272,17 +274,39 @@ void pollTouch() {
   const bool onVolumeRow = onVolume && touchOnVolumeRow;
   if (!down) touchOnVolume = touchOnVolumeRow = false;
   // In the button row the tracker stays in tap mode: a press that drifts a few
-  // pixels is still a Tap (TAP_MAX_PX), not a drag of the slider.
-  const Gesture gesture = gestures.update(down, x, y, now, onVolume && !onVolumeRow);
+  // pixels is still a Tap (TAP_MAX_PX), not a drag of the slider. On the map a
+  // move either way drags it.
+  const bool onMap = navSession.active() && bleState() != BleState::Pairing && navScene.state != NavState::Arrived;
+  const DragMode drag = onMap ? DragMode::Free : (onVolume && !onVolumeRow ? DragMode::Vertical : DragMode::Off);
+  const Gesture gesture = gestures.update(down, x, y, now, drag);
   // The deck left the card under a dragging finger (the bond went): let go, so
   // the last level is still sent.
   if (volSlider.held() && !onVolume) {
     volSlider.release(now);
     dirty = true;
   }
-  // Navigation owns the screen: the tracker has read the touch (so it stays consistent), nothing acts on it.
+  // Navigation owns the screen: a drag moves the map, a tap brings it back to the rider (nav_pan.h).
   if (navSession.active()) {
     if (volSlider.held()) volSlider.release(now);
+    switch (gesture) {
+      case Gesture::DragStart:
+        if (!onMap) break;
+        navPan.grab(gestures.startX(), gestures.startY(), now);
+        navPan.drag(gestures.lastX(), gestures.lastY(), now);
+        dirty = true;
+        break;
+      case Gesture::Drag:
+        if (navPan.drag(gestures.lastX(), gestures.lastY(), now)) dirty = true;
+        break;
+      case Gesture::DragEnd:
+        navPan.release(now);
+        break;
+      case Gesture::Tap:
+        if (onMap && navPan.recenter(now)) dirty = true;
+        break;
+      default:
+        break;
+    }
     return;
   }
   // Likewise under the "PAIRING OPEN" message: a tap dismisses it, nothing else acts.
@@ -505,6 +529,7 @@ void loop() {
   }
   if (navSession.takeStarted()) {
     Serial.println("[nav] ride started");
+    navPan.reset();
     navLogAt = navComposeMax = 0;  // the first compose line comes NAV_LOG_MS into the ride
     if (editing) {  // closed without saving: the map cannot wait for DONE
       editing = false;
@@ -517,11 +542,17 @@ void loop() {
   }
   if (navSession.takeEnded()) {
     Serial.println("[nav] ride ended");
+    navPan.reset();
     if (screenOn) lcd.setBrightness(deviceSettings().backlight);
     lastRotate = now;  // auto-advance does not fire at once
     if (onVolumeCard()) uiReplayVolume();
     else uiReplay(cardIndex);
     dirty = true;
+  }
+  if (navSession.active()) {
+    if (navPan.tick(now)) dirty = true;  // the glide back to the rider
+    int16_t px, py;
+    if (navPan.takeSend(now, px, py)) bleSendNavPan(px, py);
   }
   handleBleSettings();
   // The Mac's volume. Not a reading: it never keeps the screen awake.
@@ -609,7 +640,7 @@ void loop() {
     if (pairing) uiBlePair(lcd, blePasskey());  // the code must be seen
     else if (navOn) {
       const uint32_t t0 = millis();
-      uiNav(lcd, navScene, navPhoneLost, bv);
+      uiNav(lcd, navScene, navPhoneLost, bv, navPan.x(), navPan.y());
       logNavCompose(now, millis() - t0);
     }
     else if (pairingMsgUp()) uiMessage(lcd, "PAIRING OPEN", "PAIR FROM THE APP OR MAC");

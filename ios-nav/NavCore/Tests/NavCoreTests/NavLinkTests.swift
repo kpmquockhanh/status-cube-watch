@@ -20,6 +20,16 @@ private func frame(_ n: Int, fill: UInt8) -> Data { Data(repeating: fill, count:
         #expect(!CubeBLE.infoSupportsNav([]))
     }
 
+    @Test func panMessage() {
+        #expect(CubeBLE.parsePan([0x08, 0xD8, 0xFF, 0x2C, 0x01]) == ScreenPoint(x: -40, y: 300))
+        #expect(CubeBLE.parsePan([0x08, 0, 0, 0, 0]) == .zero)
+        #expect(CubeBLE.parsePan([0x08, 0xE8, 0x03, 0x18, 0xFC]) == ScreenPoint(x: 1000, y: -1000))
+        #expect(CubeBLE.parsePan([0x08, 0xE9, 0x03, 0, 0]) == nil)   // 1001: beyond the limit
+        #expect(CubeBLE.parsePan([0x08, 0, 0, 0]) == nil)
+        #expect(CubeBLE.parsePan([0x05, 40, 0, 0, 0]) == nil)        // the Mac's volume request
+        #expect(CubeBLE.parsePan([]) == nil)
+    }
+
     @Test func endedSceneEncodes() {
         #expect([UInt8](encode(.ended)) == [1, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0])
     }

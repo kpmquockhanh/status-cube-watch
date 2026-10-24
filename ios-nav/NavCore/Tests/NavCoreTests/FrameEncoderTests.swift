@@ -20,7 +20,7 @@ private func goldenFrames() throws -> [String: [UInt8]] {
 @Suite struct FrameEncoderTests {
     @Test func goldenScenes() throws {
         let golden = try goldenFrames()
-        #expect(golden.count == 3)
+        #expect(golden.count == 4)
         let turn = NavScene(state: .navigating, turn: .right, exit: 0, dir: 0, gpsWeak: false,
                             dist: "150 m", street: "Lê Lợi", eta: "12 min",
                             route: [pt(120, 200), pt(120, 90), pt(200, 80)],
@@ -32,6 +32,9 @@ private func goldenFrames() throws -> [String: [UInt8]] {
         #expect([UInt8](encode(turn)) == golden["turn"])
         #expect([UInt8](encode(arrived)) == golden["arrived"])
         #expect([UInt8](encode(off)) == golden["offroute"])
+        let panned = NavScene(state: .navigating, turn: .straight, exit: 0, dir: 0, gpsWeak: false,
+                              dist: "200 m", street: "", eta: "", route: [], streets: [], pan: pt(-40, 30))
+        #expect([UInt8](encode(panned)) == golden["panned"])
     }
 
     private func scene(street: String) -> NavScene {

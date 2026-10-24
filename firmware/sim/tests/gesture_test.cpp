@@ -12,11 +12,17 @@ struct Pad {
   uint32_t last = 0;
   bool wasDown = false;
   Gesture raw(uint32_t now, bool down, int x, int y, bool drag = false) {
+    return raw(now, down, x, y, drag ? DragMode::Vertical : DragMode::Off);
+  }
+  Gesture raw(uint32_t now, bool down, int x, int y, DragMode drag) {
     last = now;
     wasDown = down;
     return t.update(down, (int16_t)x, (int16_t)y, now, drag);
   }
   Gesture at(uint32_t now, bool down, int x, int y, bool drag = false) {
+    return at(now, down, x, y, drag ? DragMode::Vertical : DragMode::Off);
+  }
+  Gesture at(uint32_t now, bool down, int x, int y, DragMode drag) {
     if (down && wasDown) {
       while (now - last > 50u) raw(last + 50u, true, x, y, drag);
     }
@@ -214,6 +220,25 @@ void testDragModeOffUnchanged() {
 
 }  // namespace
 
+// Free drag (the navigation map): a move either way is a drag, never a swipe;
+// every move reports Drag with both coordinates; a still touch is still a tap.
+void testFreeDrag() {
+  Pad p;
+  const DragMode F = DragMode::Free;
+  CHECK(p.raw(0, true, 100, 100, F) == Gesture::None);
+  CHECK(p.raw(20, true, 105, 100, F) == Gesture::None);       // under the lock distance
+  CHECK(p.raw(40, true, 112, 101, F) == Gesture::DragStart);  // horizontal locks a drag too
+  CHECK(p.t.lastX() == 112 && p.t.lastY() == 101);
+  CHECK(p.raw(60, true, 112, 101, F) == Gesture::None);       // no move, no Drag
+  CHECK(p.raw(80, true, 112, 140, F) == Gesture::Drag);       // then any direction
+  CHECK(p.raw(100, true, 60, 140, F) == Gesture::Drag);
+  CHECK(p.t.lastX() == 60 && p.t.lastY() == 140);
+  CHECK(p.raw(120, false, 0, 0, F) == Gesture::DragEnd);      // a fast fling is not a swipe
+
+  CHECK(p.raw(1000, true, 100, 100, F) == Gesture::None);
+  CHECK(p.raw(1050, false, 0, 0, F) == Gesture::Tap);
+}
+
 int main() {
   testTap();
   testSwipes();
@@ -231,5 +256,6 @@ int main() {
   testDragModeTap();
   testDragEndAfterModeOff();
   testDragModeOffUnchanged();
+  testFreeDrag();
   return checksDone("gesture_test");
 }

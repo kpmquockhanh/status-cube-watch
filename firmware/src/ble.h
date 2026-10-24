@@ -66,3 +66,6 @@ void bleSendMedia(MediaKey key);
 // Asks the Mac to unlock its screen: Control `07` (fw_rev 7). Fire and forget;
 // the Mac acts only while it is locked and "Unlock with cube" is on.
 void bleSendUnlock();
+// Tells the iPhone where the dragged map is: Control `08 <x> <y>` (fw_rev 9, nav_pan.h).
+// Fire and forget; the Mac ignores it.
+void bleSendNavPan(int16_t x, int16_t y);

@@ -9,6 +9,7 @@
 #include "ble_conn.h"
 #include "ble_frame.h"
 #include "nav_frame.h"
+#include "nav_pan.h"
 #include "settings_json.h"
 
 // GATT server for the Mac app and the iPhone, both bonded and connected at
@@ -842,6 +843,12 @@ void bleSendUnlock() {
   unlockRequestEncode(m);
   notifyControl(m, sizeof(m));
   Serial.println("[ble] unlock requested");
+}
+
+void bleSendNavPan(int16_t x, int16_t y) {
+  uint8_t m[BLE_NAV_PAN_LEN];
+  navPanEncode(x, y, m);
+  notifyControl(m, sizeof(m));
 }
 
 void bleSendVolume(uint8_t level, bool muted) {

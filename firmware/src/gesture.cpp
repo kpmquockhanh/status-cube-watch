@@ -2,7 +2,7 @@
 
 #include <stdlib.h>
 
-Gesture GestureTracker::update(bool down, int16_t x, int16_t y, uint32_t now, bool dragMode) {
+Gesture GestureTracker::update(bool down, int16_t x, int16_t y, uint32_t now, DragMode drag) {
   if (down) {
     if (!_down) {
       _down = true;
@@ -12,16 +12,18 @@ Gesture GestureTracker::update(bool down, int16_t x, int16_t y, uint32_t now, bo
       _axis = AXIS_NONE;
       return Gesture::None;
     }
-    const int16_t prevY = _ly;
+    const int16_t prevX = _lx, prevY = _ly;
     _lx = x;
     _ly = y;
-    if (_axis == AXIS_NONE && dragMode) {
+    if (_axis == AXIS_NONE && drag != DragMode::Off) {
       const int adx = abs(_lx - _sx), ady = abs(_ly - _sy);
       if (adx >= DRAG_LOCK_PX || ady >= DRAG_LOCK_PX) {
-        _axis = ady > adx ? AXIS_V : AXIS_H;
-        if (_axis == AXIS_V) return Gesture::DragStart;
+        _axis = drag == DragMode::Free ? AXIS_FREE : (ady > adx ? AXIS_V : AXIS_H);
+        if (_axis != AXIS_H) return Gesture::DragStart;
       }
     } else if (_axis == AXIS_V && _ly != prevY) {
+      return Gesture::Drag;
+    } else if (_axis == AXIS_FREE && (_lx != prevX || _ly != prevY)) {
       return Gesture::Drag;
     }
     return Gesture::None;
@@ -30,7 +32,7 @@ Gesture GestureTracker::update(bool down, int16_t x, int16_t y, uint32_t now, bo
   if (!_down) return Gesture::None;
   _down = false;
 
-  if (_axis == AXIS_V) {
+  if (_axis == AXIS_V || _axis == AXIS_FREE) {
     _axis = AXIS_NONE;
     return Gesture::DragEnd;
   }

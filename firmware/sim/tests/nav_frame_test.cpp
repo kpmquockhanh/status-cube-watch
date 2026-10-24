@@ -58,8 +58,12 @@ struct Street {
   int nPts;
 };
 Bytes build(const std::string &dist, const std::string &street, const std::string &eta, int nRoute,
-            const std::vector<Street> &streets, uint8_t ver = 1, uint8_t state = 1, uint8_t turn = 0) {
+            const std::vector<Street> &streets, uint8_t ver = 1, uint8_t state = 1, uint8_t turn = 0,
+            int16_t panX = 0, int16_t panY = 0) {
   Bytes b{ver, state, turn, 0, 0, 0};
+  if (ver == 2) {
+    for (int16_t v : {panX, panY}) b.push_back((uint8_t)(v & 0xFF)), b.push_back((uint8_t)((uint16_t)v >> 8));
+  }
   for (const std::string *s : {&dist, &street, &eta}) {
     b.push_back((uint8_t)s->size());
     b.insert(b.end(), s->begin(), s->end());
@@ -82,8 +86,8 @@ Bytes build(const std::string &dist, const std::string &street, const std::strin
 
 void testFixtures() {
   const auto fx = loadFixture("fixtures/nav-frames.txt");
-  CHECK(fx.size() == 3);
-  if (fx.size() != 3) return;
+  CHECK(fx.size() == 4);
+  if (fx.size() != 4) return;
 
   {
     const Bytes &b = fx.at("turn");
@@ -92,6 +96,7 @@ void testFixtures() {
     CHECK(s.state == NavState::Navigating);
     CHECK(s.turn == NavTurn::Right);
     CHECK(s.exit == 0 && s.dir == 0 && s.flags == 0);
+    CHECK(s.panX == 0 && s.panY == 0);  // version 1 carries no pan
     CHECK(std::string(s.dist) == "150 m");
     CHECK(std::string(s.street) == "L\xc3\xaa L\xe1\xbb\xa3i");
     CHECK(std::string(s.eta) == "12 min");
@@ -128,6 +133,25 @@ void testFixtures() {
     CHECK(s.route[1].x == 300 && s.route[1].y == -64);
     CHECK(s.nStreets == 0);
   }
+  {
+    const Bytes &b = fx.at("panned");
+    NavScene s = sentinel();
+    CHECK(navDecode(b.data(), b.size(), s));
+    CHECK(s.state == NavState::Navigating && s.turn == NavTurn::Straight);
+    CHECK(s.panX == -40 && s.panY == 30);
+    CHECK(std::string(s.dist) == "200 m");
+    CHECK(s.nRoute == 0 && s.nStreets == 0);
+  }
+}
+
+void testPan() {
+  NavScene s = sentinel();
+  const Bytes b = build("a", "b", "c", 2, {{1, 2}}, 2, 1, 0, NAV_PAN_MAX, -NAV_PAN_MAX);
+  CHECK(navDecode(b.data(), b.size(), s));
+  CHECK(s.panX == NAV_PAN_MAX && s.panY == -NAV_PAN_MAX && s.nRoute == 2);
+  CHECK(rejects(build("a", "b", "c", 0, {}, 2, 1, 0, NAV_PAN_MAX + 1, 0)));
+  CHECK(rejects(build("a", "b", "c", 0, {}, 2, 1, 0, 0, -NAV_PAN_MAX - 1)));
+  CHECK(rejects(Bytes{2, 1, 0, 0, 0, 0, 0, 0}));  // pan cut short
 }
 
 void testBuilderFrameDecodes() {  // the builder itself is valid, so rejections below are due to the one change
@@ -140,7 +164,8 @@ void testBuilderFrameDecodes() {  // the builder itself is valid, so rejections 
 
 void testRejections() {
   const std::vector<Street> one = {{1, 2}};
-  CHECK(rejects(build("a", "b", "c", 0, one, 2)));            // version 2
+  CHECK(rejects(build("a", "b", "c", 0, one, 3)));            // version 3
+  CHECK(rejects(build("a", "b", "c", 0, one, 0)));            // version 0
   CHECK(rejects(build("a", "b", "c", 0, one, 1, 5)));         // state 5
   CHECK(rejects(build("a", "b", "c", 0, one, 1, 1, 13)));     // turn 13
   CHECK(rejects(build(std::string(16, 'x'), "b", "c", 0, one)));   // dist 16 bytes
@@ -260,7 +285,7 @@ void testAssembler() {
   const Bytes over2 = chunk(8, 1, 2, Bytes(1, 1));
   CHECK(d.feed(over2.data(), over2.size()) == FrameResult::Bad);  // 8193 > 8192
 
-  CHECK(BLE_FW_REV == 8);
+  CHECK(BLE_FW_REV == 9);  // 9: Control 08 and version-2 frames (the dragged map)
 }
 
 }  // namespace
@@ -269,6 +294,7 @@ int main() {
   testFixtures();
   testBuilderFrameDecodes();
   testRejections();
+  testPan();
   testTotalStreetPoints();
   testMaxRoute();
   testClipBox();

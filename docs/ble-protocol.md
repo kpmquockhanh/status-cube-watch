@@ -18,7 +18,7 @@ Swift tests); the navigation frames by `firmware/src/nav_frame.h` and
 | Volume  | `6e6d3c10-5d1a-4c1e-9f0b-7c4a2b8e1a06` | write (encrypted + authenticated), fw_rev 5+ |
 | Nav     | `6e6d3c10-5d1a-4c1e-9f0b-7c4a2b8e1a07` | write + write without response (encrypted + authenticated), fw_rev 8+ |
 
-Info is 2 bytes: `[proto_ver, fw_rev]` (current firmware: `[1, 8]`). Reading it is what triggers pairing, so the Mac reads
+Info is 2 bytes: `[proto_ver, fw_rev]` (current firmware: `[1, 9]`). Reading it is what triggers pairing, so the Mac reads
 Info first, checks `proto_ver == 1`, then subscribes to Control, then writes payloads.
 
 A bonded Mac caches this table. When the cube boots a `fw_rev` other than the one it last
@@ -52,6 +52,7 @@ negotiated write length (`maximumWriteValueLength(for: .withResponse)`, about 50
 | `05 <level> <muted>` | set the Mac's output to `<level>` (0..100) and mute it when `<muted>` is `01` (added in fw_rev 5, protocol still 1). An absolute target, so a lost or repeated message cannot drift the volume. Fire and forget: no ack, and it is dropped if no Mac is subscribed. A Mac that does not know `05` ignores it |
 | `06 <key>` | press a media key on the Mac: `00` play/pause, `01` next, `02` previous (added in fw_rev 6, protocol still 1). The Volume card's buttons send it. Fire and forget: no ack, and it is dropped if no Mac is subscribed. A Mac that does not know `06` ignores it |
 | `07` | unlock the Mac's screen: a tap on the cube's unlock prompt (added in fw_rev 7, protocol still 1). The Mac types the stored login password only while its screen is locked, "Unlock Mac with cube" is on and it holds the Accessibility permission, and at most once per 5 s; otherwise it logs why and does nothing. Fire and forget: no ack, and it is dropped if no Mac is subscribed. A Mac that does not know `07` ignores it |
+| `08 <x> <y>` | the rider dragged the navigation map: `<x>`, `<y>` are i16 little-endian screen pixels (each within ±1000), how far the map is moved from where the phone would put it (added in fw_rev 9, protocol still 1). Meant for the iPhone, which subscribes to Control for it: it builds every following frame around that offset and echoes it (Nav frame version 2). Sent at most every 100 ms while a finger drags and at once when it lifts; `08 00 00 00 00` when the map goes back (a tap, or 8 s without a touch). The offset is reset to 0 on both sides when a ride starts. Fire and forget, to every Control subscriber; a Mac ignores it |
 
 ## Liveness
 
@@ -122,12 +123,13 @@ Reassembled frame, little-endian:
 
 | Field | Type | Notes |
 |---|---|---|
-| version | u8 | `1` |
+| version | u8 | `1`, or `2` when the map is dragged (adds pan, below) |
 | state | u8 | `NavState`: 0 Ended, 1 Navigating, 2 Rerouting, 3 OffRouteNoSignal, 4 Arrived |
 | turn | u8 | `NavTurn`: 0 Straight, 1 SlightLeft, 2 Left, 3 SharpLeft, 4 SlightRight, 5 Right, 6 SharpRight, 7 UTurn, 8 KeepLeft, 9 KeepRight, 10 Roundabout, 11 Arrive, 12 Rejoin |
 | exit | u8 | roundabout exit number, 0 = none |
 | dir | u8 | Rejoin arrow, 0..255 = 0..360° clockwise from screen-up (only meaningful for Rejoin) |
 | flags | u8 | bit0 = GPS weak, or the rider is slow and the map's heading is a guess (no trusted compass yet): rider arrow drawn grey |
+| pan | i16 x, i16 y | version 2 only (fw_rev 9): the Control `08` offset this frame was built around, each within ±1000. Every coordinate already includes it, and so does the rider (drawn at (120, 200) + pan); the cube draws the frame shifted by its own current offset minus this one, so the map follows the finger before the phone catches up |
 | dist | u8 len + UTF-8 | ≤ 15 bytes, e.g. `150 m` |
 | street | u8 len + UTF-8 | ≤ 63 bytes |
 | eta | u8 len + UTF-8 | ≤ 23 bytes, e.g. `12 min` |
@@ -145,6 +147,8 @@ nav turn 01 01 05 00 00 00 05 31 35 30 20 6d 09 4c c3 aa 20 4c e1 bb a3 69 06 31
 nav arrived 01 04 0b 00 00 00 00 0c 42 e1 ba bf 6e 20 54 68 c3 a0 6e 68 00 00 00 00
 # offroute: OffRouteNoSignal, Rejoin, dir 64 (90° right), GPS weak, "80 m", route (-64,304)(300,-64)
 nav offroute 01 03 0c 00 40 01 04 38 30 20 6d 00 00 02 00 c0 ff 30 01 2c 01 c0 ff 00
+# panned: version 2, Navigating, Straight, pan (-40,30), "200 m", no route, no streets
+nav panned 02 01 00 00 00 00 d8 ff 1e 00 05 32 30 30 20 6d 00 00 00 00 00
 ```
 
 ## Settings (added in fw_rev 2, protocol still 1)

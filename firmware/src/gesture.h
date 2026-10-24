@@ -14,8 +14,8 @@ enum class Gesture : uint8_t {
   SwipePrev,
   SwipeUp,     // finger moved up the screen (closes the display panel)
   SwipeDown,   // finger moved down (opens the display panel)
-  DragStart,   // drag mode: the finger locked to a vertical drag (lastY() is where it is)
-  Drag,        // drag mode: the finger moved while dragging (lastY())
+  DragStart,   // drag mode: the finger locked to a drag (lastX()/lastY() is where it is)
+  Drag,        // drag mode: the finger moved while dragging (lastX()/lastY())
   DragEnd,     // the dragging finger lifted (also after drag mode was turned off mid-drag)
 };
 
@@ -27,24 +27,31 @@ constexpr uint32_t TAP_MAX_MS = 400;
 // move is called vertical (a drag) or horizontal (a swipe, decided on lift).
 constexpr int DRAG_LOCK_PX = 10;
 
+enum class DragMode : uint8_t {
+  Off,       // moves are swipes
+  Vertical,  // the Volume card: a vertical move is a drag, a horizontal one still swipes
+  Free,      // the navigation map: a move either way is a drag; there are no swipes
+};
+
 class GestureTracker {
  public:
   // Feed one sample per poll. At most one gesture comes back per call; a tap
   // comes back as the finger lifts.
-  // `dragMode` (only the Volume card) turns a vertical move into
-  // DragStart / Drag / DragEnd instead of a swipe.
-  Gesture update(bool down, int16_t x, int16_t y, uint32_t now, bool dragMode = false);
+  // `drag` (the Volume card, the navigation map) turns a move into
+  // DragStart / Drag / DragEnd instead of a swipe (see DragMode).
+  Gesture update(bool down, int16_t x, int16_t y, uint32_t now, DragMode drag = DragMode::Off);
 
   // Where the latest touch began. A tap carries no coordinates of its own, so
   // the editor hit-tests here: a few pixels of drift between down and up must
   // not move the press onto a neighbouring button.
   int16_t startX() const { return _sx; }
   int16_t startY() const { return _sy; }
-  // The latest sample's height: where a drag is.
+  // The latest sample: where a drag is.
+  int16_t lastX() const { return _lx; }
   int16_t lastY() const { return _ly; }
 
  private:
-  enum : uint8_t { AXIS_NONE, AXIS_V, AXIS_H };
+  enum : uint8_t { AXIS_NONE, AXIS_V, AXIS_H, AXIS_FREE };  // AXIS_V and AXIS_FREE are drags
   bool _down = false;
   uint8_t _axis = AXIS_NONE; // drag mode: which way this touch locked
   int16_t _sx = 0, _sy = 0;  // where the touch began

@@ -4,3 +4,5 @@ nav turn 01 01 05 00 00 00 05 31 35 30 20 6d 09 4c c3 aa 20 4c e1 bb a3 69 06 31
 nav arrived 01 04 0b 00 00 00 00 0c 42 e1 ba bf 6e 20 54 68 c3 a0 6e 68 00 00 00 00
 # offroute: OffRouteNoSignal, Rejoin, dir 64 (90° right), GPS weak, "80 m", route (-64,304)(300,-64)
 nav offroute 01 03 0c 00 40 01 04 38 30 20 6d 00 00 02 00 c0 ff 30 01 2c 01 c0 ff 00
+# panned: version 2, Navigating, Straight, pan (-40,30), "200 m", "", "", no route, no streets
+nav panned 02 01 00 00 00 00 d8 ff 1e 00 05 32 30 30 20 6d 00 00 00 00 00

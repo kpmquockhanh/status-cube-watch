@@ -171,6 +171,8 @@ void bleSendMedia(MediaKey key) {
 
 void bleSendUnlock() { Serial.println("[ble] (sim) unlock"); }
 
+void bleSendNavPan(int16_t x, int16_t y) { Serial.printf("[ble] (sim) nav pan %d,%d\n", x, y); }
+
 void bleSendVolume(uint8_t level, bool muted) {
   Serial.printf("[ble] (sim) volume %u%s\n", (unsigned)level, muted ? " muted" : "");
 }

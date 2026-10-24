@@ -8,7 +8,9 @@ you observed it. Logs: `pio device monitor` (cube; look for `[nav]` and `[ble]`)
 
 - [ ] Mac and iPhone both bonded and connected: the deck keeps updating from the Mac while the iPhone streams a ride; neither link drops the other.
 - [ ] Start a ride: the map takes the screen within about 1 s, at full brightness, whatever the Display panel's brightness is. `[nav] ride started` is logged.
-- [ ] Swipes and taps do nothing while the map is up; the screen never sleeps during the ride.
+- [ ] Swipes do nothing to the deck while the map is up (no editor, no card change); the screen never sleeps during the ride.
+- [ ] Drag the map: it follows the finger at once, and within about 0.3 s the phone's frames show the streets beyond the old edge (no jump back, no double offset). Drag about 1000 px in one direction: the map stops there.
+- [ ] After a drag, 8 s without a touch: the map glides back to the rider. A tap after a drag brings it back at once. A new ride starts centred.
 - [ ] With auto-advance on (e.g. 10 s), a long ride does not change cards under the map; when the ride ends the deck is on the card it was on.
 - [ ] End the ride in the app: the deck returns at once, brightness goes back to its setting, auto-advance does not fire immediately.
 - [ ] Open the display panel, then start a ride: the panel closes without saving.

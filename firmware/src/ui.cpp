@@ -1192,19 +1192,20 @@ constexpr int NAV_TEXT_X = 72;
 constexpr int NAV_BOTTOM_Y = 262;
 constexpr int NAV_BOTTOM_MAX_W = 212;
 
-// A stroked polyline with round caps and joins (a filled circle at every vertex).
-void navStroke(LovyanGFX *g, const NavPoint *p, size_t n, int w, uint16_t col) {
+// A stroked polyline with round caps and joins (a filled circle at every vertex),
+// moved by (ox, oy): the dragged map's shift.
+void navStroke(LovyanGFX *g, const NavPoint *p, size_t n, int w, uint16_t col, int ox = 0, int oy = 0) {
   const float r = w * 0.5f;
-  for (size_t i = 0; i + 1 < n; i++) g->drawWideLine(p[i].x, p[i].y, p[i + 1].x, p[i + 1].y, r, col);
+  for (size_t i = 0; i + 1 < n; i++) g->drawWideLine(p[i].x + ox, p[i].y + oy, p[i + 1].x + ox, p[i + 1].y + oy, r, col);
   if (w <= 2) return;  // a 2 px line has no joint worth rounding
-  for (size_t i = 0; i < n; i++) g->fillSmoothCircle(p[i].x, p[i].y, (int)(r + 0.5f), col);
+  for (size_t i = 0; i < n; i++) g->fillSmoothCircle(p[i].x + ox, p[i].y + oy, (int)(r + 0.5f), col);
 }
 
-void navPolyline(LovyanGFX *g, const NavPoint *p, size_t n, int w, uint16_t col) {
+void navPolyline(LovyanGFX *g, const NavPoint *p, size_t n, int w, uint16_t col, int ox, int oy) {
   if (w <= 2) {
-    for (size_t i = 0; i + 1 < n; i++) g->drawWideLine(p[i].x, p[i].y, p[i + 1].x, p[i + 1].y, 1.0f, col);
+    for (size_t i = 0; i + 1 < n; i++) g->drawWideLine(p[i].x + ox, p[i].y + oy, p[i + 1].x + ox, p[i + 1].y + oy, 1.0f, col);
   } else {
-    navStroke(g, p, n, w, col);
+    navStroke(g, p, n, w, col, ox, oy);
   }
 }
 
@@ -1365,7 +1366,7 @@ void drawNavArrived(LovyanGFX *g, const NavScene &s) {
 
 }  // namespace
 
-void uiNav(Display &lcd, const NavScene &s, bool phoneLost, const BatteryView &bat) {
+void uiNav(Display &lcd, const NavScene &s, bool phoneLost, const BatteryView &bat, int16_t panX, int16_t panY) {
   g_animating = false;
   LovyanGFX *g = target(lcd);
   g->fillScreen(BG);
@@ -1375,19 +1376,26 @@ void uiNav(Display &lcd, const NavScene &s, bool phoneLost, const BatteryView &b
   if (s.state == NavState::Arrived) {
     drawNavArrived(g, s);
   } else {
+    // The frame was built around the pan the phone last heard of: what the
+    // finger has moved since is drawn as a shift (nav_pan.h).
+    const int ox = panX - s.panX, oy = panY - s.panY;
     // Streets, widest last so junctions of big roads stay clean.
     for (int cls = 3; cls >= 0; cls--) {
       const uint16_t col = to565(NAV_STREET_RGB[cls]);
       for (uint8_t i = 0; i < s.nStreets; i++) {
-        if (s.streetCls[i] == cls) navPolyline(g, &s.streetPts[s.streetStart[i]], s.streetLen[i], NAV_STREET_W[cls], col);
+        if (s.streetCls[i] == cls)
+          navPolyline(g, &s.streetPts[s.streetStart[i]], s.streetLen[i], NAV_STREET_W[cls], col, ox, oy);
       }
     }
     const bool lost = s.state != NavState::Navigating;
-    if (s.nRoute >= 2) navStroke(g, s.route, s.nRoute, 12, lost ? DIM : to565(0x4DA3FF));
+    if (s.nRoute >= 2) navStroke(g, s.route, s.nRoute, 12, lost ? DIM : to565(0x4DA3FF), ox, oy);
 
-    // The rider: a chevron with a black outline, grey when the GPS is weak.
+    // The rider: a chevron with a black outline, grey when the GPS is weak. It
+    // moves with the dragged map (off screen when dragged far enough).
     const uint16_t arrow = (s.flags & 1) ? DIM : INK;
-    const int tip[2] = {120, 180}, bl[2] = {104, 220}, nt[2] = {120, 210}, br[2] = {136, 220};
+    const int rx = panX, ry = panY;
+    const int tip[2] = {120 + rx, 180 + ry}, bl[2] = {104 + rx, 220 + ry}, nt[2] = {120 + rx, 210 + ry},
+              br[2] = {136 + rx, 220 + ry};
     g->fillTriangle(tip[0], tip[1], bl[0], bl[1], nt[0], nt[1], BG);
     g->fillTriangle(tip[0], tip[1], nt[0], nt[1], br[0], br[1], BG);
     g->drawWideLine(tip[0], tip[1], bl[0], bl[1], 3.0f, BG);

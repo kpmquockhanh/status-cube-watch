@@ -426,6 +426,7 @@ bool bleTakeVolume(MacVolume &out) {
 
 void bleSendMedia(MediaKey) {}
 void bleSendUnlock() {}
+void bleSendNavPan(int16_t, int16_t) {}
 
 void bleSendVolume(uint8_t level, bool muted) {
   g_volRequests++;

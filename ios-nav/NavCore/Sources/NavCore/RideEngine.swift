@@ -23,6 +23,9 @@ import Foundation
     public private(set) var state: NavState = .ended
     /// Largest frame the link can deliver; the BLE layer sets `chunkCapacity(maxWrite:)`.
     public var frameBudget: Int = NavLimits.maxFrameBytes
+    /// Where the rider dragged the map on the cube (Control `08`); every scene is built around it.
+    /// A new ride starts centred.
+    public var pan: ScreenPoint = .zero
 
     private(set) var route: Route?
     /// The style the rider picked; every reroute asks for it again (Calm by the clock at that moment).
@@ -112,6 +115,7 @@ import Foundation
         missingTiles = []; lastTileAttempt = nil
         lastFix = nil; lastFixAt = nil; lastProgress = nil; lastTracked = nil
         fuser = HeadingFuser()
+        pan = .zero
     }
 
     private func begin(route r: Route, tiles t: [TileID: [StreetLine]], destination dest: Coord, style s: RouteStyle) {
@@ -155,7 +159,7 @@ import Foundation
         }
         fetchMissingTilesIfDue(at: t)
         return buildScene(progress: p, route: route, streets: streets, state: state,
-                          speed: fix.speed, maxBytes: frameBudget)
+                          speed: fix.speed, maxBytes: frameBudget, pan: pan)
     }
 
     /// Time passing without a new fix: ends the arrival hold, retries a reroute every 15 s and
@@ -174,7 +178,7 @@ import Foundation
         fetchMissingTilesIfDue(at: t)
         if let at = lastFixAt, t.timeIntervalSince(at) > Self.fixStale { p.gpsWeak = true }
         return buildScene(progress: p, route: route, streets: streets, state: state,
-                          speed: lastFix?.speed ?? 0, maxBytes: frameBudget)
+                          speed: lastFix?.speed ?? 0, maxBytes: frameBudget, pan: pan)
     }
 
     /// A new compass reading, degrees from north. While the rider is slow the map turns with it

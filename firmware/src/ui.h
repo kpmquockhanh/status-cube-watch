@@ -60,7 +60,9 @@ void uiUnlock(Display &lcd, bool waiting);
 // The navigation map: streets, route and rider arrow under a turn banner, the
 // street and ETA at the bottom; `phoneLost` shows NO PHONE. Arrived is a full
 // screen of its own. Battery under 15% shows as red text, not the top bar.
-void uiNav(Display &lcd, const NavScene &s, bool phoneLost, const BatteryView &bat);
+// `panX`/`panY`: where the rider has dragged the map (nav_pan.h); the frame is
+// shifted by that minus the pan it was built around.
+void uiNav(Display &lcd, const NavScene &s, bool phoneLost, const BatteryView &bat, int16_t panX = 0, int16_t panY = 0);
 
 // Progress screen while an OTA image is arriving.
 void uiOta(Display &lcd, uint8_t percent);

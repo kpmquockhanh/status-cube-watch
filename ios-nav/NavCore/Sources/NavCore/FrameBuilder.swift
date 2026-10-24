@@ -67,8 +67,8 @@ private func douglasPeucker(_ pts: [P], epsilon: Double) -> [P] {
     return zip(pts, keep).filter { $0.1 }.map { $0.0 }
 }
 
-private func runDist(_ run: [P]) -> Double {
-    run.reduce(Double.infinity) { min($0, hypot($1.x - riderX, $1.y - riderY)) }
+private func runDist(_ run: [P], to ref: P) -> Double {
+    run.reduce(Double.infinity) { min($0, hypot($1.x - ref.x, $1.y - ref.y)) }
 }
 
 private func round16(_ pts: [P]) -> [ScreenPoint] {
@@ -89,9 +89,11 @@ private func frameBytes(dist: String, street: String, eta: String, route: Int, s
 /// Builds the heading-up frame around the snapped position. `maxBytes` is the largest
 /// frame the link can deliver (see `chunkCapacity`): whole streets are dropped, lowest
 /// priority first (class, then nearness to the rider), until it fits; the route's points
-/// are never dropped, only simplified harder if the route alone is too big.
+/// are never dropped, only simplified harder if the route alone is too big. `pan` moves the
+/// whole map by that many screen pixels (the rider dragged it on the cube); the frame carries it.
 public func buildScene(progress: Progress, route: Route, streets: [StreetLine], state: NavState,
-                       speed: Double = 0, maxBytes: Int = NavLimits.maxFrameBytes) -> NavScene {
+                       speed: Double = 0, maxBytes: Int = NavLimits.maxFrameBytes,
+                       pan: ScreenPoint = .zero) -> NavScene {
     let next = route.instructions.indices.contains(progress.nextInstruction) ? route.instructions[progress.nextInstruction] : nil
     let rejoin = progress.offRoute || state == .offRouteNoSignal
     let ended = state == .arrived || state == .ended
@@ -107,6 +109,7 @@ public func buildScene(progress: Progress, route: Route, streets: [StreetLine], 
     var scene = NavScene(state: state, turn: turn, exit: rejoin ? 0 : (next?.exit ?? 0), dir: dir,
                          gpsWeak: progress.gpsWeak || progress.headingGuess, dist: dist, street: streetName, eta: eta, route: [], streets: [])
     if ended { return scene }
+    scene.pan = pan
 
     let mpp = rejoin ? min(3.0, max(1.5, progress.distanceToRoute / 100))
                      : metersPerPixel(distanceToTurn: progress.distanceToTurn, speed: speed)
@@ -114,25 +117,32 @@ public func buildScene(progress: Progress, route: Route, streets: [StreetLine], 
     let sinH = sin(h), cosH = cos(h)
     let center = progress.fix
     let kx = metersPerDegree * cos(center.lat * .pi / 180)
+    let px = Double(pan.x), py = Double(pan.y)
     func project(_ c: Coord) -> P {
         let e = (c.lon - center.lon) * kx, n = (c.lat - center.lat) * metersPerDegree
         let fwd = e * sinH + n * cosH, right = e * cosH - n * sinH
-        return P(x: riderX + right / mpp, y: riderY - fwd / mpp)
+        return P(x: riderX + px + right / mpp, y: riderY + py - fwd / mpp)
     }
+    let rider = P(x: riderX + px, y: riderY + py)
+    // What is at the screen's anchor (where the rider is when the map is not dragged).
+    let fwd0 = py * mpp, right0 = -px * mpp
+    let view = Coord(lat: center.lat + (fwd0 * cosH - right0 * sinH) / metersPerDegree,
+                     lon: center.lon + (fwd0 * sinH + right0 * cosH) / max(1, kx))
 
     // Route: from the snapped position forward, culled to what can reach the box. Of the
     // visible runs, the one nearest the rider (the first on route, where it starts at the rider).
     let radius = 550 * mpp   // about the clip box's diagonal in meters
+    let reach = radius * 1.5 + hypot(px, py) * mpp   // from the rider, past the far side of the dragged box
     var path = [project(progress.snapped)]
     var along = 0.0
     for i in route.points.indices {
         if i > 0 { along += distanceMeters(route.points[i - 1], route.points[i]) }
         if along > progress.distanceAlong + 0.01 {
             path.append(project(route.points[i]))
-            if hypot(path[path.count - 1].x - riderX, path[path.count - 1].y - riderY) * mpp > radius * 1.5 { break }
+            if hypot(path[path.count - 1].x - rider.x, path[path.count - 1].y - rider.y) * mpp > reach { break }
         }
     }
-    let routeRun = clip(path).min { runDist($0) < runDist($1) } ?? []
+    let routeRun = clip(path).min { runDist($0, to: rider) < runDist($1, to: rider) } ?? []
     let fixed = frameBytes(dist: dist, street: streetName, eta: eta, route: 0, streets: [])
     var eps = 1.5
     var routePts = round16(douglasPeucker(routeRun, epsilon: eps))
@@ -148,8 +158,8 @@ public func buildScene(progress: Progress, route: Route, streets: [StreetLine], 
     let dLat = radius / metersPerDegree, dLon = radius / max(1, kx)
     for (idx, s) in streets.enumerated() where s.points.count >= 2 && s.cls <= 3 {
         let b = s.bounds
-        if b.maxLat < center.lat - dLat || b.minLat > center.lat + dLat
-            || b.maxLon < center.lon - dLon || b.minLon > center.lon + dLon { continue }
+        if b.maxLat < view.lat - dLat || b.minLat > view.lat + dLat
+            || b.maxLon < view.lon - dLon || b.minLon > view.lon + dLon { continue }
         for run in clip(s.points.map(project)) {
             let pts = round16(douglasPeucker(run, epsilon: 1.5))
             guard pts.count >= 2 else { continue }
