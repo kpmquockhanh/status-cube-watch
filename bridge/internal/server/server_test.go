@@ -11,6 +11,7 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"strconv"
+	"strings"
 	"sync"
 	"sync/atomic"
 	"testing"
@@ -346,5 +347,64 @@ func TestNoOverlap(t *testing.T) {
 	}
 	if m := maxInside.Load(); m != 1 {
 		t.Fatalf("max concurrent refreshes = %d", m)
+	}
+}
+
+type panicLimits struct{ n atomic.Int32 }
+
+func (p *panicLimits) Get(context.Context) limits.Limits {
+	if p.n.Add(1) == 1 {
+		panic("limits exploded")
+	}
+	return goodLimits()
+}
+
+type panicMail struct{ n atomic.Int32 }
+
+func (p *panicMail) Get(context.Context, string, string) *mail.Mail {
+	if p.n.Add(1) == 1 {
+		panic("mail exploded")
+	}
+	return nil
+}
+
+// A panic in the limits or mail reader runs on its own goroutine; it must
+// reach the refresh loop's recover instead of killing the process.
+func TestReaderPanicIsLogged(t *testing.T) {
+	for _, tc := range []struct {
+		name string
+		lim  interface {
+			Get(context.Context) limits.Limits
+		}
+		mail interface {
+			Get(context.Context, string, string) *mail.Mail
+		}
+		want string
+	}{
+		{"limits", &panicLimits{}, stubMail{}, "refresh failed: limits exploded"},
+		{"mail", &stubLimits{l: goodLimits()}, &panicMail{}, "refresh failed: mail exploded"},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			var buf bytes.Buffer
+			s := New(config.Config{RefreshMs: 5000}, Deps{
+				Limits: tc.lim, Mail: tc.mail, Source: &stubSource{},
+				Now: func() time.Time { return fixedNow },
+				Log: quiet, ErrLog: log.New(&buf, "", 0),
+			})
+			s.safeRefresh(context.Background())
+			if !strings.Contains(buf.String(), tc.want) {
+				t.Fatalf("log = %q, want %q", buf.String(), tc.want)
+			}
+			if h := healthOf(t, s.Handler()); h.Error == nil || *h.Error != "starting up" {
+				t.Fatalf("after panic: %+v", h)
+			}
+			s.safeRefresh(context.Background())
+			if h := healthOf(t, s.Handler()); !h.Ok {
+				t.Fatalf("next refresh: %+v", h)
+			}
+			if c := payloadOf(t, get(t, s.Handler(), "/api/status")).Cards[0]; *c.G != 42 {
+				t.Fatalf("card after recovery = %+v", c)
+			}
+		})
 	}
 }

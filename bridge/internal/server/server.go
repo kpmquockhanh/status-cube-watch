@@ -96,18 +96,35 @@ func defaultPreview() []byte {
 	return bridge.PreviewHTML
 }
 
-// RefreshOnce runs one refresh. Limits and mail never fail (they report their
-// own error), so neither can take the other or the source down.
+// RefreshOnce runs one refresh. Limits and mail report their own error, so
+// neither can take the other or the source down. A panic in either is
+// re-raised here, on the caller's goroutine, like a rejected Promise.all in
+// Node: the refresh loop logs it and the state is left as it was.
+//
+// It must not be called concurrently with itself or with Run: the Source is
+// not goroutine-safe.
 func (s *Server) RefreshOnce(ctx context.Context) {
 	var (
-		lim limits.Limits
-		m   *mail.Mail
-		wg  sync.WaitGroup
+		lim     limits.Limits
+		m       *mail.Mail
+		wg      sync.WaitGroup
+		panics  [2]any
+		capture = func(i int) {
+			if v := recover(); v != nil {
+				panics[i] = v
+			}
+			wg.Done()
+		}
 	)
 	wg.Add(2)
-	go func() { defer wg.Done(); lim = s.d.Limits.Get(ctx) }()
-	go func() { defer wg.Done(); m = s.d.Mail.Get(ctx, s.cfg.GmailUser, s.cfg.GmailPassword) }()
+	go func() { defer capture(0); lim = s.d.Limits.Get(ctx) }()
+	go func() { defer capture(1); m = s.d.Mail.Get(ctx, s.cfg.GmailUser, s.cfg.GmailPassword) }()
 	wg.Wait()
+	for _, v := range panics {
+		if v != nil {
+			panic(v)
+		}
+	}
 
 	// Built after Source.Refresh: the admin source sets Billed there.
 	common := func() cards.Opts {
