@@ -448,6 +448,18 @@ expect_manifold "plate"   plate  --max 40.9 62.4 3.0
 expect_manifold "gasket"  gasket --max 38.5 60.0 1.3
 expect_step "plate clear of the board"            at_plate  "--min-gap 0.2"
 expect_step "squeezed gasket clear of the board"  at_gasket ""
+
+# tethered TPU Type-C plug: the body seals the opening by interference, the flange lands on the side face,
+# and opened it hangs below the opening, clear of a plugged-in cable
+expect_empty "plug body fits the opening (0.05 clearance)"  check_plug_seal -D plug_int=-0.05
+expect_solid "plug body seals the opening (interference)"   check_plug_seal
+expect_empty "plug flange lands on the side face"            check_plug_seat
+expect_solid "control: plug_flange=6 overhangs"              check_plug_seat -D plug_flange=6
+expect_empty "plug clear of the board"                       check_plug_board
+expect_empty "open plug clear of a plugged-in cable"         check_open_plug_cable
+expect_solid "control: the closed plug is where the cable goes" check_open_plug_cable -D plug_open=false
+expect_manifold "plug" plug --max 18.7 9.6 3.9
+expect_step "plug clear of the board" at_plug "--min-gap 0.2"
 fi
 
 exit $fail

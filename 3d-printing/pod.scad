@@ -52,6 +52,15 @@ pod_win_cham = 1.0;         // the window widens by this at the face
 screw_d = 2.4;  gk_hole_d = 2.0;   // clearance in the plate; the gasket grips the M2 shank
 cs_d = 4.0;                 // countersink at the face: 90 deg, for a 3.8 M2 countersunk head
 screw_l = 8;
+// Type-C plug (TPU): a body that fills the plug relief with plug_int interference per side, a flange on the
+// side face, and a strap down to a pin pressed into the anchor hole.
+plug_int = 0.15;            // VERIFY on the first print: per side, into the relief
+plug_flange = 1.0;          // flange past the relief, per side
+plug_lip = 1.0;             // flange thickness
+plug_gap = 0.2;             // body tip to the relief floor
+strap_w = 2.0;  strap_t = 0.8;
+pin_d = 1.9;                // into the Ø1.6 anchor hole
+plug_open = true;           // check_open_plug_cable: the plug hanging open (false = closed, the control)
 ledge = 0;                  // check_ledges: 0 = bottom ledge, 1 = top ledge
 carrier_clr = 0.2;          // carrier outline inside the cavity, per side
 post_d = 3;  preload = 0.2; // posts press this far into the PCB rear
@@ -215,6 +224,38 @@ module screws() for (p = screw_pts) {
   translate([p[0], face_y, p[1]]) rotate([-90, 0, 0]) cylinder(d1 = 3.8, d2 = 2, h = 0.9);
 }
 
+// ---- Type-C plug ------------------------------------------------------------------------
+// Plug-local frame (print orientation): x = board z, y = board y, z = into the wall from the flange's outer
+// face; origin on the relief centre. plug_place() maps it onto the tub's right side.
+plug_depth = out_x1 - (pcb_b0 + pcb_b + usb_plug_x0) - plug_gap;
+plug_root = -(usb_plug_w/2 + plug_flange);    // flange lower edge, where the strap starts and the plug hinges
+pin_x = anchor_pt[1] - usb_a;
+module plug_place() translate([out_x1 + plug_lip, usb_y, usb_a]) rotate([0, -90, 0]) children();
+module plug_flange2d() square([usb_plug_w + 2*plug_flange, usb_plug_h + 2*plug_flange], center = true);
+module plug_body() hull() {   // 0.3 lead-in at the tip
+  translate([0, 0, plug_lip - 0.01]) linear_extrude(plug_depth - 0.3 + 0.01) square([usb_plug_w + 2*plug_int, usb_plug_h + 2*plug_int], center = true);
+  translate([0, 0, plug_lip]) linear_extrude(plug_depth) square([usb_plug_w + 2*plug_int - 0.6, usb_plug_h + 2*plug_int - 0.6], center = true);
+}
+module plug_cap() { linear_extrude(plug_lip) plug_flange2d(); plug_body(); }
+module plug_strap() {
+  translate([pin_x - pin_d/2 - 0.6, -strap_w/2, plug_lip - strap_t]) cube([plug_root + 0.5 - (pin_x - pin_d/2 - 0.6), strap_w, strap_t]);
+  translate([pin_x, 0, plug_lip - strap_t]) cylinder(d = pin_d, h = strap_t + anchor_l - 0.2);
+}
+module tplug() { plug_cap(); plug_strap(); }
+// open: the cap turned 180 deg about the flange's lower outer edge, hanging below the opening
+module plug_cap_open() translate([plug_root, 0, 0]) rotate([0, 180, 0]) translate([-plug_root, 0, 0]) plug_cap();
+module plug_print() tplug();
+// a Type-C overmold straight out from the relief floor, and the cable on from it
+module cable_ghost() {
+  translate([pcb_b0 + pcb_b + usb_plug_x0 + 0.2, usb_y - 3.25, usb_a - 6.25]) cube([25, 6.5, 12.5]);
+  translate([pcb_b0 + pcb_b + usb_plug_x0 + 25, usb_y, usb_a]) rotate([0, 90, 0]) cylinder(d = 4, h = 60);
+}
+// the strip of side face the flange must land on (the relief opening is the plug minus plug_int)
+module plug_seat() plug_place() translate([0, 0, plug_lip + nudge]) linear_extrude(0.2) difference() {
+  plug_flange2d();
+  square([usb_plug_w + 2*nudge, usb_plug_h + 2*nudge], center = true);
+}
+
 // ---- reference values ------------------------------------------------------------
 module meta() echo(str("POD{\"w\":", out_x1 - out_x0, ",\"l\":", out_z1 - out_z0, ",\"d\":", back_y, "}"));
 
@@ -256,5 +297,12 @@ else if (part == "check_seal_land") linear_extrude(1) intersection() {
     for (p = screw_pts) translate(p) circle(d = gk_hole_d + 2*seal_land); cav2d(); }
 else if (part == "check_gasket_band") linear_extrude(1) difference() { offset(r = seal_land) cav2d(); gasket2d(); }
 else if (part == "check_glass_land") linear_extrude(1) difference() { offset(r = seal_land) pod_win_rect(); rrect(0, 0, glass_b, glass_a, glass_r); }
+else if (part == "at_plug") plug_place() tplug();
+else if (part == "plug") plug_print();
+// the body alone: the flange touches the side face by design, the pin bites the anchor hole by design
+else if (part == "check_plug_seal") intersection() { plug_place() plug_body(); tub(); }
+else if (part == "check_plug_seat") difference() { plug_seat(); tub(); }
+else if (part == "check_plug_board") intersection() { plug_place() tplug(); board_at(); }
+else if (part == "check_open_plug_cable") intersection() { plug_place() if (plug_open) plug_cap_open(); else plug_cap(); cable_ghost(); }
 else if (part == "check_antenna_metal") intersection() { metal(); antenna_zone(metal_keep); }
 else assert(false, str("unknown part: ", part));
