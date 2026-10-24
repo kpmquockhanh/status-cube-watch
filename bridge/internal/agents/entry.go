@@ -24,6 +24,11 @@ type entry struct {
 	CompactManual bool
 	HookSeen      bool
 	EndedAt       time.Time
+
+	// Tracker bookkeeping (bridge only).
+	LastHook time.Time // when the last hook arrived
+	Missed   int       // successful discoveries in a row without this session
+	Live     *Live     // the session as discovery last saw it (nil: never)
 }
 
 // NextPromptID returns a fresh id for a new blocking prompt.
