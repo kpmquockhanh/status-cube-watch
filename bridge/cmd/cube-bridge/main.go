@@ -39,11 +39,49 @@ func parseArgs(args []string, stderr io.Writer) (path string, code int) {
 	return *p, -1
 }
 
+// command is what the command line asks for: kind "serve" (config is set) or "hook" (port is set).
+type command struct {
+	kind   string
+	config string
+	port   int
+}
+
+// parseCommand dispatches on the first word; anything that is not a known
+// subcommand goes to parseArgs (serve), which rejects stray words.
+func parseCommand(args []string, stderr io.Writer) (command, int) {
+	if len(args) > 0 && args[0] == "hook" {
+		fs := flag.NewFlagSet("cube-bridge hook", flag.ContinueOnError)
+		fs.SetOutput(stderr)
+		port := fs.Int("port", 8787, "port of the running bridge")
+		if err := fs.Parse(args[1:]); err != nil {
+			if errors.Is(err, flag.ErrHelp) {
+				return command{}, 0
+			}
+			return command{}, 2
+		}
+		if fs.NArg() > 0 || *port < 1 || *port > 65535 {
+			fmt.Fprintln(stderr, "usage: cube-bridge hook [--port N]")
+			return command{}, 2
+		}
+		return command{kind: "hook", port: *port}, -1
+	}
+	path, code := parseArgs(args, stderr)
+	if code >= 0 {
+		return command{}, code
+	}
+	return command{kind: "serve", config: path}, -1
+}
+
 func main() {
-	path, code := parseArgs(os.Args[1:], os.Stderr)
+	cmd, code := parseCommand(os.Args[1:], os.Stderr)
 	if code >= 0 {
 		os.Exit(code)
 	}
+	if cmd.kind == "hook" {
+		runHook(os.Stdin, cmd.port, hookClient())
+		return
+	}
+	path := cmd.config
 	errLog := log.New(os.Stderr, "", 0)
 	cfg := config.Load(os.LookupEnv, config.ReadFile(path), func(s string) { errLog.Println(s) })
 
