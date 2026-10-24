@@ -408,6 +408,24 @@ expect_manifold "carrier (lead at top)"   carrier --max 34.6 54.9 9.3 -D 'lead_e
 expect_step "carrier: shoulders press the PCB and nothing else" at_carrier "--touch-pcb --min-gap 0.2"
 expect_step "carrier clear of the board"                       at_carrier "--min-gap 0.2" -D preload=-0.05
 expect_step_fail "control: board_t=10.2 hits the 2-pin header" at_carrier "" -D preload=-0.05 -D board_t=10.2
+
+# tub: front cavity for board and carrier, bay for the cell, ledges for the carrier, blind pilots
+expect_empty "board clear of the tub"                  check_board_tub
+expect_empty "board clear of the tub (clr 0.5)"        check_board_tub -D clr=0.5
+expect_empty "carrier clear of the tub"                check_carrier_tub
+expect_solid "carrier rests on the bottom ledge"       check_ledges -D ledge=0
+expect_solid "carrier rests on the top ledge"          check_ledges -D ledge=1
+expect_solid "carrier rests on the top ledge (lead at top)" check_ledges -D ledge=1 -D 'lead_end="top"'
+expect_empty "control: step=0 leaves no top ledge"     check_ledges -D ledge=1 -D step=0
+expect_empty "cell clear of the tub"                   check_cell_tub
+expect_empty "cell clear of the tub (3 mm buffer)"     check_cell_tub -D bat_buf=3
+expect_solid "control: pad_t=-0.6 puts the cell into the back" check_cell_tub -D pad_t=-0.6
+expect_empty "pilots keep a 1.0 wall"                  check_pilot_wall
+expect_solid "control: pilot_in=0.3 breaks into the pocket" check_pilot_wall -D pilot_in=0.3
+expect_manifold "tub"                  tub --max 40.9 62.4 24.3
+expect_manifold "tub (3 mm buffer)"    tub --max 40.9 60.4 24.3 -D bat_buf=3
+expect_step "tub clear of the board"   at_tub "--min-gap 0.2"
+expect_step_fail "control: clr=-0.3 puts the glass into the pocket wall" at_tub "" -D clr=-0.3
 fi
 
 exit $fail

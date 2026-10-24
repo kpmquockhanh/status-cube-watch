@@ -36,6 +36,11 @@ top_wall = 4.2;             // top wall: takes the two top pilots
 back_t = 2.0;               // back wall behind the cell
 step = 1.0;                 // the front cavity runs this far past the bay's top: the carrier's top ledge
 carrier_t = 3.2;            // carrier plate (keeps 1.6 behind the lead groove)
+pilot_d = 1.8;  pilot_in = 1.4;   // M2 self-tapping pilots; pilot wall to the cavity at the bottom corners
+pilot_depth = 8;            // blind, from the rim face
+edge_r = 2;                 // outer vertical edges
+anchor_d = 1.6;  anchor_l = 3;    // blind hole in the right side for the plug's tether pin
+ledge = 0;                  // check_ledges: 0 = bottom ledge, 1 = top ledge
 carrier_clr = 0.2;          // carrier outline inside the cavity, per side
 post_d = 3;  preload = 0.2; // posts press this far into the PCB rear
 peg_d = 1.8;  peg_l = 1.0;  // pegs into the PCB notches; peg_l = 0 turns them off
@@ -69,6 +74,12 @@ out_z0 = -clr - wall;    out_z1 = cav_z1 + top_wall;
 // z range of the pouch and of the buffer block (protection board) inside the bay
 buf_z0 = lead_end == "bottom" ? bay_z0 + bcl : bay_z1 - bcl - bat_buf;
 pouch_z0 = lead_end == "bottom" ? bay_z0 + bcl + bat_buf : bay_z0 + bcl;
+// Screw points (x, z): two on the diagonal out of each lower corner arc of the cavity, two in the top wall.
+pilot_r = glass_r + clr + pilot_in + pilot_d/2;
+screw_pts = [[glass_r - pilot_r/sqrt(2), glass_r - pilot_r/sqrt(2)],
+             [glass_b - glass_r + pilot_r/sqrt(2), glass_r - pilot_r/sqrt(2)],
+             [bay_x0 + 5, cav_z1 + top_wall/2], [bay_x1 - 5, cav_z1 + top_wall/2]];
+anchor_pt = [usb_y, usb_a - usb_plug_w/2 - 3];   // tether anchor on the right side face (board y, z)
 // PCB notches (board-local x, z)
 holes = [for (bx = [hole_ib, pcb_b - hole_ib], az = [hole_ia, pcb_a - hole_ia]) [pcb_b0 + bx, pcb_a0 + az]];
 shoulder_y = pcb_rear - preload;
@@ -128,6 +139,23 @@ module cord_ghost() {
   for (i = [0 : len(cord_pts) - 2]) hull() for (q = [cord_pts[i], cord_pts[i + 1]]) translate(q) sphere(d = cord_d, $fn = 16);
 }
 
+// ---- tub --------------------------------------------------------------------------------
+// Prints in any orientation (MJF). Rim face at y = 0, flush with the glass front; the gasket and the plate
+// close it. Holds the board in the front cavity, the carrier on its two ledges and the cell in the bay.
+module tub_body() xz_extrude(back_y) rrect(out_x0, out_z0, out_x1 - out_x0, out_z1 - out_z0, edge_r);
+module pilots(d = pilot_d, y1 = pilot_depth) for (p = screw_pts) ycyl(p, d, -1, y1);
+module anchor_hole() translate([out_x1 + 0.01, anchor_pt[0], anchor_pt[1]]) rotate([0, -90, 0]) cylinder(d = anchor_d, h = anchor_l + 0.01);
+module tub() difference() {
+  tub_body();
+  translate([0, -1, 0]) xz_extrude(bay_y0 + 1) cav2d();
+  translate([bay_x0, bay_y0 - 0.01, bay_z0]) cube([bay_w, bay_t + 0.01, bay_l]);
+  usb_slot(20);
+  usb_plug_relief(20);
+  pilots();
+  anchor_hole();
+}
+module tub_print() translate([0, 0, back_y]) rotate([-90, 0, 0]) tub();
+
 // ---- reference values ------------------------------------------------------------
 module meta() echo(str("POD{\"w\":", out_x1 - out_x0, ",\"l\":", out_z1 - out_z0, ",\"d\":", back_y, "}"));
 
@@ -144,5 +172,16 @@ else if (part == "check_shoulders") intersection() { posts(); board_at(); }
 else if (part == "check_pegs") intersection() { pegs(); board_at(); }
 else if (part == "check_cell_carrier") intersection() { cell_ghost(); carrier(); }
 else if (part == "check_cord") intersection() { cord_ghost(); union() { carrier(); board_at(); rear_parts(); } }
+else if (part == "at_tub") tub();
+else if (part == "tub") tub_print();
+else if (part == "check_board_tub") intersection() { board_at(); tub(); }
+else if (part == "check_carrier_tub") intersection() { translate([0, -nudge, 0]) carrier(); tub(); }
+// the carrier pushed 0.1 back meets the tub only on its ledges: below the bay, and past its top
+else if (part == "check_ledges") intersection() {
+    translate([0, 0.1, 0]) carrier(); tub();
+    translate([-50, -50, ledge == 0 ? -50 : bay_z1]) cube([100, 100, ledge == 0 ? 50 + bay_z0 : 50]); }
+else if (part == "check_cell_tub") intersection() { cell_ghost(); tub(); }
+// a 1.0 wall round each pilot: the pilot grown by 1.0 (and 1.0 past its floor) must stay inside the tub
+else if (part == "check_pilot_wall") difference() { pilots(pilot_d + 2, pilot_depth + 1); tub(); pilots(pilot_d + 2*nudge, pilot_depth + nudge); translate([-50, -50, -50]) cube([100, 50, 200]); }
 else if (part == "check_antenna_metal") intersection() { metal(); antenna_zone(metal_keep); }
 else assert(false, str("unknown part: ", part));
