@@ -426,6 +426,28 @@ expect_manifold "tub"                  tub --max 40.9 62.4 24.3
 expect_manifold "tub (3 mm buffer)"    tub --max 40.9 60.4 24.3 -D bat_buf=3
 expect_step "tub clear of the board"   at_tub "--min-gap 0.2"
 expect_step_fail "control: clr=-0.3 puts the glass into the pocket wall" at_tub "" -D clr=-0.3
+
+# front plate and the one gasket: it seals the glass border and the rim; every water path to the cavity
+# crosses at least seal_land of squeezed gasket
+expect_empty "active area is clear of plate and gasket"   check_window
+expect_solid "control: win_margin=-2 covers the active area" check_window -D win_margin=-2
+expect_solid "gasket is squeezed on the glass"            check_gasket_glass
+expect_solid "gasket is squeezed on the glass (board 0.2 back)" check_gasket_glass -D glass_dy=0.2
+expect_empty "control: gk_sq=0 leaves the glass unsqueezed" check_gasket_glass -D gk_sq=0
+expect_solid "gasket is squeezed on the rim"              check_gasket_rim
+expect_empty "plate lands on the rim, clear of the tub"   check_plate_tub
+expect_empty "board 0.2 forward still clears the plate"   check_plate_tub -D glass_dy=-0.2
+expect_empty "seal_land from every screw to the cavity"   check_seal_land
+expect_solid "control: pilot_in=0.5 leaves no land"       check_seal_land -D pilot_in=0.5
+expect_empty "seal_land from the seam to the cavity"      check_gasket_band
+expect_solid "control: wall=2 leaves no land"             check_gasket_band -D wall=2
+expect_empty "seal_land on the glass round the window"    check_glass_land
+expect_solid "control: win_margin=2 leaves no land"       check_glass_land -D win_margin=2
+expect_empty "screws clear of the antenna"                check_antenna_metal
+expect_manifold "plate"   plate  --max 40.9 62.4 3.0
+expect_manifold "gasket"  gasket --max 38.5 60.0 1.3
+expect_step "plate clear of the board"            at_plate  "--min-gap 0.2"
+expect_step "squeezed gasket clear of the board"  at_gasket ""
 fi
 
 exit $fail

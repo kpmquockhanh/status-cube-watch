@@ -40,6 +40,18 @@ pilot_d = 1.8;  pilot_in = 1.4;   // M2 self-tapping pilots; pilot wall to the c
 pilot_depth = 8;            // blind, from the rim face
 edge_r = 2;                 // outer vertical edges
 anchor_d = 1.6;  anchor_l = 3;    // blind hole in the right side for the plug's tether pin
+// Gasket and front plate: one flat TPU gasket over the glass border and the rim (flush at y = 0), squeezed
+// from gk_t to gk_c by the plate, whose outer skirt lands on the rim and sets the squeeze.
+gk_t = 1.2;  gk_sq = 0.3;   // free thickness, squeeze
+face_t = 2.0;               // front plate
+face_cham = 0.6;            // 45 deg break on the face's outer edge
+skirt_w = 1.0;              // skirt round the plate's rear, inside the outline
+gk_gap = 0.2;               // gasket edge inside the skirt
+seal_land = 1.0;            // least squeezed gasket on any water path into the cavity
+pod_win_cham = 1.0;         // the window widens by this at the face
+screw_d = 2.4;  gk_hole_d = 2.0;   // clearance in the plate; the gasket grips the M2 shank
+cs_d = 4.0;                 // countersink at the face: 90 deg, for a 3.8 M2 countersunk head
+screw_l = 8;
 ledge = 0;                  // check_ledges: 0 = bottom ledge, 1 = top ledge
 carrier_clr = 0.2;          // carrier outline inside the cavity, per side
 post_d = 3;  preload = 0.2; // posts press this far into the PCB rear
@@ -99,7 +111,7 @@ module cell_ghost() translate([bay_x0 + bcl, bay_y0 + bcl, 0]) {
 }
 // the antenna footprint grown by g in x and z, through every depth
 module antenna_zone(g) translate([ant_b0 - g, -50, ant_a0 - g]) cube([ant_b1 - ant_b0 + 2*g, 100, ant_a1 - ant_a0 + 2*g]);
-module metal() { cell_ghost(); cord_ghost(); }
+module metal() { cell_ghost(); cord_ghost(); screws(); }
 
 // ---- carrier --------------------------------------------------------------------------
 // Prints rear face down. Sits in the front cavity on two ledges of the tub (below the bay and past its top),
@@ -156,6 +168,53 @@ module tub() difference() {
 }
 module tub_print() translate([0, 0, back_y]) rotate([-90, 0, 0]) tub();
 
+// ---- front plate and gasket -------------------------------------------------------------
+gk_c = gk_t - gk_sq;                           // squeezed thickness
+face_y = -gk_c - face_t;                       // front face
+module outline2d() rrect(out_x0, out_z0, out_x1 - out_x0, out_z1 - out_z0, edge_r);
+module gasket2d() offset(delta = -skirt_w - gk_gap) outline2d();
+// the window outline: board.scad's win_rect with r = 3 corners, which keep seal_land of gasket on the glass
+// inside the glass's r = 6 corners (r = 2 leaves 0.84)
+win_r = 3;
+module pod_win_rect(g = 0) rrect(act_b0 - win_margin - g, act_a0 - win_margin - g,
+                                 act_b + 2*(win_margin + g), act_a + 2*(win_margin + g), win_r + g);
+// through plate and gasket, framing the active area, widening by pod_win_cham at the face
+module pod_window() {
+  translate([0, face_y - 0.5, 0]) xz_extrude(-face_y + 0.6) pod_win_rect();
+  hull() {
+    translate([0, face_y - 0.5, 0]) xz_extrude(0.01) pod_win_rect(pod_win_cham + 0.5);
+    translate([0, face_y + pod_win_cham, 0]) xz_extrude(0.01) pod_win_rect();
+  }
+}
+module countersinks() for (p = screw_pts) {
+  ycyl(p, screw_d, face_y - 0.1, 0.1);
+  translate([p[0], face_y - 0.01, p[1]]) rotate([-90, 0, 0]) cylinder(d1 = cs_d + 0.02, d2 = screw_d, h = (cs_d - screw_d)/2 + 0.01);
+}
+module plate() difference() {
+  union() {
+    hull() {
+      translate([0, face_y, 0]) xz_extrude(0.01) offset(delta = -face_cham) outline2d();
+      translate([0, face_y + face_cham, 0]) xz_extrude(face_t - face_cham) outline2d();
+    }
+    translate([0, -gk_c - 0.01, 0]) xz_extrude(gk_c + 0.01) difference() { outline2d(); offset(delta = -skirt_w) outline2d(); }
+  }
+  pod_window();
+  countersinks();
+}
+module plate_print() translate([0, 0, -face_y]) rotate([90, 0, 0]) plate();
+// the gasket t thick, its front face on the plate: t = gk_c squeezed in place, t = gk_t as if the plate were not there
+module gasket(t = gk_c) difference() {
+  translate([0, -gk_c, 0]) xz_extrude(t) gasket2d();
+  pod_window();
+  for (p = screw_pts) ycyl(p, gk_hole_d, -gk_c - 1, t + 1);
+}
+module gasket_print() translate([0, 0, gk_t - gk_c]) rotate([90, 0, 0]) gasket(gk_t);
+// countersunk M2 x screw_l, head flush with the face
+module screws() for (p = screw_pts) {
+  ycyl(p, 2, face_y, face_y + screw_l);
+  translate([p[0], face_y, p[1]]) rotate([-90, 0, 0]) cylinder(d1 = 3.8, d2 = 2, h = 0.9);
+}
+
 // ---- reference values ------------------------------------------------------------
 module meta() echo(str("POD{\"w\":", out_x1 - out_x0, ",\"l\":", out_z1 - out_z0, ",\"d\":", back_y, "}"));
 
@@ -183,5 +242,19 @@ else if (part == "check_ledges") intersection() {
 else if (part == "check_cell_tub") intersection() { cell_ghost(); tub(); }
 // a 1.0 wall round each pilot: the pilot grown by 1.0 (and 1.0 past its floor) must stay inside the tub
 else if (part == "check_pilot_wall") difference() { pilots(pilot_d + 2, pilot_depth + 1); tub(); pilots(pilot_d + 2*nudge, pilot_depth + nudge); translate([-50, -50, -50]) cube([100, 50, 200]); }
+else if (part == "at_plate") plate();
+else if (part == "at_gasket") gasket();
+else if (part == "plate") plate_print();
+else if (part == "gasket") gasket_print();
+else if (part == "check_window") intersection() { union() { plate(); gasket(); } translate([act_b0, -4, act_a0]) cube([act_b, 4 - nudge, act_a]); }
+else if (part == "check_gasket_glass") intersection() { translate([0, -nudge, 0]) gasket(gk_t); board_at(); }
+else if (part == "check_gasket_rim") intersection() { translate([0, -nudge, 0]) gasket(gk_t); tub(); }
+else if (part == "check_plate_tub") intersection() { translate([0, -nudge, 0]) plate(); union() { tub(); board_at(); } }
+// the water paths into the cavity: screw hole -> under the gasket -> cavity, seam -> gasket edge -> cavity,
+// window -> under the gasket on the glass -> glass edge; each must cross seal_land of gasket
+else if (part == "check_seal_land") linear_extrude(1) intersection() {
+    for (p = screw_pts) translate(p) circle(d = gk_hole_d + 2*seal_land); cav2d(); }
+else if (part == "check_gasket_band") linear_extrude(1) difference() { offset(r = seal_land) cav2d(); gasket2d(); }
+else if (part == "check_glass_land") linear_extrude(1) difference() { offset(r = seal_land) pod_win_rect(); rrect(0, 0, glass_b, glass_a, glass_r); }
 else if (part == "check_antenna_metal") intersection() { metal(); antenna_zone(metal_keep); }
 else assert(false, str("unknown part: ", part));
