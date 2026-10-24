@@ -10,9 +10,11 @@ import (
 	"log"
 	"os"
 	"os/signal"
+	"path/filepath"
 	"syscall"
 
 	"claude-status-cube/bridge/internal/config"
+	"claude-status-cube/bridge/internal/hooksettings"
 	"claude-status-cube/bridge/internal/limits"
 	"claude-status-cube/bridge/internal/mail"
 	"claude-status-cube/bridge/internal/server"
@@ -39,16 +41,82 @@ func parseArgs(args []string, stderr io.Writer) (path string, code int) {
 	return *p, -1
 }
 
-// command is what the command line asks for: kind "serve" (config is set) or "hook" (port is set).
+// command is what the command line asks for: kind "serve" (config is set),
+// "hook" (port is set) or "hooks" (action, settings and port are set).
 type command struct {
-	kind   string
-	config string
-	port   int
+	kind     string
+	config   string
+	port     int
+	action   string // hooks: install | uninstall
+	settings string // hooks: path of Claude Code's settings.json
+}
+
+const hooksUsage = "usage: cube-bridge hooks install|uninstall [--port N] [--settings PATH]"
+
+func parseHooks(args []string, stderr io.Writer) (command, int) {
+	if len(args) == 0 || (args[0] != "install" && args[0] != "uninstall") {
+		fmt.Fprintln(stderr, hooksUsage)
+		return command{}, 2
+	}
+	defSettings := "~/.claude/settings.json"
+	home, homeErr := os.UserHomeDir()
+	if homeErr == nil {
+		defSettings = filepath.Join(home, ".claude", "settings.json")
+	}
+	fs := flag.NewFlagSet("cube-bridge hooks "+args[0], flag.ContinueOnError)
+	fs.SetOutput(stderr)
+	port := fs.Int("port", 8787, "port of the running bridge")
+	settings := fs.String("settings", defSettings, "Claude Code settings file")
+	if err := fs.Parse(args[1:]); err != nil {
+		if errors.Is(err, flag.ErrHelp) {
+			return command{}, 0
+		}
+		return command{}, 2
+	}
+	if fs.NArg() > 0 || *port < 1 || *port > 65535 || *settings == "" {
+		fmt.Fprintln(stderr, hooksUsage)
+		return command{}, 2
+	}
+	if homeErr != nil && *settings == defSettings {
+		fmt.Fprintf(stderr, "cube-bridge: no home directory (%v); pass --settings\n%s\n", homeErr, hooksUsage)
+		return command{}, 2
+	}
+	return command{kind: "hooks", action: args[0], port: *port, settings: *settings}, -1
+}
+
+// runHooks installs or removes the bridge's hooks in c.settings, pointing them
+// at this binary (symlinks resolved). It returns the exit code.
+func runHooks(c command, stdout, stderr io.Writer) int {
+	var err error
+	if c.action == "install" {
+		var exe string
+		if exe, err = os.Executable(); err == nil {
+			exe, err = filepath.EvalSymlinks(exe)
+		}
+		if err == nil {
+			err = hooksettings.Install(c.settings, hooksettings.Command(exe, c.port))
+		}
+	} else {
+		err = hooksettings.Uninstall(c.settings)
+	}
+	if err != nil {
+		fmt.Fprintf(stderr, "cube-bridge: hooks %s: %v\n", c.action, err)
+		return 1
+	}
+	if c.action == "install" {
+		fmt.Fprintf(stdout, "installed the bridge's hooks in %s (port %d)\n", c.settings, c.port)
+	} else {
+		fmt.Fprintf(stdout, "removed the bridge's hooks from %s\n", c.settings)
+	}
+	return 0
 }
 
 // parseCommand dispatches on the first word; anything that is not a known
 // subcommand goes to parseArgs (serve), which rejects stray words.
 func parseCommand(args []string, stderr io.Writer) (command, int) {
+	if len(args) > 0 && args[0] == "hooks" {
+		return parseHooks(args[1:], stderr)
+	}
 	if len(args) > 0 && args[0] == "hook" {
 		fs := flag.NewFlagSet("cube-bridge hook", flag.ContinueOnError)
 		fs.SetOutput(stderr)
@@ -80,6 +148,9 @@ func main() {
 	if cmd.kind == "hook" {
 		runHook(os.Stdin, cmd.port, hookClient())
 		return
+	}
+	if cmd.kind == "hooks" {
+		os.Exit(runHooks(cmd, os.Stdout, os.Stderr))
 	}
 	path := cmd.config
 	errLog := log.New(os.Stderr, "", 0)
