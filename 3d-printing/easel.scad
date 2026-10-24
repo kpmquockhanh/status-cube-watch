@@ -353,6 +353,9 @@ else if (part == "at_cell") cell_ghost();
 else if (part == "at_board") board_at();
 else if (part == "at_tray") tray();
 else if (part == "at_frame") frame();
+else if (part == "board_frame") echo_board_frame(sag);
+else if (part == "at_swung") swung(swing) bezel();
+else if (part == "at_cap") ecap_place() ecap();
 else if (part == "check_cell_tray") intersection() { translate([0, 0, nudge]) cell_ghost(); tray(); }
 else if (part == "check_cell_frame") intersection() { cell_ghost(); frame(); }
 else if (part == "check_lead_path") intersection() { lead_path(); union() { tray(); frame(); carrier(); bezel(); } }

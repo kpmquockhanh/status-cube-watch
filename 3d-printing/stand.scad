@@ -233,6 +233,8 @@ module section_view() difference() {
 // ---- parts (rendered by test.sh) ----------------------------------------------
 if (part == "none") {}
 else if (part == "front_shell") front_shell();
+else if (part == "board_frame") echo_board_frame();
+else if (part == "at_cap") cap_place() cap();
 else if (part == "check_window") intersection() { front_shell(); bf() active_prism(); }
 else if (part == "check_pocket_inside") difference() { bf() pocket(); outer_solid(); }
 else if (part == "check_skin") difference() { bf() pocket(); outer_inset(0.8); }

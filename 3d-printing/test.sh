@@ -61,6 +61,46 @@ expect_fail() {  # label cmd...   passes when the command exits non-zero (positi
 }
 run() { [ -z "$only" ] || [ "$only" = "$1" ]; }
 
+# The printed parts in place against Waveshare's STEP model of the board (tools/stepcheck.py), not the box
+# ghost. Skipped, with a note, without the STEP file or the Python packages.
+STEP=ESP32-S3-Touch-LCD-1_69.stp
+STEP_PY="${STEP_PY:-$PWD/build/stepvenv/bin/python}"
+step_state=""
+step_ok() {  # meshes the STEP into build/board-step.npz when it is older than the STEP; false = skip
+  if [ -n "$step_state" ]; then [ "$step_state" = ok ]; return; fi
+  step_state=skip
+  if [ ! -f "$STEP" ]; then echo "SKIP STEP checks: no $STEP"; return 1; fi
+  if ! "$STEP_PY" -c "import OCP, manifold3d, trimesh, scipy" >/dev/null 2>&1; then
+    echo "SKIP STEP checks: python3 -m venv build/stepvenv && build/stepvenv/bin/pip install cadquery-ocp manifold3d trimesh scipy numpy"
+    return 1
+  fi
+  if [ ! build/board-step.npz -nt "$STEP" ] &&
+     ! "$STEP_PY" tools/stepcheck.py mesh "$STEP" build/board-step.npz >build/board-step.log 2>&1; then
+    echo "FAIL STEP mesh"; tail -n 4 build/board-step.log; fail=1; return 1
+  fi
+  step_state=ok
+}
+step() {  # part "stepcheck flags" [-D ...]   renders the part and the board frame, then checks them
+  local part="$1" flags="$2"; shift 2
+  render "$part" "$@"
+  if has_error "$part"; then sed -n 1,4p "$(out "$part").log"; return 2; fi
+  "$OPENSCAD" -D 'part="board_frame"' $VARIANT "$@" -o "$(out board_frame).echo" "$SCAD" >"$(out board_frame).log" 2>&1
+  "$STEP_PY" tools/stepcheck.py check build/board-step.npz "$(out "$part").stl" "$(out board_frame).echo" $flags
+}
+expect_step() {  # label part "flags" [-D ...]   passes when the part clears the STEP board (or, --touch-pcb, presses only the PCB)
+  local label="$1" o rc; shift
+  step_ok || return 0
+  o="$(step "$@")"; rc=$?
+  if [ $rc -eq 0 ]; then echo "PASS STEP $label"; else echo "FAIL STEP $label"; fail=1; fi
+  [ -n "$o" ] && echo "$o"
+}
+expect_step_fail() {  # label part "flags" [-D ...]   positive control: the check must find a collision
+  local label="$1" o rc; shift
+  step_ok || return 0
+  o="$(step "$@")"; rc=$?
+  if [ $rc -eq 1 ]; then echo "PASS STEP $label"; else echo "FAIL STEP $label: expected a collision"; echo "$o"; fail=1; fi
+}
+
 # ==== wedge: stand.scad =========================================================================
 if run stand; then
 SCAD=stand.scad
@@ -179,6 +219,16 @@ expect_manifold "fit-check coupon"      fit   --max 48 60 70
 expect_solid    "assembly renders"      assembly
 expect_solid    "section renders"       section
 expect_solid    "cap fitted renders"    cap_fitted
+
+# the real board: Waveshare's STEP model in the pocket (front shell, base plate, cap in place)
+expect_step "front shell clear of the board"            front_shell "--min-gap 0.2"
+expect_step "front shell clear of the board (tilt 55)"  front_shell "--min-gap 0.2" -D tilt=55
+expect_step "front shell clear of the board (tilt 75)"  front_shell "--min-gap 0.2" -D tilt=75
+expect_step "pushers press the PCB and nothing else"    base_plate  "--touch-pcb --min-gap 0.2"
+expect_step "base plate clear of the board (no preload)" base_plate "--min-gap 0.2" -D preload=-0.05
+expect_step "Type-C cap clear of the board"             at_cap      "--min-gap 0.2"
+expect_step_fail "control: clr=-0.3 puts the glass into the pocket wall"         front_shell "" -D clr=-0.3
+expect_step_fail "control: unflipped, a pusher passes 0.15 from a side switch" base_plate "--touch-pcb --min-gap 0.2" -D board_flip=false
 
 fi
 
@@ -299,6 +349,21 @@ expect_empty "cap ribs stay off the carrier"         check_cap_rib_carrier
 expect_empty "cap clears the board"                  check_cap_board
 expect_empty "cap clears the board (flip)"           check_cap_board -D board_flip=true
 expect_manifold "cap"                   cap --max 17.7 10 3.1
+
+# the real board: Waveshare's STEP model on the carrier's pegs, every part in place
+expect_step "tray clear of the board"                    at_tray    "--min-gap 0.2"
+expect_step "frame clear of the board"                   at_frame   "--min-gap 0.2"
+expect_step "shoulders press the PCB and nothing else"   at_carrier "--touch-pcb --min-gap 0.2"
+expect_step "carrier clear of the board (pegs in the notches)" at_carrier "--min-gap 0.2" -D preload=-0.05
+expect_step "flip: carrier clear of the board"           at_carrier "--min-gap 0.2" -D preload=-0.05 -D board_flip=true
+expect_step "bezel clear of the board"                   at_swung   "--min-gap 0.2"
+expect_step "flip: bezel clear of the board"             at_swung   "--min-gap 0.2" -D board_flip=true
+for a in 5 10 20 30; do
+  expect_step "bezel swings clear of the board (${a} deg, sag 0.2)" at_swung "--min-gap 0.2" -D swing=$a -D sag=0.2
+done
+expect_step "Type-C cap clear of the board"              at_cap     "--min-gap 0.2"
+expect_step_fail "control: 2.6 mm pegs miss the notches"          at_carrier "" -D preload=-0.05 -D peg_d=2.6
+expect_step_fail "control: board_t=10.2 hits the 2-pin header"    at_carrier "" -D preload=-0.05 -D board_t=10.2
 
 # Stability: mass and tip force from the parts in place (estimates; see tools/stability.py)
 for p in at_tray at_frame at_carrier at_bezel at_cell at_board; do expect_solid "$p renders" $p; done

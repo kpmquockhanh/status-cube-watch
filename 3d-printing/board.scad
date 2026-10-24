@@ -36,6 +36,8 @@ function b2g(p) = [O[0] + p[0],
                    O[1] + p[1]*cos(lean) + p[2]*sin(lean),
                    O[2] - p[1]*sin(lean) + p[2]*cos(lean)];
 function flipp(p) = board_flip ? [glass_b - p[0], p[1], glass_a - p[2]] : p;
+// Where the board sits, for tools/stepcheck.py: O, lean, flip, glass size, and `sag` along portrait z.
+module echo_board_frame(sag = 0) echo(str("BOARDFRAME", [O[0], O[1], O[2], lean, board_flip ? 1 : 0, glass_b, glass_a, sag]));
 
 // ---- helpers ----------------------------------------------------------------
 // 2D shape given in (x, z) extruded along +y.

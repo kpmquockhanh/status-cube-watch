@@ -9,7 +9,7 @@ The board facts come from Waveshare's STEP model of the board (`ESP32-S3-Touch-L
 
 The wedge is a two-part printed desk stand for the Waveshare ESP32-S3-Touch-LCD-1.69 and a 12 x 40 x 65 mm LiPo. The board sits in a glass pocket in the sloped front face (65 deg screen angle by default), the cell lies flat in a bay behind and below it, and a base plate with two pusher posts closes the bottom and presses the board into the pocket. Everything is parametric in `stand.scad`; `test.sh` checks the geometry with boolean-intersection tests.
 
-> **Biggest unverified risk: board retention.** The board has only two lower rear contacts (the two pusher posts on the base plate); nothing supports the upper board from behind, and the pusher/retention mechanism is NOT in `fit-check.stl`, so the fit-check cannot validate retention. Touch-time rattle or flex can only be judged on the full print. Fallbacks if it rattles: foam on the pusher tips (then set `preload = -0.8`), or add a rear pad at the roof. The posts press on the PCB around the edge notches. Against the STEP model's parts they clear everything only with `board_flip = true`, the wedge's default; unflipped, they hit the RST switch and the BAT header.
+> **Biggest unverified risk: board retention.** The board has only two lower rear contacts (the two pusher posts on the base plate); nothing supports the upper board from behind, and the pusher/retention mechanism is NOT in `fit-check.stl`, so the fit-check cannot validate retention. Touch-time rattle or flex can only be judged on the full print. Fallbacks if it rattles: foam on the pusher tips (then set `preload = -0.8`), or add a rear pad at the roof. The posts press on the PCB around the edge notches. Against the STEP model (`test.sh`'s STEP checks) they press only the PCB and keep 0.6 mm from every part with `board_flip = true`, the wedge's default; unflipped, one passes 0.15 mm from the RST switch.
 
 ![front](preview-front.png)
 ![back](preview-back.png)
@@ -102,7 +102,7 @@ In the unflipped board frame (the STEP model, turned 180 deg in-plane so its but
 
 Each stand sets `board_flip` itself, because the right choice differs:
 
-- **Wedge** (`stand.scad`): `true`, so the Type-C and the battery connector are on the **left** wall and the buttons on the right. Unflipped, the pusher posts land on the RST switch and the BAT header. Flipped, the posts sit further back, so the front end zone grows to keep them at least 1 mm (`push_gap`) in front of the battery bay: 88.44 mm deep at tilt 65 (88.37 unflipped, 89.1 at tilt 55).
+- **Wedge** (`stand.scad`): `true`, so the Type-C and the battery connector are on the **left** wall and the buttons on the right. Unflipped, a pusher post passes 0.15 mm from the RST switch. Flipped, the posts sit further back, so the front end zone grows to keep them at least 1 mm (`push_gap`) in front of the battery bay: 88.44 mm deep at tilt 65 (88.37 unflipped, 89.1 at tilt 55).
 - **Easel** (`easel.scad`): `false`, so the Type-C is on the right. Flipped, the active area sits 2.55 mm higher in the bezel and the centre-press tip force drops to 2.76 N, under the 3.0 N the tests require.
 
 Re-export the STLs after changing either.
@@ -123,6 +123,14 @@ The battery and its metal pouch must not sit over the board's chip antenna. The 
 tools/openscad --backend=manifold -D 'part="front"' -o stand-front.stl stand.scad   # also part="base", part="fit", part="cap"
 python3 tools/stlcheck.py stand-front.stl
 ```
+
+The STEP checks (`STEP` in the output) also run every printed part, in place, against Waveshare's STEP model of the board instead of the box ghost: no overlap with any of its 291 solids, at least 0.2 mm from every rear part, and the pushers / shoulders overlap the PCB (the preload) and nothing else. `tools/stepcheck.py` meshes the STEP once into `build/board-step.npz` and needs Python packages the rest does not; without them, or without `ESP32-S3-Touch-LCD-1_69.stp`, `test.sh` prints `SKIP STEP checks` and goes on. Set them up once:
+
+```sh
+python3 -m venv build/stepvenv && build/stepvenv/bin/pip install cadquery-ocp manifold3d trimesh scipy numpy   # or STEP_PY=<python with them>
+```
+
+The tightest fits against the STEP model: the easel carrier 0.29 mm from the 2-pin header (the tallest rear part, 10.7 mm), the easel bezel 0.63 mm from the Type-C shell, the wedge pushers 0.6 mm from a side switch.
 
 Previews were rendered headless with `--render` and `xvfb-run` (installed with apt inside the Docker image; not scripted here), using `part="assembly"` / `part="section"` / `part="cap_fitted"` with a section camera rotated 270 deg about z. They are illustrative and not reproducible from this repo alone.
 
