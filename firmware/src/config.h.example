@@ -5,7 +5,7 @@
 #define WIFI_SSID      "your-network"
 #define WIFI_PASSWORD  "your-password"
 
-// The machine running bridge/server.mjs. Its LAN address is printed when the
+// The machine running bridge/cube-bridge. Its LAN address is printed when the
 // bridge starts. Plain HTTP on the local network -- no credentials cross it.
 #define BRIDGE_URL     "http://192.168.1.50:8787/api/status"
 

@@ -24,7 +24,7 @@ const (
 
 var statusRe = regexp.MustCompile(`(?i)^\* STATUS .*\(UNSEEN (\d+)\)`)
 
-// Reader reads the inbox's unseen count over IMAP, like gmail.mjs: one
+// Reader reads the inbox's unseen count over IMAP, like the Node bridge did: one
 // connection per fetch, a 60 s cache that also backs off after a failure, and
 // the last good count kept (stale) when a fetch fails.
 type Reader struct {
@@ -183,7 +183,7 @@ func isTimeout(err error) bool {
 	return errors.As(err, &ne) && ne.Timeout() || errors.Is(err, context.DeadlineExceeded)
 }
 
-// mapErr turns transport errors into the messages gmail.mjs reports.
+// mapErr turns transport errors into the messages the Node bridge reported.
 func mapErr(err error) error {
 	if err == nil {
 		return nil

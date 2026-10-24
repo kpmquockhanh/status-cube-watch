@@ -1,5 +1,5 @@
 // Package cards turns usage data into the card deck the cube renders: a port
-// of cards.mjs, golden-tested against it (testdata/gen.mjs).
+// of the Node card builder, golden-tested against it (testdata/gen.mjs).
 //
 // All formatting happens here, on the host: the firmware just draws whatever
 // strings it is handed. The usage card (both rate-limit windows as two rings,

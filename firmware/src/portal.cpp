@@ -58,7 +58,7 @@ std::string formPage(const Settings &cur, const std::string &error) {
        "<label>Bridge URL</label><input name=bridge maxlength=127 required value=\"" +
        portalHtmlEscape(cur.bridge) +
        "\">"
-       "<div class=hint>The machine running bridge/server.mjs, e.g. "
+       "<div class=hint>The machine running bridge/cube-bridge, e.g. "
        "http://192.168.1.50:8787/api/status</div>"
        "<label>OTA password (optional)</label><input name=otapass type=password maxlength=63 "
        "placeholder=\"leave blank to keep\">";

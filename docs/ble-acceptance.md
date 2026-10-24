@@ -27,7 +27,7 @@ Tick an item only when you observed it. Logs: `./install.sh logs` (Mac, from `ma
 
 ## Bridge
 
-- [ ] Bridge down (`pkill -f server.mjs` while the app supervises it): the app restarts it. With the bridge held down the cube goes stale and falls back.
+- [ ] Bridge down (`pkill -f cube-bridge` while the app supervises it): the app restarts it. With the bridge held down the cube goes stale and falls back.
 - [ ] External bridge: start `bridge/agent.sh install` first, then the app; the log says it adopted that bridge.
 
 ## Bond management

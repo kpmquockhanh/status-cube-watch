@@ -1,4 +1,4 @@
-// Package pricing ports bridge/pricing.mjs: USD per million tokens, from
+// Package pricing is the port of the Node pricing table: USD per million tokens, from
 // platform.claude.com/docs/en/about-claude/pricing.
 //
 // Cache pricing is a multiplier on the input rate: 5-minute write 1.25x,

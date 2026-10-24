@@ -4,7 +4,7 @@
 
 // The bridge sends fully formatted strings, so the firmware never does any
 // number formatting or unit conversion -- redesigning the dashboard means
-// editing bridge/cards.mjs and reloading, not reflashing the board.
+// editing bridge/internal/cards and rebuilding the bridge, not reflashing the board.
 
 constexpr uint8_t MAX_CARDS = 8;
 

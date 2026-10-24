@@ -40,7 +40,7 @@ import Testing
 @Test func theAdminSourceNeedsACredential() {
     var s = BridgeSettings()
     s.source = .admin
-    #expect(s.problem(secrets: BridgeSecrets()) != nil)  // server.mjs would exit at startup
+    #expect(s.problem(secrets: BridgeSecrets()) != nil)  // cube-bridge would exit at startup
     #expect(s.problem(secrets: BridgeSecrets(adminKey: "k")) == nil)
     #expect(s.problem(secrets: BridgeSecrets(oauthToken: "t")) == nil)
     s.refreshSec = 0
@@ -68,7 +68,7 @@ import Testing
     let (s, secrets) = try #require(BridgeSettings.imported(configJSON: Data(json.utf8)))
     #expect(s.source == .admin)
     #expect(s.extraCards)
-    #expect(s.refreshSec == nil)  // server.mjs falls back to its default too
+    #expect(s.refreshSec == nil)  // cube-bridge falls back to its default too
     #expect(!s.lan)
     #expect(secrets == BridgeSecrets(adminKey: "k", oauthToken: "t"))
     // A host pinned to a LAN address still serves the LAN.

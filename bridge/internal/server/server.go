@@ -1,4 +1,4 @@
-// Package server is the bridge's HTTP side and refresh loop (server.mjs).
+// Package server is the bridge's HTTP side and refresh loop.
 //
 //	GET /api/status  -> the payload the firmware consumes
 //	GET /            -> a browser mock of the device, for developing the UI

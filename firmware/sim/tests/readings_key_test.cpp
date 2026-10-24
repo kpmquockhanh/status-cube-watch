@@ -3,7 +3,7 @@
 
 namespace {
 
-// The dual-ring usage card cards.mjs sends by default, plus a text card.
+// The dual-ring usage card internal/cards sends by default, plus a text card.
 Payload deck() {
   Payload p{};
   p.valid = true;

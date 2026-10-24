@@ -34,7 +34,7 @@ colours anywhere on screen.
 
 ```
 Claude Code login (OAuth)   ─┐                       ┌─HTTP (WiFi)──────────────→┐
-~/.claude/projects/*.jsonl  ─┼─→  bridge (Node)  ────┤                           ├─→ ESP32-S3
+~/.claude/projects/*.jsonl  ─┼─→  bridge (Go)    ────┤                           ├─→ ESP32-S3
 Anthropic Usage & Cost API  ─┤     aggregates,       └─→ ClaudeCubeLink.app ─BLE─→┘   draws cards
 Gmail (IMAP, optional)      ─┘     formats strings       (Mac menu bar)
 ```
@@ -45,7 +45,7 @@ WiFi at all). The device never talks to Anthropic. A host-side bridge does the a
 and serves one small, pre-formatted JSON document over the LAN. That keeps
 credentials off the microcontroller, keeps TLS and pagination off the
 microcontroller, and — most usefully — means **you redesign the dashboard by
-editing `bridge/cards.mjs` and reloading, with no reflash.**
+editing `bridge/internal/cards` and rebuilding the bridge, with no reflash.**
 
 ## The gauges
 
@@ -63,7 +63,7 @@ error bar. Green under 60%, amber to 85%, red above.
 Authentication reuses the Claude Code login already on this machine -- the
 macOS Keychain item `Claude Code-credentials`, falling back to
 `~/.claude/.credentials.json` elsewhere. The token never leaves the host; the
-device only ever receives the rendered percentage. `bridge/limits.mjs` caches
+device only ever receives the rendered percentage. `bridge/internal/limits` caches
 the response for 60s and fails soft: a failed read keeps the last good one for
 up to 10 minutes, and after that (or with no login, no network, or an endpoint
 that has moved) the ring keeps its empty track and a short reason (`no login`,
@@ -72,7 +72,7 @@ reset time has passed shows the empty track too, until the next read. An
 unfilled ring reads as a legible nothing; a missing ring reads as a bug.
 
 The spend and token breakdowns (`TODAY`, `THIS MONTH`, `TOKENS TODAY`,
-`TOP MODEL`, `TOP PROJECT`) are still built in `bridge/cards.mjs` and are one
+`TOP MODEL`, `TOP PROJECT`) are still built in `bridge/internal/cards` and are one
 flag away -- set `"extraCards": true` in `bridge/config.json`, or run with
 `CUBE_EXTRA_CARDS=1` (with the Mac helper: **Bridge settings…**), to swipe through them as well. They are off by default,
 and they have no percentage of anything to fill a ring with, so they keep the
@@ -115,11 +115,12 @@ mode the cost report supplies real billed dollars and the `~` disappears.
 
 ```bash
 cd bridge
-node server.mjs
+go build -o cube-bridge ./cmd/cube-bridge && ./cube-bridge
 ```
 
-No dependencies to install — it's plain Node ≥20 with zero packages. It prints
-the URL to put in the firmware config:
+Install Go 1.24 or newer first (`brew install go`); there is nothing else to
+install, since the one module dependency (`golang.org/x/text`) is fetched by the
+build. The result is a single binary. It prints the URL to put in the firmware config:
 
 ```
 claude-status-cube bridge  source=local  refresh=5000ms
@@ -144,10 +145,10 @@ the file both ways (`CUBE_EXTRA_CARDS=0` turns off `"extraCards": true`).
 To keep it running without a terminal open, install it as a LaunchAgent:
 
 ```bash
-./agent.sh install      # starts now, and at every login
+./agent.sh install      # builds the binary; starts now, and at every login
 ./agent.sh status       # loaded? answering? what's on the cards?
 ./agent.sh logs         # tail ~/Library/Logs/claude-status-cube/bridge.log
-./agent.sh restart      # after editing cards.mjs
+./agent.sh restart      # rebuild and reload, after editing the Go code
 ./agent.sh uninstall
 ```
 
@@ -158,10 +159,9 @@ authenticate. launchd restarts it if it crashes but leaves it alone if you stop
 it deliberately (`SuccessfulExit=false`), and backs off 10s between respawns so
 a bad config cannot spin the CPU.
 
-The interpreter is pinned to an absolute path — launchd does not read your
-shell profile — and the script prefers `/opt/homebrew/bin/node` over an nvm
-build, whose path disappears when you clean up a Node version. Override with
-`CUBE_NODE=/path/to/node ./agent.sh install`.
+The LaunchAgent runs the compiled `bridge/cube-bridge` by absolute path, so there is no
+interpreter to find and launchd's missing shell profile does not matter. `./agent.sh restart`
+rebuilds the binary first, and also switches an install left over from the Node bridge to it.
 
 This keeps the cube alive as long as the Mac is awake. It still goes dark when
 the Mac sleeps; for a display that is genuinely independent, run the bridge on
@@ -171,7 +171,7 @@ For Admin API mode:
 
 ```bash
 export ANTHROPIC_ADMIN_KEY=sk-ant-admin01-...
-CUBE_SOURCE=admin node server.mjs
+CUBE_SOURCE=admin ./cube-bridge
 ```
 
 (or copy `config.example.json` to `config.json` and set it there).
@@ -204,10 +204,11 @@ cd mac-helper
 2. `./install.sh install`, click **Allow** on the macOS Bluetooth prompt. The script pauses
    (`read`) until you press Enter, so run it from a terminal, not a script without stdin.
 3. The cube shows a 6-digit code; macOS asks for it. Type it. That is the whole pairing.
-4. From then on it reconnects by itself. The app also runs the Node bridge for you
-   (`node server.mjs` from a copy of `bridge/` inside the app, restarted if it dies); if something
+4. From then on it reconnects by itself. The app also runs the bridge for you
+   (the compiled `cube-bridge` from a copy of `bridge/` inside the app, restarted if it dies); if something
    already serves the port, such as a running `bridge/agent.sh` job, the app adopts that bridge
-   instead of starting its own. Node itself is not bundled: it needs Node 20+ installed.
+   instead of starting its own. `build-app.sh` builds the binary into the app, so Go 1.24+ is needed
+   to install, and nothing but the app to run.
 
 **`install.sh` replaces `bridge/agent.sh`.** BLE users run `mac-helper/install.sh` instead of
 `bridge/agent.sh install`. If the `agent.sh` job is already installed, run
@@ -228,14 +229,14 @@ bridge settings"); the rest is in the app's defaults (`bridgeSettings`). On its 
 yet. Each reinstall re-signs the app, so macOS asks once to let the new build read that Keychain
 item: choose **Always Allow**. A bridge the app adopted (say, a running `agent.sh` job) keeps its own
 config; the window says so.
-The app reads `CUBE_PORT` (default 8787), `CUBE_BRIDGE_DIR` and `CUBE_NODE` (path to `node`) from
-the environment, and takes `--port N` on its command line; `install.sh` writes the port and node
+The app reads `CUBE_PORT` (default 8787), `CUBE_BRIDGE_DIR` (a directory holding `cube-bridge`) from
+the environment, and takes `--port N` on its command line; `install.sh` writes the port
 into the LaunchAgent, which restarts the app only after a crash (`KeepAlive` with
-`SuccessfulExit=false`), and records the node path in the app's defaults
-(`defaults read com.claude-cube.link`) for launches without the LaunchAgent. Bridge order:
+`SuccessfulExit=false`). Its other state is in the app's defaults
+(`defaults read com.claude-cube.link`). Bridge order:
 `CUBE_BRIDGE_DIR` (to run the repo's bridge while working on it), a `bridgeDir` default left by an
 older install (`install.sh install` removes it), the bundled copy, then a `bridge/` next to the
-working directory (`swift run`). Node: `CUBE_NODE`, the recorded path, the Homebrew and system paths.
+working directory (`swift run`).
 The app talks to the bridge on `127.0.0.1`; a bridge whose `host` is pinned to a LAN address
 listens on `127.0.0.1` as well, so any `host` works.
 
@@ -360,14 +361,16 @@ The default is `BUZZER_LEVEL` in `config.h`. SOUND took the place of WiFi refres
 
 ```
 bridge/
-  server.mjs          HTTP server + refresh loop
-  cards.mjs           events → the card deck (edit this to redesign)
-  pricing.mjs         per-model rates and cache multipliers
-  limits.mjs          rate-limit windows from the OAuth usage endpoint
-  agent.sh            install/remove the macOS LaunchAgent
-  preview.html        browser mock of the device
-  sources/local.mjs   incremental ~/.claude transcript reader
-  sources/admin.mjs   Usage & Cost Admin API client
+  cmd/cube-bridge/    main: config, wiring, signals
+  internal/server/    HTTP server + refresh loop
+  internal/cards/     events → the card deck (edit this to redesign); golden tests in testdata/
+  internal/pricing/   per-model rates and cache multipliers
+  internal/limits/    rate-limit windows from the OAuth usage endpoint
+  internal/mail/      unread count over IMAP (Gmail)
+  internal/config/    config.json + environment variables
+  internal/sources/   local.go: incremental ~/.claude transcript reader; admin.go: Usage & Cost Admin API client
+  agent.sh            build + install/remove the macOS LaunchAgent
+  preview.html        browser mock of the device (also embedded in the binary, assets.go)
 mac-helper/           Swift app: runs the bridge, pushes /api/status to the cube over BLE
   install.sh          install/remove the LaunchAgent
   build-app.sh        builds ClaudeCubeLink.app with the bridge inside
@@ -400,7 +403,7 @@ Two ways, in increasing fidelity.
 
 **Browser mock.** Start the bridge and open its address. `preview.html` renders
 the same 240×280 layout and polls the same endpoint the device will. Good for
-iterating on `cards.mjs` — edit, reload, see it. It is a JavaScript
+iterating on `internal/cards` — edit, rebuild, reload, see it. It is a JavaScript
 reimplementation of the layout, so it tells you whether the *data* reads well,
 not whether the firmware draws it correctly.
 
@@ -467,27 +470,27 @@ real refresh rate.
 
 ## Adding a card
 
-Push one more object onto the `cards` array in `bridge/cards.mjs`. Without a
-`g`, you get the big-number layout:
+Append one more `Card` to the deck in `bridge/internal/cards/cards.go` (`spendCards`
+shows how). Without a `G`, you get the big-number layout:
 
-```js
-{ t: 'WEB SEARCHES', v: String(dayT.webSearch), s1: 'today', s2: '', c: 'blue' }
+```go
+Card{T: "REQUESTS", V: itoa(dayT.count), S1: "today", S2: "", C: "blue"}
 ```
 
-With a `g` — a whole percentage — you get a ring instead, and the other fields
-change jobs: `g` fills the arc, `v` goes in the middle of it, `s1` captions
-`v`, and `s2` labels the percentage in the gap at the bottom:
+With a `G` — a whole percentage — you get a ring instead, and the other fields
+change jobs: `G` fills the arc, `V` goes in the middle of it, `S1` captions
+`V`, and `S2` labels the percentage in the gap at the bottom:
 
-```js
-{ t: 'CONTEXT', v: '38k', s1: 'tokens left', s2: 'of 200k', c: 'green', g: 81 }
+```go
+Card{T: "CONTEXT", V: "38k", S1: "tokens left", S2: "of 200k", C: "green", G: intp(81)}
 ```
 
-`g: -1` means *no reading* and draws the empty track. The threshold colours
+`G: -1` means *no reading* and draws the empty track. The threshold colours
 are yours to pick through `c`; the notches at 60% and 85% are fixed, so a ring
 whose meaning does not break there wants a different accent than green/amber/
 red so it doesn't imply one.
 
-Reload the page. The firmware sizes the deck from the payload and the page
+Rebuild and restart the bridge, then reload the page. The firmware sizes the deck from the payload and the page
 dots follow — nothing to change on the device. Accent names are `accent`,
 `blue`, `green`, `amber`, `violet`, `red`.
 
@@ -506,7 +509,7 @@ as you swipe. One long value therefore shrinks every ring, which is why
   modified time have not changed is skipped, so a 5-second refresh over a busy
   `~/.claude` stays cheap. Events are de-duplicated on `requestId`, because
   the same request is often written to the log more than once.
-- **Pricing.** `bridge/pricing.mjs` matches model ids on the longest prefix,
+- **Pricing.** `bridge/internal/pricing` matches model ids on the longest prefix,
   prices cache reads and writes per model, and prices fast mode and US-only
   inference (`inference_geo: "us"`, 1.1x) when the usage record says so.
 - **Admin polling.** The Usage & Cost API documents sustained polling at once
@@ -537,7 +540,7 @@ as you swipe. One long value therefore shrinks every ring, which is why
 | Colours inverted | Flip `cfg.invert` in `src/display.h` |
 | `[touch] not responding` | `PIN_I2C_SDA` / `PIN_I2C_SCL` / `PIN_TP_RST` wrong |
 | Top bar shows `OFF` | Bridge not reachable — check it's bound to the LAN address it printed, and that the host firewall allows the port |
-| Costs look too low | An unrecognised model falls back to Sonnet-tier rates; add it to `bridge/pricing.mjs` |
+| Costs look too low | An unrecognised model falls back to Sonnet-tier rates; add it to `bridge/internal/pricing` |
 | Cube never pairs | Check `./install.sh logs`; the app needs the Bluetooth permission (System Settings > Privacy & Security > Bluetooth) |
 | `pio run` stalls at `Downloading 0%` | PlatformIO's CDN, not your network. See below. |
 

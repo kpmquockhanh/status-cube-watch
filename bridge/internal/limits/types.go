@@ -15,7 +15,7 @@ type Window struct {
 
 // UnmarshalJSON is lenient: a utilization that is not a JSON number reads as
 // no reading, and a resets_at that is not a string as unknown, instead of
-// failing the whole document (cards.mjs only checks `typeof utilization`).
+// failing the whole document (the Node card builder only checked `typeof utilization`).
 func (w *Window) UnmarshalJSON(b []byte) error {
 	// Node treats a window that is not an object as no reading; null never
 	// reaches here for a *Window, but a number or string does.

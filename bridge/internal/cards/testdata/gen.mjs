@@ -1,3 +1,7 @@
+// Generated once from the Node bridge at commit 041dc90; the JSON it wrote is now
+// the reference and the Node bridge is gone, so this script no longer runs (it
+// imports the deleted cards.mjs). Kept as a record of how the cases were made.
+//
 // Golden cases for the Go card builder: runs the Node one (cards.mjs) on fixed
 // inputs and prints [{name, now, events, opts, want}] as JSON.
 //

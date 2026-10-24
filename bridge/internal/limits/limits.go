@@ -27,7 +27,7 @@ const (
 	maxBackoff      = 30 * time.Minute
 )
 
-// Reader fetches the usage windows, caching and failing soft like limits.mjs.
+// Reader fetches the usage windows, caching and failing soft, as the Node bridge did.
 type Reader struct {
 	URL    string
 	Client *http.Client
