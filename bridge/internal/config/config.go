@@ -20,6 +20,7 @@ type Config struct {
 	AdminKey      string
 	OAuthToken    string
 	ExtraCards    bool
+	Agents        bool
 	GmailUser     string
 	GmailPassword string
 }
@@ -83,6 +84,7 @@ func Load(lookup func(string) (string, bool), file []byte, warn func(string)) Co
 		AdminKey:      secret("ANTHROPIC_ADMIN_KEY", f["adminKey"]),
 		OAuthToken:    secret("ANTHROPIC_ADMIN_OAUTH_TOKEN", f["oauthToken"]),
 		ExtraCards:    boolean(warn, "extraCards", env("CUBE_EXTRA_CARDS"), f["extraCards"]),
+		Agents:        boolean(warn, "agents", env("CUBE_AGENTS"), f["agents"]),
 		GmailUser:     secret("CUBE_GMAIL_USER", gmail["user"]),
 		GmailPassword: secret("CUBE_GMAIL_PASSWORD", gmail["appPassword"]),
 	}
