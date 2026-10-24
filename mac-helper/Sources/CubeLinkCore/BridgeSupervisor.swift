@@ -2,31 +2,24 @@ import Foundation
 
 public enum SupervisorAction: Equatable {
     case adopt                // something already serves the port: use it, do not spawn
-    case spawn(node: String)
+    case spawn(binary: String)
     case fail(String)
 }
 
-/// Runs `node server.mjs` as a child of the (Bluetooth-permitted) app and keeps
+/// Runs the `cube-bridge` binary as a child of the (Bluetooth-permitted) app and keeps
 /// it alive. If a bridge from agent.sh is already running it is adopted instead.
 public final class BridgeSupervisor {
-    public static func decide(externalBridgeUp: Bool, node: String?) -> SupervisorAction {
+    public static func decide(externalBridgeUp: Bool, binary: String?) -> SupervisorAction {
         if externalBridgeUp { return .adopt }
-        guard let node else { return .fail("node not found: install Node 20+ or set CUBE_NODE to its path") }
-        return .spawn(node: node)
-    }
-
-    /// `recorded` is the path install.sh stored in the app's defaults (`nodePath`), for launches
-    /// that do not carry the LaunchAgent's environment (Finder, `open`) and nvm-style installs.
-    public static func findNode(env: [String: String], recorded: String? = nil, exists: (String) -> Bool) -> String? {
-        if let p = env["CUBE_NODE"], exists(p) { return p }
-        if let p = recorded, exists(p) { return p }
-        for p in ["/opt/homebrew/bin/node", "/usr/local/bin/node", "/usr/bin/node"] where exists(p) { return p }
-        return nil
+        guard let binary else {
+            return .fail("bridge binary not found: rebuild the app with mac-helper/install.sh install, or set CUBE_BRIDGE_DIR (in the repo: go build -o cube-bridge ./cmd/cube-bridge in bridge/)")
+        }
+        return .spawn(binary: binary)
     }
 
     /// The bridge directory: the first of CUBE_BRIDGE_DIR, a recorded `bridgeDir` (older installs), and
     /// a `bridge/` in `searchFrom` (the bundle's Resources, which build-app.sh fills, then the working
-    /// directory and the app bundle) or up to 4 of its parents, that holds server.mjs. Nil when none does.
+    /// directory and the app bundle) or up to 4 of its parents, that holds `cube-bridge`. Nil when none does.
     public static func findBridgeDir(env: [String: String], recorded: String?, searchFrom: [String],
                                      exists: (String) -> Bool) -> String? {
         var candidates = [env["CUBE_BRIDGE_DIR"], recorded].compactMap { $0 }.filter { !$0.isEmpty }
@@ -39,7 +32,7 @@ public final class BridgeSupervisor {
                 dir = up
             }
         }
-        return candidates.first { exists(($0 as NSString).appendingPathComponent("server.mjs")) }
+        return candidates.first { exists(($0 as NSString).appendingPathComponent("cube-bridge")) }
     }
 
     /// A child that stayed up this long counts as healthy, so the next crash restarts quickly again.
@@ -60,7 +53,7 @@ public final class BridgeSupervisor {
     private let bridgeDir: URL
     private let childEnvironment: ([String: String]) -> [String: String]
     private let port: Int
-    private let node: String?
+    private let binary: String?
     private let log: (String) -> Void
     private let client: BridgeClient
     private var process: Process?
@@ -71,13 +64,14 @@ public final class BridgeSupervisor {
 
     /// `client` is shared with the app's own polling; nil makes one for `port`. `childEnvironment` maps
     /// the app's environment to the child's; it runs at every spawn, so a restart picks up new settings.
-    public init(bridgeDir: URL, port: Int, node: String?, client: BridgeClient? = nil,
+    public init(bridgeDir: URL, port: Int, client: BridgeClient? = nil,
                 childEnvironment: @escaping ([String: String]) -> [String: String] = { $0 },
                 log: @escaping (String) -> Void) {
         self.bridgeDir = bridgeDir
         self.childEnvironment = childEnvironment
         self.port = port
-        self.node = node
+        let candidate = bridgeDir.appendingPathComponent("cube-bridge").path
+        self.binary = FileManager.default.isExecutableFile(atPath: candidate) ? candidate : nil
         self.log = log
         self.client = client ?? BridgeClient(port: port)
     }
@@ -116,16 +110,16 @@ public final class BridgeSupervisor {
 
     private func act(externalUp: Bool) {
         guard !stopping else { return }
-        Trace.log("bridge", "health check on :\(port): \(externalUp ? "up" : "down"), node \(node ?? "none"), spawned child: \(process != nil)")
-        let action = Self.decide(externalBridgeUp: externalUp, node: node)
+        Trace.log("bridge", "health check on :\(port): \(externalUp ? "up" : "down"), binary \(binary ?? "none"), spawned child: \(process != nil)")
+        let action = Self.decide(externalBridgeUp: externalUp, binary: binary)
         switch action {
         case .adopt where process != nil:
             return  // our own child answered; exited() takes over if it dies
         case .adopt, .fail:
             if let line = Self.announcement(action, previous: lastAction, port: port) { log(line) }
             recheck(after: 30)  // adopted: if it goes away, take over; failed: try again
-        case .spawn(let node):
-            if process == nil { spawn(node) }
+        case .spawn(let binary):
+            if process == nil { spawn(binary) }
         }
         lastAction = action
     }
@@ -141,15 +135,14 @@ public final class BridgeSupervisor {
         DispatchQueue.main.asyncAfter(deadline: .now() + seconds, execute: item)
     }
 
-    private func spawn(_ node: String) {
+    private func spawn(_ binary: String) {
         let p = Process()
-        p.executableURL = URL(fileURLWithPath: node)
-        p.arguments = ["server.mjs"]
+        p.executableURL = URL(fileURLWithPath: binary)
         p.currentDirectoryURL = bridgeDir
         var env = childEnvironment(ProcessInfo.processInfo.environment)
         env["CUBE_PORT"] = String(port)
         p.environment = env
-        Trace.log("bridge", "spawn \(node) server.mjs cwd \(bridgeDir.path) CUBE_PORT=\(port)")
+        Trace.log("bridge", "spawn \(binary) cwd \(bridgeDir.path) CUBE_PORT=\(port)")
         p.terminationHandler = { [weak self] proc in
             DispatchQueue.main.async { self?.exited(status: proc.terminationStatus) }
         }

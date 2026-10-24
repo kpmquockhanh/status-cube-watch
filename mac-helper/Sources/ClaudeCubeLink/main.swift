@@ -40,8 +40,7 @@ let argv = CommandLine.arguments
 if let i = argv.firstIndex(of: "--port"), i + 1 < argv.count, let p = Int(argv[i + 1]) { port = p }
 
 // After the environment, what install.sh recorded in the app's defaults: a launch from Finder or
-// `open` has no LaunchAgent environment and "/" as its working directory, and nvm's node is not on
-// any fixed path. The bridge normally ships inside the bundle (Contents/Resources/bridge); a bridge/
+// `open` has no LaunchAgent environment and "/" as its working directory. The bridge normally ships inside the bundle (Contents/Resources/bridge); a bridge/
 // near the working directory or the app bundle covers `swift run` in the repo.
 let cwd = FileManager.default.currentDirectoryPath
 let bridgeDir = URL(fileURLWithPath: BridgeSupervisor.findBridgeDir(
@@ -49,15 +48,15 @@ let bridgeDir = URL(fileURLWithPath: BridgeSupervisor.findBridgeDir(
     searchFrom: [Bundle.main.resourcePath ?? "", cwd, Bundle.main.bundlePath],
     exists: { FileManager.default.fileExists(atPath: $0) })
     ?? env["CUBE_BRIDGE_DIR"] ?? cwd + "/bridge")
-let node = BridgeSupervisor.findNode(env: env, recorded: UserDefaults.standard.string(forKey: "nodePath"),
-                                     exists: { FileManager.default.isExecutableFile(atPath: $0) })
+let binaryPath = bridgeDir.appendingPathComponent("cube-bridge").path
+let binaryFound = FileManager.default.isExecutableFile(atPath: binaryPath)
 
 // The bridge's own settings (source, extra cards, mail, LAN): kept in the app, handed to the child as env.
 let bridgeStore = BridgeSettingsStore(log: log)
 bridgeStore.importConfigIfOffered()
 
 let client = BridgeClient(port: port)
-let supervisor = BridgeSupervisor(bridgeDir: bridgeDir, port: port, node: node, client: client,
+let supervisor = BridgeSupervisor(bridgeDir: bridgeDir, port: port, client: client,
                                   childEnvironment: { bridgeStore.settings.environment(inherited: $0, secrets: bridgeStore.secrets) },
                                   log: log)
 let link = CubeLink(log: log)
@@ -231,7 +230,7 @@ supervisor.start()
 let tickTimer = Timer(timeInterval: 5, repeats: true) { _ in tick(force: false) }
 RunLoop.main.add(tickTimer, forMode: .common)
 log("Claude Cube Link started (bridge :\(port), dir \(bridgeDir.path))")
-Trace.log("main", "tracing on; node \(node ?? "not found")")
+Trace.log("main", "tracing on; bridge binary \(binaryFound ? binaryPath : "not found")")
 
 var signalSources: [DispatchSourceSignal] = []
 for sig in [SIGTERM, SIGINT] {

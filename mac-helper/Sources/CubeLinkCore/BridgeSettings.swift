@@ -1,7 +1,7 @@
 import Foundation
 
 /// The bridge's settings as the app keeps them ("Bridge settings…"), in place of bridge/config.json.
-/// They reach the bridge child as the environment variables server.mjs already reads, which win
+/// They reach the bridge child as the environment variables cube-bridge already reads, which win
 /// over any config.json. The secrets are kept apart, in the Keychain (`BridgeSecrets`).
 public struct BridgeSettings: Codable, Equatable {
     public enum Source: String, Codable, CaseIterable { case local, admin }
@@ -59,7 +59,7 @@ public struct BridgeSettings: Codable, Equatable {
         if let r = refreshSec, !Self.refreshRange.contains(r) {
             return "Refresh must be \(Self.refreshRange.lowerBound)–\(Self.refreshRange.upperBound) seconds."
         }
-        // server.mjs builds the admin source at startup and exits without a credential.
+        // cube-bridge builds the admin source at startup and exits without a credential.
         if source == .admin, secrets.adminKey.isEmpty, secrets.oauthToken.isEmpty {
             return "The Admin API source needs an admin key or an OAuth token."
         }
@@ -70,7 +70,7 @@ public struct BridgeSettings: Codable, Equatable {
     }
 
     /// Reads a bridge/config.json (the one-time import install.sh arranges). Unknown and "//" comment
-    /// keys are ignored, as is a value server.mjs would ignore; `port` is the app's own (CUBE_PORT).
+    /// keys are ignored, as is a value cube-bridge would ignore; `port` is the app's own (CUBE_PORT).
     public static func imported(configJSON: Data) -> (BridgeSettings, BridgeSecrets)? {
         guard let o = try? JSONSerialization.jsonObject(with: configJSON) as? [String: Any] else { return nil }
         var s = BridgeSettings()
@@ -93,7 +93,7 @@ public struct BridgeSettings: Codable, Equatable {
         return (s, secrets)
     }
 
-    /// server.mjs's `bool`: JSON true/false, or 1/true/yes/on as text.
+    /// cube-bridge's `bool`: JSON true/false, or 1/true/yes/on as text.
     private static func truthy(_ v: Any) -> Bool {
         if let b = v as? Bool { return b }
         if let n = v as? NSNumber { return n.intValue != 0 }

@@ -1,7 +1,7 @@
 #!/bin/bash
 # Claude Cube Link as a macOS LaunchAgent, like bridge/agent.sh.
 #   ./install.sh install | status | logs | restart | uninstall
-# The app supervises the Node bridge, so this replaces `bridge/agent.sh install`
+# The app supervises the Go bridge, so this replaces `bridge/agent.sh install`
 # for the Bluetooth setup (an already-running bridge is adopted, not duplicated).
 set -euo pipefail
 
@@ -17,8 +17,7 @@ DOMAIN="gui/$(id -u)"
 
 # Writes the LaunchAgent plist to $1 (split out so it can be checked without installing).
 write_plist() {
-  local node_found port
-  node_found="$(command -v node || true)"
+  local port
   port="${CUBE_PORT:-8787}"
   cat > "$1" <<PLIST_EOF
 <?xml version="1.0" encoding="UTF-8"?>
@@ -28,7 +27,6 @@ write_plist() {
   <key>ProgramArguments</key><array><string>$APP_BIN</string></array>
   <key>EnvironmentVariables</key><dict>
     <key>CUBE_PORT</key><string>$port</string>
-    <key>CUBE_NODE</key><string>$node_found</string>
   </dict>
   <key>RunAtLoad</key><true/>
   <!-- Restart on a crash only. The app exits 0 on SIGTERM and when a second
@@ -53,22 +51,15 @@ stop_app() {
   echo "warning: Claude Cube Link is still running; quit it from its menu bar item" >&2
 }
 
-# Records the node path in the app's defaults, for launches without the LaunchAgent's environment
-# (Finder, `open`: no CUBE_* variables), and offers bridge/config.json for import. The bridge is
+# Offers bridge/config.json for import and clears what older installs recorded in the app's defaults. The bridge is
 # inside the app now; a bridgeDir recorded by an older install would point the app back at the repo, so it goes.
 record_paths() {
-  local node_found
-  node_found="$(command -v node || true)"
   defaults delete "$BUNDLE_ID" bridgeDir 2>/dev/null || true
+  defaults delete "$BUNDLE_ID" nodePath 2>/dev/null || true
   # The bridge settings live in the app now (menu: Bridge settings…). On its next launch the app
   # imports this file once, only if it has no bridge settings of its own yet.
   if [ -f "$REPO/bridge/config.json" ]; then
     defaults write "$BUNDLE_ID" importConfig -string "$REPO/bridge/config.json"
-  fi
-  if [ -n "$node_found" ]; then
-    defaults write "$BUNDLE_ID" nodePath -string "$node_found"
-  else
-    defaults delete "$BUNDLE_ID" nodePath 2>/dev/null || true
   fi
 }
 

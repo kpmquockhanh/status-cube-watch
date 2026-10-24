@@ -1,7 +1,7 @@
 #!/bin/bash
 # Builds build/ClaudeCubeLink.app: the SwiftPM executable in a bundle with the
-# Info.plist that carries the Bluetooth usage description and a copy of the Node
-# bridge (Contents/Resources/bridge, run with the system's node), signed.
+# Info.plist that carries the Bluetooth usage description and the Go
+# bridge binary (Contents/Resources/bridge/cube-bridge), signed.
 #
 # Signing: CUBE_SIGN_IDENTITY if set ("-" = ad-hoc), else the first Apple Development or Developer ID
 # Application identity in the keychain, else ad-hoc. A real identity keeps macOS's grants (Bluetooth,
@@ -18,19 +18,18 @@ cp Info.plist "$APP/Contents/Info.plist"
 # Regenerate the icon with: swift icon/make-icon.swift X.iconset && iconutil -c icns X.iconset -o icon/AppIcon.icns
 mkdir -p "$APP/Contents/Resources"
 cp icon/AppIcon.icns "$APP/Contents/Resources/AppIcon.icns"
-# The bridge's code only: config.json (gitignored, holds secrets) stays out of the bundle. The app
-# keeps the bridge settings itself and passes them to the child as environment variables.
-BRIDGE=../bridge
+# The Go bridge binary only: config.json (gitignored, holds secrets) stays out of the bundle, and the
+# preview page is embedded in the binary. The app keeps the bridge settings itself and passes them to
+# the child as environment variables.
+BRIDGE="$PWD/../bridge"
+APP_ABS="$PWD/$APP"
+command -v go >/dev/null 2>&1 || { echo "go not found: install Go 1.24+" >&2; exit 1; }
 mkdir -p "$APP/Contents/Resources/bridge"
-(cd "$BRIDGE" && find . -name '*.mjs' -not -path './node_modules/*' -print0) |
-  while IFS= read -r -d '' f; do
-    mkdir -p "$APP/Contents/Resources/bridge/$(dirname "$f")"
-    cp "$BRIDGE/$f" "$APP/Contents/Resources/bridge/$f"
-  done
-cp "$BRIDGE/package.json" "$BRIDGE/preview.html" "$BRIDGE/config.example.json" "$APP/Contents/Resources/bridge/"
+(cd "$BRIDGE" && GOOS=darwin GOARCH=arm64 go build -trimpath -o "$APP_ABS/Contents/Resources/bridge/cube-bridge" ./cmd/cube-bridge)
 IDENTITY="${CUBE_SIGN_IDENTITY:-$(security find-identity -v -p codesigning 2>/dev/null |
   awk '/"(Apple Development|Developer ID Application):/ { print $2; exit }')}"
 IDENTITY="${IDENTITY:--}"
+codesign --force --sign "$IDENTITY" --identifier com.claude-cube.bridge "$APP/Contents/Resources/bridge/cube-bridge"
 codesign --force --sign "$IDENTITY" --identifier com.claude-cube.link "$APP"
 if [ "$IDENTITY" = "-" ]; then
   echo "signed ad-hoc: macOS will ask for Accessibility and Keychain access again after each rebuild"
