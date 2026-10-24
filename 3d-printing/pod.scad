@@ -85,6 +85,18 @@ foot_base_t = 2;            // base plate under the hull
 foot_pad_d = 8;  foot_pad_depth = 0.8;  foot_pad_in = 6;   // rubber-foot recesses
 desk_gap = 2;               // least gap from the pod to the desk
 pod_turn = 0;
+// Handlebar clamp. Clamp frame: bar along x through the origin, halves split at z = 0 with a `pinch` gap,
+// the receiver on top with the locked pod's long axis across the bar (along y).
+bar_d = 31.8;               // the bar in the checks
+bore_d = 31.8;              // the clamp's bore (a 31.8 bar, or a shim)
+shim_d = [25.4, 22.2];  shim = 0;   // shim bores; shim = 1 | 2 fits that bar, 0 = none
+clamp_w = 16;               // along the bar
+clamp_wall = 3;             // round the bore
+pinch = 1.0;                // gap between the halves, closed by the screws
+ear_t = 6;                  // screw ears, each half
+m3_d = 3.4;  m3_cb_d = 6.4;   // M3 clearance, head counterbore
+nut_af = 5.7;  nut_h = 2.6;   // nut trap in the lower half
+shim_l = 14;
 ledge = 0;                  // check_ledges: 0 = bottom ledge, 1 = top ledge
 carrier_clr = 0.2;          // carrier outline inside the cavity, per side
 post_d = 3;  preload = 0.2; // posts press this far into the PCB rear
@@ -355,6 +367,51 @@ function rotx(p, a) = [p[0], p[1]*cos(a) - p[2]*sin(a), p[1]*sin(a) + p[2]*cos(a
 pod_ctr_m = [(out_x0 + out_x1)/2 - qt_c[0], (face_y + back_y)/2 - back_y, (out_z0 + out_z1)/2 - qt_c[1]];
 pod_ctr = [0, 0, foot_h] + rotx(pod_turn == 180 ? [-pod_ctr_m[0], pod_ctr_m[1], -pod_ctr_m[2]] : pod_ctr_m, -foot_lean);
 
+// ---- handlebar clamp -------------------------------------------------------------------
+clamp_top_z = bore_d/2 + clamp_wall;           // top of the tube; the receiver stands on it
+screw_y = bore_d/2 + m3_d/2 + 1.5;             // the two screws, in front of and behind the bar
+ear_y = screw_y + nut_af/2 + 1.5;
+module xcyl(d, l) translate([-l/2, 0, 0]) rotate([0, 90, 0]) cylinder(d = d, h = l, $fn = 96);
+module upper(z0 = 0) translate([-100, -100, z0]) cube([200, 200, 100]);
+module lower(z1 = 0) translate([-100, -100, z1 - 100]) cube([200, 200, 100]);
+module ears() translate([-clamp_w/2, -ear_y, -pinch/2 - ear_t]) cube([clamp_w, 2*ear_y, 2*ear_t + pinch]);
+// the tube, a pedestal from its upper half to the receiver (no wider than the clamp along the bar, so the
+// receiver overhangs and the bar runs free), and the ears
+module clamp_raw() union() {
+  xcyl(bore_d + 2*clamp_wall, clamp_w);
+  intersection() {
+    hull() {
+      intersection() { xcyl(bore_d + 2*clamp_wall, clamp_w); upper(0); }
+      translate([0, 0, clamp_top_z - 0.01]) cylinder(d = qt_base_d, h = 0.01, $fn = 96);
+    }
+    translate([-clamp_w/2, -50, 0]) cube([clamp_w, 100, 100]);
+  }
+  ears();
+}
+module clamp_holes() for (sy = [-1, 1]) {
+  translate([0, sy*screw_y, -50]) cylinder(d = m3_d, h = 100);
+  translate([0, sy*screw_y, pinch/2 + ear_t]) cylinder(d = m3_cb_d, h = 50);
+  translate([0, sy*screw_y, -pinch/2 - ear_t - 0.01]) cylinder(d = nut_af/cos(30), h = nut_h + 0.01, $fn = 6);
+}
+// the receiver stands on the tube, floor down, overlapping it 0.5
+module clamp_receiver() translate([0, 0, clamp_top_z - 0.5 + qt_back]) rotate([180, 0, 0]) qt_receiver();
+module clamp_top() union() {
+  difference() { intersection() { clamp_raw(); upper(pinch/2); } xcyl(bore_d, 200); clamp_holes(); }
+  clamp_receiver();
+}
+module clamp_bottom() difference() { intersection() { clamp_raw(); lower(-pinch/2); } xcyl(bore_d, 200); clamp_holes(); }
+module shim_half(i, top = true) intersection() {
+  difference() { xcyl(bore_d, shim_l); xcyl(shim_d[i - 1], shim_l + 2); }
+  if (top) upper(pinch/2); else lower(-pinch/2);
+}
+module shims() if (shim > 0) { shim_half(shim, true); shim_half(shim, false); }
+// M3 x 16, head in the counterbore, nut in the trap
+module clamp_screws() for (sy = [-1, 1]) translate([0, sy*screw_y, 0]) {
+  translate([0, 0, -pinch/2 - ear_t + 0.1]) cylinder(d = 3, h = 16);
+  translate([0, 0, -pinch/2 - ear_t + 16 + 0.1]) cylinder(d = 5.5, h = 3);
+  translate([0, 0, -pinch/2 - ear_t + 0.1]) cylinder(d = 5.5/cos(30), h = 2.4, $fn = 6);
+}
+
 // ---- reference values ------------------------------------------------------------
 module meta() echo(str("POD{\"w\":", out_x1 - out_x0, ",\"l\":", out_z1 - out_z0, ",\"d\":", back_y, "}"));
 
@@ -414,5 +471,12 @@ else if (part == "check_foot_desk") intersection() { foot_pod(); translate([-100
 else if (part == "check_foot_cable") intersection() { foot(); on_foot() { cable_ghost(); plug_place() plug_cap_open(); } }
 else if (part == "check_foot_cog") assert(abs(pod_ctr[0]) <= foot_w/2 - 5 && abs(pod_ctr[1] - foot_yc) <= foot_d/2 - 5,
                                          str("pod centre ", pod_ctr, " is not 5 inside the foot"));
+else if (part == "clamp_top") translate([0, 0, -pinch/2]) clamp_top();
+else if (part == "clamp_bottom") translate([0, 0, pinch/2 + ear_t]) rotate([180, 0, 0]) clamp_bottom();
+else if (part == "shim_25") translate([0, 0, -pinch/2]) shim_half(1);
+else if (part == "shim_22") translate([0, 0, -pinch/2]) shim_half(2);
+else if (part == "check_bar") intersection() { xcyl((shim > 0 ? shim_d[shim - 1] : bar_d) - 2*nudge, 60); union() { clamp_top(); clamp_bottom(); shims(); } }
+else if (part == "check_clamp_halves") intersection() { clamp_top(); clamp_bottom(); }
+else if (part == "check_clamp_screws") intersection() { clamp_screws(); union() { clamp_top(); clamp_bottom(); } }
 else if (part == "check_antenna_metal") intersection() { metal(); antenna_zone(metal_keep); }
 else assert(false, str("unknown part: ", part));

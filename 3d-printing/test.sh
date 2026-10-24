@@ -483,6 +483,18 @@ done
 expect_solid "control: foot_h=25 puts the pod into the desk"     check_foot_desk -D foot_h=25
 expect_error "control: foot_d=20 puts the centre off the foot"    check_foot_cog -D foot_d=20
 expect_manifold "foot" foot --max 40.1 52.1 46.6
+
+# handlebar clamp: two halves pinched by two M3, 31.8 bore, half-tube shims for 25.4 and 22.2
+for s in 0 1 2; do expect_empty "bar clear of clamp and shims (shim $s)" check_bar -D shim=$s; done
+expect_solid "control: bar_d=33 does not fit the clamp" check_bar -D shim=0 -D bar_d=33
+expect_empty "clamp halves leave the pinch gap"    check_clamp_halves
+expect_solid "control: pinch=-0.2 closes the gap"  check_clamp_halves -D pinch=-0.2
+expect_empty "screws and nuts sit in their holes"  check_clamp_screws
+expect_solid "control: m3_d=2.6 binds the screws"  check_clamp_screws -D m3_d=2.6
+expect_manifold "clamp top"    clamp_top    --max 31.1 47.0 25.0
+expect_manifold "clamp bottom" clamp_bottom --max 16.1 47.0 18.5
+expect_manifold "shim 25.4"    shim_25      --max 14.1 31.9 15.5
+expect_manifold "shim 22.2"    shim_22      --max 14.1 31.9 15.5
 fi
 
 exit $fail
