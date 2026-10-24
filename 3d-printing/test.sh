@@ -377,6 +377,9 @@ fi
 # ==== pod: pod.scad =============================================================================
 if run pod; then
 SCAD=pod.scad
+meta() {
+  "$OPENSCAD" -D 'part="meta"' $VARIANT "$@" -o build/pod-meta.echo pod.scad >build/pod-meta.log 2>&1
+}
 expect_empty "pod: part=none renders nothing" none
 expect_error "pod: unknown part is rejected" bogus
 expect_error "pod: board_flip is not supported" none -D board_flip=true
@@ -495,6 +498,18 @@ expect_manifold "clamp top"    clamp_top    --max 31.1 47.0 25.0
 expect_manifold "clamp bottom" clamp_bottom --max 16.1 47.0 18.5
 expect_manifold "shim 25.4"    shim_25      --max 14.1 31.9 15.5
 expect_manifold "shim 22.2"    shim_22      --max 14.1 31.9 15.5
+
+# every part against every other part and the ghosts (touching faces pulled apart by nudge)
+expect_empty "pod parts and ghosts clear"                    check_fit -D preload=-0.05
+expect_empty "pod parts and ghosts clear (lead at the top)"  check_fit -D preload=-0.05 -D 'lead_end="top"'
+expect_empty "pod parts and ghosts clear (3 mm buffer)"      check_fit -D preload=-0.05 -D bat_buf=3
+expect_empty "pod parts and ghosts clear (clr 0.5)"          check_fit -D preload=-0.05 -D clr=0.5
+expect_solid "control: nudge=0 lets touching faces overlap"  check_fit -D preload=-0.05 -D nudge=0
+meta; expect_pass "meta echoes the envelope" grep -q 'POD{' build/pod-meta.echo
+expect_solid "pod assembly renders" assembly
+expect_solid "pod section renders"  section
+expect_solid "pod on the foot renders" on_foot_view
+expect_solid "pod on the bar renders"  on_bar_view
 fi
 
 exit $fail

@@ -412,6 +412,37 @@ module clamp_screws() for (sy = [-1, 1]) translate([0, sy*screw_y, 0]) {
   translate([0, 0, -pinch/2 - ear_t + 0.1]) cylinder(d = 5.5/cos(30), h = 2.4, $fn = 6);
 }
 
+// ---- assembly and the all-parts check ----------------------------------------------
+module pod_assembly() {
+  color("gainsboro") tub();
+  color("lightgray") carrier();
+  color("royalblue", 0.6) cell_ghost();
+  color("black") board_at();
+  color("red") cord_ghost();
+  color("dimgray") gasket();
+  color("whitesmoke", 0.9) plate();
+  color("dimgray") plug_place() tplug();
+}
+// cut at the board's mid x, keeping the right side
+module section_view() difference() { pod_assembly(); translate([-50, -50, -50]) cube([50 + glass_b/2, 100, 150]); }
+module on_foot_view() { color("gainsboro") foot(); on_foot() pod_assembly(); }
+module on_bar_view() {
+  color("gainsboro") { clamp_top(); clamp_bottom(); }
+  color("dimgray") xcyl(bar_d, 80);
+  translate([0, 0, clamp_top_z - 0.5 + qt_back]) rotate([180, 0, 0]) qt_from_pod() pod_assembly();
+}
+// Each part moved by nudge off what it rests on (the carrier forward off its ledges, gasket and plate forward
+// off the glass and the rim): any overlap left is a real collision. The plug, the lead and the screws bite
+// on purpose (interference, the lead into the protection board, threads) and have their own checks.
+module fit_parts(i) {
+  if (i == 0) tub();
+  if (i == 1) translate([0, -nudge, 0]) carrier();
+  if (i == 2) cell_ghost();
+  if (i == 3) board_at();
+  if (i == 4) translate([0, -nudge, 0]) gasket();
+  if (i == 5) translate([0, -2*nudge, 0]) plate();
+}
+
 // ---- reference values ------------------------------------------------------------
 module meta() echo(str("POD{\"w\":", out_x1 - out_x0, ",\"l\":", out_z1 - out_z0, ",\"d\":", back_y, "}"));
 
@@ -478,5 +509,10 @@ else if (part == "shim_22") translate([0, 0, -pinch/2]) shim_half(2);
 else if (part == "check_bar") intersection() { xcyl((shim > 0 ? shim_d[shim - 1] : bar_d) - 2*nudge, 60); union() { clamp_top(); clamp_bottom(); shims(); } }
 else if (part == "check_clamp_halves") intersection() { clamp_top(); clamp_bottom(); }
 else if (part == "check_clamp_screws") intersection() { clamp_screws(); union() { clamp_top(); clamp_bottom(); } }
+else if (part == "check_fit") for (i = [0:4], j = [i + 1:5]) intersection() { fit_parts(i); fit_parts(j); }
+else if (part == "assembly") pod_assembly();
+else if (part == "section") section_view();
+else if (part == "on_foot_view") on_foot_view();
+else if (part == "on_bar_view") on_bar_view();
 else if (part == "check_antenna_metal") intersection() { metal(); antenna_zone(metal_keep); }
 else assert(false, str("unknown part: ", part));

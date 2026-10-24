@@ -1,11 +1,12 @@
-# Claude status cube: desk stands
+# Claude status cube: stands and pod
 
-Two printed stands, both parametric and both checked by `test.sh`. They share the board facts and fit tunables in `board.scad` (glass, PCB, openings, `clr`, `lip_t`), so a measurement corrected there fixes both. Each stand sets its own `board_flip` (see [Orientation](#orientation)).
+Two printed desk stands and a closed pod, all parametric and all checked by `test.sh`. They share the board facts and fit tunables in `board.scad` (glass, PCB, openings, `clr`, `lip_t`), so a measurement corrected there fixes all three. Each stand sets its own `board_flip` (see [Orientation](#orientation)).
 
 The board facts come from Waveshare's STEP model of the board (`ESP32-S3-Touch-LCD-1_69.stp`, Creo export): glass 33.13 x 41.13 with r ~6.4 corners and a rounded front edge, 3.8 mm of glass and LCD, a 1.5 mm foam pad, a 1.0 mm PCB whose front face is 5.3 mm behind the glass front, and rear parts up to 10.7 mm (a vertical 2-pin 1.0 mm header; the BAT header reaches 9.8, the Type-C 9.65). The PCB has no closed mounting holes: the four "holes" are Ø2.36 notches open to the long edges. The STEP figures are the vendor's CAD, not caliper readings: measure the overall thickness and the glass-to-PCB-rear depth on your board before a full print.
 
 - **Wedge** (`stand.scad`, below): one closed body and a base plate.
 - **Easel** (`easel.scad`, see [Easel stand](#easel-stand)): a slim bezel at 65 deg on a low tray that holds the cell; screws only, every part prints flat without supports.
+- **Pod** (`pod.scad`, see [Pod](#pod)): a closed, rain-proof case for the board and a 6.2 x 34 x 41 mm cell, with a Garmin-style quarter-turn boss, a desk foot and a handlebar clamp. MJF nylon and TPU, from a printing service.
 
 The wedge is a two-part printed desk stand for the Waveshare ESP32-S3-Touch-LCD-1.69 and a 12 x 40 x 65 mm LiPo. The board sits in a glass pocket in the sloped front face (65 deg screen angle by default), the cell lies flat in a bay behind and below it, and a base plate with two pusher posts closes the bottom and presses the board into the pocket. Everything is parametric in `stand.scad`; `test.sh` checks the geometry with boolean-intersection tests.
 
@@ -117,7 +118,7 @@ The battery and its metal pouch must not sit over the board's chip antenna. The 
 
 ## Tests and regenerating
 
-`./test.sh` (both stands; `./test.sh stand` or `./test.sh easel` for one; uses Docker via `tools/openscad`, override with `OPENSCAD=...`) must exit 0. Export:
+`./test.sh` (all three; `./test.sh stand`, `./test.sh easel` or `./test.sh pod` for one; uses Docker via `tools/openscad`, override with `OPENSCAD=...`) must exit 0. Export:
 
 ```sh
 tools/openscad --backend=manifold -D 'part="front"' -o stand-front.stl stand.scad   # also part="base", part="fit", part="cap"
@@ -187,3 +188,70 @@ python3 tools/stability.py build/easel   # after ./test.sh easel has rendered th
 ```
 
 There are no easel preview images (no headless PNG export here); `part="assembly"` and `part="section"` render the parts in place for viewing in OpenSCAD.
+
+## Pod
+
+`pod.scad`, designed in `docs/superpowers/specs/2026-10-24-pod-design.md`. A closed case for the board and a 6.2 x 34 x 41 mm cell that lives on the desk next to the monitor and goes on the bike when needed, in the rain too. The cell sits behind the board, shifted along the long axis so nothing metal is over the chip antenna (see [Antenna](#antenna)), with 5 mm of extra bay length (`bat_buf`, 3..5) for a protection board at the lead end (`lead_end = "bottom"` or `"top"`). A quarter-turn boss on the back locks into the desk foot or the bar clamp; store-bought Garmin mounts should take it too (`VERIFY`). No button holes: the board stays on, and RST / BOOT / PWR are reached by opening the case. No sound hole either, so the buzzer is muffled.
+
+Envelope: 40.8 x 62.3 mm, 27.1 mm from the face to the back (tub 24.2, plate and squeezed gasket 2.9), plus 5.0 for the boss. `part="meta"` echoes the tub's figures.
+
+### Print list
+
+Printed by a service: rigid parts in **MJF PA12**, the gasket and the plug in **TPU** (MJF TPU, or cut the gasket from 1.2 mm silicone sheet and use a ready-made rubber plug). MJF needs no supports, so orientation is the service's choice.
+
+| File | Part | Material | Qty |
+|---|---|---|---|
+| `pod-tub.stl` | rear shell: board pocket, carrier ledges, cell bay, four blind pilots, Type-C opening, tether anchor, quarter-turn boss | PA12 | 1 |
+| `pod-plate.stl` | front plate: window, four countersinks, skirt that sets the gasket squeeze | PA12 | 1 |
+| `pod-carrier.stl` | carrier: four posts press the PCB, pegs in its notches, lead groove and slot | PA12 | 1 |
+| `pod-gasket.stl` | 1.2 mm gasket over the glass border and the rim | TPU | 1 |
+| `pod-plug.stl` | Type-C plug with a strap and a pin into the anchor | TPU | 1 |
+| `pod-foot.stl` | desk foot, 20 deg lean, quarter-turn receiver | PA12 | 1 |
+| `pod-clamp-top.stl`, `pod-clamp-bottom.stl` | handlebar clamp for a 31.8 mm bar, receiver on top | PA12 | 1 each |
+| `pod-shim-25.stl`, `pod-shim-22.stl` | half-tube shims for 25.4 / 22.2 mm bars | PA12 | 2 of the size you need |
+| `pod-qt-boss.stl`, `pod-qt-receiver.stl` | quarter-turn test pair | PA12 | 1 each |
+
+**Order first:** `pod-qt-boss`, `pod-qt-receiver` and `pod-carrier`. Check the boss against a cheap store-bought Garmin quarter-turn mount and against the test receiver (it should drop in landscape, turn 90 deg, click and not lift out), and press the real board onto the carrier's pegs. Only then order the rest.
+
+### Hardware
+
+4 x M2 x 8 countersunk (front plate into the tub's pilots), 2 x M3 x 16 and 2 x M3 nuts (clamp), a 1.5 mm adhesive foam pad the size of the cell (behind it, squeezed to 1.0), 4 x Ø8 rubber feet (foot), a cheap Garmin quarter-turn mount (to check the boss).
+
+### Assembly order
+
+1. Foam pad on the back of the bay; cell in, with its lead and protection board at the `lead_end` end of the bay (default: the bottom).
+2. Thread the lead through the carrier's slot from behind; carrier into the cavity, rear face on the two ledges.
+3. Plug the lead into the board's BAT header (beside the Type-C, opening towards the board centre) and lay it in the carrier's groove.
+4. Press the board onto the carrier's pegs, glass outwards: the glass front ends flush with the rim.
+5. Gasket on, then the plate; four M2 x 8 countersunk screws, evenly, until the plate's skirt meets the rim.
+6. Plug into the Type-C opening, pin into the anchor hole below it.
+
+### Seal
+
+One flat gasket does all the sealing. The glass front and the tub's rim are in one plane (y = 0), and the plate squeezes the gasket on both, from 1.2 to 0.9 mm (`gk_t`, `gk_sq`); the plate's skirt lands on the rim and stops the squeeze there. Every way into the cavity crosses at least 1.0 mm of squeezed gasket (`seal_land`, checked): from a screw hole (the pilots are blind, so water down a screw goes nowhere else), from the seam at the side, and from the window across the glass border to the glass edge. The pod window has r = 3 corners for that last one (board.scad's r = 2 leaves 0.84). The Type-C opening is closed by the plug's body, 0.15 mm oversize per side (`plug_int`, `VERIFY`). Rain and road spray, not dunking.
+
+### Desk and bike
+
+On the desk, the foot holds the pod 20 deg back from vertical (`foot_lean`), clear of the desk, with nothing of the foot past the pod's sides: a USB-C cable plugs into the side while it stands there, and the open plug hangs below the opening, clear of the cable. On the bike the clamp holds it flat on top of the bar, long side across the bar. Either way it locks in both portrait orientations (chin up or down); the cube's IMU turns the picture. Charge by cable after a ride, never with a cable plugged in while riding.
+
+**Power with no button (`VERIFY`):** the case has no button access, so after the cell runs flat, plugging in USB has to start the board without PWR. The PWR / SYS_EN power-hold circuit is not documented for this; if it does not start, open the case and press PWR.
+
+### Checks
+
+`./test.sh pod`, on top of the board checks shared with the stands. With the board's STEP model: the carrier presses only the PCB and keeps 0.29 mm from the tallest rear part (the 2-pin header), the tub 1.17 mm from the Type-C shell, the plug 1.89 mm. The quarter-turn checks insert, the turn, the lock, retention when pulled 0.5 mm, and the detent; the foot checks the pod against the foot and the desk, the cable and the open plug, and that the pod's centre is 5 mm inside the base, both ways up.
+
+### VERIFY (pod-specific, on top of the board items in `board.scad`)
+
+- The antenna position (`ant_*` in `board.scad`): the 6 x 2 x 1 mm STEP part assumed to be the chip antenna. The bay starts `ant_keep` = 3 past it; every metal part (cell, buffer, lead, screws) keeps `metal_keep` = 2 off its footprint.
+- Every quarter-turn dimension (`qt_*`). No published Garmin drawing was found, so these are starting values; the pod's own receivers use them too, so the pod fits its foot and clamp either way. Check against a real mount on the test pair.
+- The BAT header and the lead route (`bat_*`, `cord_*`), as in the easel; which end of the real cell the lead leaves from, and the protection board's length (`lead_end`, `bat_buf`).
+- `plug_int` (the plug's grip in the opening) and the gasket squeeze on the first print.
+- USB starting the board after a flat cell (above).
+
+Export:
+
+```sh
+tools/openscad --backend=manifold -D 'part="tub"' -o pod-tub.stl pod.scad   # also plate, carrier, gasket, plug, foot, clamp_top (-> pod-clamp-top.stl), clamp_bottom, shim_25, shim_22, qt_test_boss (-> pod-qt-boss.stl), qt_test_receiver
+```
+
+`part="assembly"`, `"section"`, `"on_foot_view"` and `"on_bar_view"` render the pod in place for viewing.
