@@ -1,0 +1,408 @@
+package cards
+
+import (
+	"encoding/json"
+	"fmt"
+	"reflect"
+	"strings"
+	"testing"
+	"time"
+
+	"claude-status-cube/bridge/internal/agents"
+	"claude-status-cube/bridge/internal/limits"
+	"claude-status-cube/bridge/internal/mail"
+	"claude-status-cube/bridge/internal/sources"
+)
+
+var agentsNow = time.Date(2026, 10, 24, 12, 0, 0, 0, time.UTC)
+
+func agent(id, folder string, st agents.Status, since time.Duration) agents.Agent {
+	a := agents.Agent{ID: id, Folder: folder, Status: st, StatusSince: agentsNow.Add(-since), Pane: "%1"}
+	if st == agents.Waiting {
+		a.Waiting = &agents.Prompt{ID: "p-" + id, Kind: "permission", Title: "run " + id + " secret title",
+			Detail: id + " secret detail", Context: id + " secret context",
+			Options: []agents.Option{{Key: "1", Label: id + " allow label", Primary: true}, {Key: "3", Label: id + " deny label"}}}
+	}
+	return a
+}
+
+func fourAgents() []agents.Agent {
+	w2 := agent("a1", "short-wait", agents.Waiting, 2*time.Minute)
+	w5 := agent("a2", "long-wait", agents.Waiting, 5*time.Minute)
+	run := agent("a3", "runner", agents.Running, time.Minute)
+	run.Activity = &agents.Activity{Tool: "Edit", Detail: "/Users/me/secret/path.go"}
+	run.Subagents = make([]agents.Subagent, 3)
+	run.LastPrompt = "my secret last prompt"
+	run.Context.Used, run.Context.Window = 50_000, 200_000
+	idle := agent("a4", "sleepy", agents.Idle, 12*time.Minute)
+	idle.Unseen = true
+	idle.LastPrompt = "another secret prompt"
+	return []agents.Agent{w2, run, idle, w5}
+}
+
+func agentsCard(t *testing.T, p Payload) *Card {
+	t.Helper()
+	for i := range p.Cards {
+		if p.Cards[i].T == "AGENTS" {
+			return &p.Cards[i]
+		}
+	}
+	return nil
+}
+
+func TestAgentsCardOrderAndSummary(t *testing.T) {
+	p := Build(nil, Opts{Agents: fourAgents(), ShowAgents: true, Full: true}, agentsNow)
+	if len(p.Cards) != 2 || p.Cards[0].T != "CLAUDE" || p.Cards[1].T != "AGENTS" {
+		t.Fatalf("cards = %+v", p.Cards)
+	}
+	c := p.Cards[1]
+	if c.V != "4" || c.S1 != "2 NEED YOU" || c.S2 != "" || c.C != "accent" {
+		t.Errorf("card = v %q s1 %q s2 %q c %q", c.V, c.S1, c.S2, c.C)
+	}
+	var ids, lines, poses, kinds []string
+	for _, tl := range c.A {
+		ids, lines, poses, kinds = append(ids, tl.I), append(lines, tl.L), append(poses, tl.P), append(kinds, tl.K)
+	}
+	want := func(name string, got, w []string) {
+		if !reflect.DeepEqual(got, w) {
+			t.Errorf("%s = %q, want %q", name, got, w)
+		}
+	}
+	want("ids", ids, []string{"a2", "a1", "a3", "a4"})
+	want("lines", lines, []string{"needs you", "needs you", "Edit +3", "idle 12m"})
+	want("poses", poses, []string{"wait", "wait", "write", "hungry"})
+	want("kinds", kinds, []string{"wait", "wait", "run", "idle"})
+	if c.A[2].X != 25 || c.A[3].U != 1 || c.A[2].U != 0 || c.A[0].N != "long-wait" {
+		t.Errorf("tiles = %+v", c.A)
+	}
+	q := c.Q
+	if q == nil || q.I != "a2" || q.P != "p-a2" || q.K != "permission" || q.X != "" ||
+		q.T != "run a2 secret title" || q.D != "a2 secret detail" || q.C != "a2 secret context" ||
+		!reflect.DeepEqual(q.O, []PromptOption{{K: "1", L: "a2 allow label"}, {K: "3", L: "a2 deny label"}}) {
+		t.Errorf("q = %+v", q)
+	}
+	b, err := Marshal(p)
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, key := range []string{`"a":[`, `"q":{`, `"o":[{"k":"1","l":"a2 allow label"}`} {
+		if !strings.Contains(string(b), key) {
+			t.Errorf("payload lacks %s: %s", key, b)
+		}
+	}
+}
+
+func TestAgentsSummaryWords(t *testing.T) {
+	cases := []struct {
+		st       []agents.Status
+		s1, c, v string
+	}{
+		{[]agents.Status{agents.Waiting, agents.Running}, "1 NEEDS YOU", "accent", "2"},
+		{[]agents.Status{agents.Running, agents.Running, agents.Running, agents.Idle}, "3 RUNNING", "blue", "4"},
+		{[]agents.Status{agents.Idle, agents.Exited, agents.Starting, agents.Error}, "ALL IDLE", "ink", "4"},
+	}
+	for _, tc := range cases {
+		var list []agents.Agent
+		for i, st := range tc.st {
+			list = append(list, agent(fmt.Sprint("x", i), "f", st, time.Minute))
+		}
+		c := agentsCard(t, Build(nil, Opts{Agents: list, ShowAgents: true}, agentsNow))
+		if c == nil || c.S1 != tc.s1 || c.C != tc.c || c.V != tc.v {
+			t.Errorf("%v: card = %+v", tc.st, c)
+		}
+	}
+}
+
+func TestAgentsTileOrderAndPoses(t *testing.T) {
+	mk := func(id, folder string, st agents.Status, tool string) agents.Agent {
+		a := agent(id, folder, st, 30*time.Second)
+		if tool != "" {
+			a.Activity = &agents.Activity{Tool: tool}
+		}
+		return a
+	}
+	list := []agents.Agent{
+		mk("e1", "zz", agents.Exited, ""),
+		mk("i1", "bb", agents.Idle, ""),
+		mk("r2", "b", agents.Running, "Bash"),
+		mk("x1", "aa", agents.Error, ""),
+		mk("s1", "aa", agents.Starting, ""),
+		mk("r1", "a", agents.Running, ""),
+		mk("w1", "q", agents.Waiting, ""),
+	}
+	c := agentsCard(t, Build(nil, Opts{Agents: list, ShowAgents: true}, agentsNow))
+	var got []string
+	for _, tl := range c.A {
+		got = append(got, tl.I+":"+tl.K+":"+tl.P+":"+tl.L)
+	}
+	want := []string{"w1:wait:wait:needs you", "r1:run:think:thinking", "r2:run:bash:Bash",
+		"s1:start:start:starting", "x1:err:err:error", "i1:idle:idle:idle", "e1:exit:exit:exited"}
+	if !reflect.DeepEqual(got, want) {
+		t.Errorf("tiles = %q\nwant  %q", got, want)
+	}
+
+	poses := map[string]string{"Read": "read", "Grep": "read", "Glob": "read", "LS": "read",
+		"Edit": "write", "MultiEdit": "write", "Write": "write", "NotebookEdit": "write", "Bash": "bash",
+		"WebFetch": "web", "WebSearch": "web", "TodoWrite": "plan", "ExitPlanMode": "plan",
+		"Task": "delegate", "Agent": "delegate", "Compact": "compact", "mcp__x__y": "run"}
+	for tool, pose := range poses {
+		if got := tileOf(mk("r", "f", agents.Running, tool), agentsNow).P; got != pose {
+			t.Errorf("pose(%s) = %q, want %q", tool, got, pose)
+		}
+	}
+}
+
+func TestAgentsIdleAgeAndContext(t *testing.T) {
+	for since, want := range map[time.Duration]string{
+		59 * time.Second: "idle", 12*time.Minute + 59*time.Second: "idle 12m",
+		3*time.Hour + 59*time.Minute: "idle 3h", 50 * time.Hour: "idle 2d",
+	} {
+		if got := tileOf(agent("i", "f", agents.Idle, since), agentsNow).L; got != want {
+			t.Errorf("idle %v = %q, want %q", since, got, want)
+		}
+	}
+	for _, tc := range []struct {
+		used, window int64
+		want         int
+	}{{1, 200, 1}, {3, 1000, 0}, {5, 1000, 1}, {300, 200, 100}, {-5, 100, 0}, {10, 0, 0}} {
+		a := agent("c", "f", agents.Idle, 0)
+		a.Context.Used, a.Context.Window = tc.used, tc.window
+		if got := tileOf(a, agentsNow).X; got != tc.want {
+			t.Errorf("context %d/%d = %d, want %d", tc.used, tc.window, got, tc.want)
+		}
+	}
+}
+
+func TestAgentsWaitTieBreak(t *testing.T) {
+	a := agent("b2", "same", agents.Waiting, time.Minute)
+	b := agent("b1", "same", agents.Waiting, time.Minute)
+	c := agent("c0", "alpha", agents.Waiting, time.Minute)
+	card := agentsCard(t, Build(nil, Opts{Agents: []agents.Agent{a, b, c}, ShowAgents: true, Full: true}, agentsNow))
+	var got []string
+	for _, tl := range card.A {
+		got = append(got, tl.I)
+	}
+	if !reflect.DeepEqual(got, []string{"c0", "b1", "b2"}) || card.Q.I != "c0" {
+		t.Errorf("order = %v, q = %+v", got, card.Q)
+	}
+}
+
+func TestLANVariantHasNoPromptText(t *testing.T) {
+	list := fourAgents()
+	p := Build(nil, Opts{Agents: list, ShowAgents: true, Full: false}, agentsNow)
+	c := agentsCard(t, p)
+	if c == nil || c.Q != nil || len(c.A) != 4 {
+		t.Fatalf("card = %+v", c)
+	}
+	b, err := Marshal(p)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var secrets []string
+	for _, a := range list {
+		secrets = append(secrets, a.LastPrompt)
+		if a.Activity != nil {
+			secrets = append(secrets, a.Activity.Detail)
+		}
+		if w := a.Waiting; w != nil {
+			secrets = append(secrets, w.Title, w.Detail, w.Context)
+			for _, o := range w.Options {
+				secrets = append(secrets, o.Label)
+			}
+		}
+	}
+	for _, s := range secrets {
+		if s != "" && strings.Contains(string(b), s) {
+			t.Errorf("LAN payload carries %q: %s", s, b)
+		}
+	}
+	if strings.Contains(string(b), "secret") {
+		t.Errorf("LAN payload carries a secret: %s", b)
+	}
+}
+
+func TestNotInTmux(t *testing.T) {
+	a := agent("t1", "f", agents.Waiting, time.Minute)
+	a.Pane = ""
+	c := agentsCard(t, Build(nil, Opts{Agents: []agents.Agent{a}, ShowAgents: true, Full: true}, agentsNow))
+	if c == nil || c.Q == nil || c.Q.X != "tmux" {
+		t.Fatalf("card = %+v", c)
+	}
+}
+
+func TestNoAgentsNoCard(t *testing.T) {
+	base := Opts{Limits: &limits.Limits{Error: "timeout"}, ExtraCards: true}
+	plain := Build(nil, base, agentsNow)
+
+	on := base
+	on.ShowAgents, on.Full = true, true
+	if p := Build(nil, on, agentsNow); !reflect.DeepEqual(p, plain) {
+		t.Errorf("no agents: %+v\nwant %+v", p, plain)
+	}
+	off := base
+	off.Agents, off.Full = fourAgents(), true
+	p := Build(nil, off, agentsNow)
+	if !reflect.DeepEqual(p, plain) {
+		t.Errorf("agents off: %+v\nwant %+v", p, plain)
+	}
+	got, _ := json.Marshal(p)
+	want, _ := json.Marshal(plain)
+	if string(got) != string(want) {
+		t.Errorf("agents off marshals differently:\n%s\n%s", got, want)
+	}
+}
+
+func TestAgentsCardPosition(t *testing.T) {
+	p := Build(nil, Opts{Error: "boom", ExtraCards: true, Agents: fourAgents(), ShowAgents: true}, agentsNow)
+	var titles []string
+	for _, c := range p.Cards {
+		titles = append(titles, c.T)
+	}
+	want := []string{"BRIDGE ERROR", "CLAUDE", "AGENTS", "TODAY", "THIS MONTH", "TOKENS TODAY", "TOP MODEL", "TOP PROJECT"}
+	if !reflect.DeepEqual(titles, want) {
+		t.Errorf("titles = %v", titles)
+	}
+}
+
+// budgetOpts: the worst case the brief names. Eight agents with long
+// non-ASCII folder names, all waiting; the oldest asks a question with six
+// 200-character options and a 3000-character detail.
+func budgetOpts(extra bool) Opts {
+	var list []agents.Agent
+	for i := range 8 {
+		folder := strings.Repeat("dự-án-đẹp-", 6) // 60 characters, accents and đ
+		a := agent(fmt.Sprintf("l%05d", i), folder, agents.Waiting, time.Duration(10-i)*time.Minute)
+		a.Context.Used, a.Context.Window = 199_999, 200_000
+		a.Unseen = true
+		if i == 0 {
+			p := &agents.Prompt{ID: "p1234567", Kind: "question", Title: strings.Repeat("Tiêu đề ", 20),
+				Detail: strings.Repeat("chi tiết ", 334), Context: strings.Repeat("ngữ cảnh ", 20)}
+			for k := range 6 {
+				p.Options = append(p.Options, agents.Option{Key: fmt.Sprint(k + 1), Label: strings.Repeat("é", 200)})
+			}
+			a.Waiting = p
+		}
+		list = append(list, a)
+	}
+	unread := 123456
+	five, seven := 99.0, 99.0
+	return Opts{
+		Error: strings.Repeat("x", 100),
+		Limits: &limits.Limits{FiveHour: &limits.Window{Utilization: &five, ResetsAt: "2026-10-24T15:00:00Z"},
+			SevenDay: &limits.Window{Utilization: &seven, ResetsAt: "2026-10-30T15:00:00Z"}, Error: strings.Repeat("y", 100)},
+		Mail:       &mail.Mail{Unread: &unread},
+		ExtraCards: extra, Agents: list, ShowAgents: true, Full: true,
+	}
+}
+
+func budgetEvents() []sources.Event {
+	return []sources.Event{{T: agentsNow.UnixMilli() - 1000, Model: "claude-opus-5-5-20261001",
+		Project: strings.Repeat("project-name-", 5), Input: 123_456_789, Output: 9_876_543, Cost: 12345.67}}
+}
+
+func size(t *testing.T, p Payload) int {
+	t.Helper()
+	b, err := Marshal(p)
+	if err != nil {
+		t.Fatal(err)
+	}
+	return len(b)
+}
+
+func TestAgentsPayloadBudget(t *testing.T) {
+	for _, extra := range []bool{true, false} {
+		for _, full := range []bool{true, false} {
+			o := budgetOpts(extra)
+			o.Full = full
+			if n := size(t, Build(budgetEvents(), o, agentsNow)); n > MaxPayloadBytes {
+				t.Errorf("extra %v full %v: %d bytes", extra, full, n)
+			}
+		}
+	}
+	p := Build(budgetEvents(), budgetOpts(false), agentsNow)
+	c := agentsCard(t, p)
+	if len(c.A) != MaxTiles || c.Q == nil {
+		t.Fatalf("without extra cards: %d tiles, q %+v", len(c.A), c.Q)
+	}
+	if c.A[0].N != "du-an-dep-du-an-" || c.Q.T == "" || c.Q.D == "" || len(c.Q.O) != 6 {
+		t.Errorf("tile %+v q %+v", c.A[0], c.Q)
+	}
+}
+
+func TestAgentsTileCap(t *testing.T) {
+	var list []agents.Agent
+	for i := range 11 {
+		list = append(list, agent(fmt.Sprint("r", i), fmt.Sprintf("f%02d", i), agents.Running, time.Minute))
+	}
+	c := agentsCard(t, Build(nil, Opts{Agents: list, ShowAgents: true}, agentsNow))
+	if c.V != "11" || len(c.A) != MaxTiles || c.A[7].I != "r7" || c.S1 != "11 RUNNING" {
+		t.Errorf("card = %+v", c)
+	}
+}
+
+// TestAgentsTrimOrder runs the trimming steps one by one: with the budget set
+// to exactly the size each step leaves, that step is the last one taken.
+func TestAgentsTrimOrder(t *testing.T) {
+	o := budgetOpts(true)
+	events := budgetEvents()
+	full := build(events, o, agentsNow, 1<<20)
+	agentsAt := 2 // BRIDGE ERROR, CLAUDE, AGENTS, extras...
+
+	clone := func(p Payload) Payload {
+		var c Payload
+		b, _ := json.Marshal(p)
+		_ = json.Unmarshal(b, &c)
+		return c
+	}
+	if len(full.Cards[agentsAt].Q.O) != 6 || full.Cards[agentsAt].Q.D == "" || len(full.Cards[agentsAt].A) != 8 {
+		t.Fatalf("untrimmed = %+v", full.Cards[agentsAt])
+	}
+
+	var expect []Payload
+	step := clone(full)
+	ac := func() *Card { return &step.Cards[agentsAt] }
+	ac().Q.D = ""
+	expect = append(expect, clone(step)) // 1: detail
+	ac().Q.O = ac().Q.O[:4]
+	expect = append(expect, clone(step)) // 2: options beyond 4
+	for len(ac().A) > 4 {
+		ac().A = ac().A[:len(ac().A)-1]
+		expect = append(expect, clone(step)) // 3: tiles from the end
+	}
+	ac().Q = nil
+	expect = append(expect, clone(step)) // 4: prompt
+	for len(step.Cards) > agentsAt+1 {
+		step.Cards = step.Cards[:len(step.Cards)-1]
+		expect = append(expect, clone(step)) // 5: extra cards from the end
+	}
+	step.Cards = step.Cards[:agentsAt]
+	expect = append(expect, clone(step)) // last resort: the Agents card
+
+	prev := size(t, full)
+	for i, want := range expect {
+		n := size(t, want)
+		if n >= prev {
+			t.Fatalf("step %d does not shrink: %d >= %d", i, n, prev)
+		}
+		prev = n
+		got := clone(build(events, o, agentsNow, n))
+		if !reflect.DeepEqual(got, want) {
+			gb, _ := Marshal(got)
+			wb, _ := Marshal(want)
+			t.Errorf("budget %d (step %d):\n got  %s\n want %s", n, i, gb, wb)
+		}
+		if got := clone(build(events, o, agentsNow, n+1)); !reflect.DeepEqual(got, want) {
+			t.Errorf("budget %d+1 (step %d) went further than needed", n, i)
+		}
+	}
+}
+
+func TestMarshalNoHTMLEscapes(t *testing.T) {
+	b, err := Marshal(Payload{V: 1, Src: "<a&b>", Cards: []Card{}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if string(b) != `{"v":1,"ts":0,"src":"<a&b>","cards":[]}` {
+		t.Errorf("Marshal = %s", b)
+	}
+}

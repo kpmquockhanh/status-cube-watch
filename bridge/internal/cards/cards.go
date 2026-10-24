@@ -14,6 +14,7 @@ import (
 	"sort"
 	"time"
 
+	"claude-status-cube/bridge/internal/agents"
 	"claude-status-cube/bridge/internal/limits"
 	"claude-status-cube/bridge/internal/mail"
 	"claude-status-cube/bridge/internal/sources"
@@ -28,17 +29,19 @@ type Row struct {
 
 // Card is one card of the payload contract (see the repo CLAUDE.md).
 type Card struct {
-	T    string `json:"t"`
-	V    string `json:"v"`
-	S1   string `json:"s1"`
-	S2   string `json:"s2"`
-	C    string `json:"c"`
-	G    *int   `json:"g,omitempty"`
-	C2   string `json:"c2,omitempty"`
-	G2   *int   `json:"g2,omitempty"`
-	Rows []Row  `json:"rows,omitempty"`
-	M    string `json:"m,omitempty"`
-	MC   string `json:"mc,omitempty"`
+	T    string       `json:"t"`
+	V    string       `json:"v"`
+	S1   string       `json:"s1"`
+	S2   string       `json:"s2"`
+	C    string       `json:"c"`
+	G    *int         `json:"g,omitempty"`
+	C2   string       `json:"c2,omitempty"`
+	G2   *int         `json:"g2,omitempty"`
+	Rows []Row        `json:"rows,omitempty"`
+	M    string       `json:"m,omitempty"`
+	MC   string       `json:"mc,omitempty"`
+	A    []Tile       `json:"a,omitempty"` // Agents card: the agents
+	Q    *AgentPrompt `json:"q,omitempty"` // Agents card: the longest-waiting prompt (Full only)
 }
 
 // Payload is what GET /api/status serves.
@@ -58,23 +61,47 @@ type Opts struct {
 	Limits           *limits.Limits
 	Mail             *mail.Mail
 	ExtraCards       bool
+	Agents           []agents.Agent // the open agents
+	ShowAgents       bool           // add the Agents card (when at least one agent is open)
+	Full             bool           // loopback variant: the Agents card carries the prompt
 }
 
 // Build builds the deck. now carries the local zone: today/month boundaries
 // use now.Location().
+//
+// The Agents card follows the usage card, and the whole payload is trimmed to
+// MaxPayloadBytes (fitBudget).
 func Build(events []sources.Event, o Opts, now time.Time) Payload {
+	return build(events, o, now, MaxPayloadBytes)
+}
+
+func build(events []sources.Event, o Opts, now time.Time, budget int) Payload {
 	cards := []Card{usageCard(o.Limits, o.Mail, now.UnixMilli())}
+	agentsAt := -1
+	if o.ShowAgents {
+		if c := agentsCardOf(o.Agents, o.Full, now); c != nil {
+			agentsAt = len(cards)
+			cards = append(cards, *c)
+		}
+	}
+	extraFrom := len(cards)
 	if o.ExtraCards {
 		cards = append(cards, spendCards(events, o, now)...)
 	}
 	if o.Error != "" {
 		// 28 characters is what fits across the panel in the text card's s1 font.
 		cards = append([]Card{{T: "BRIDGE ERROR", V: "offline", S1: Fit(o.Error, 29), C: "red"}}, cards...)
+		extraFrom++
+		if agentsAt >= 0 {
+			agentsAt++
+		}
 	}
 	for i := range cards {
 		cards[i] = fitCard(cards[i])
 	}
-	return Payload{V: 1, Ts: now.Unix(), Src: o.Source, Cards: cards}
+	p := Payload{V: 1, Ts: now.Unix(), Src: o.Source, Cards: cards}
+	fitBudget(&p, agentsAt, extraFrom, budget)
+	return p
 }
 
 // tone sets the 60/85 thresholds shared with the firmware, preview.html and
