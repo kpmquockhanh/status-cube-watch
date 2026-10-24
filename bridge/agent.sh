@@ -120,13 +120,33 @@ status_agent() {
   fi
 }
 
+# What restart should do: not-installed (nothing loaded), install (the plist
+# still runs something other than our binary, e.g. an older Node install), or
+# kickstart.
+restart_action() { # plist loaded(0|1)
+  local prog
+  if [ "$2" != 1 ]; then echo not-installed; return; fi
+  prog="$(/usr/libexec/PlistBuddy -c 'Print :ProgramArguments:0' "$1" 2>/dev/null || true)"
+  if [ "$prog" = "$DIR/cube-bridge" ]; then echo kickstart; else echo install; fi
+}
+
+restart_agent() {
+  local loaded=0
+  launchctl print "$TARGET" >/dev/null 2>&1 && loaded=1
+  case "$(restart_action "$PLIST" "$loaded")" in
+    not-installed) echo "not installed: run ./agent.sh install" >&2; return 1 ;;
+    install)       echo "installed plist does not run $DIR/cube-bridge: switching to the Go binary"; install_agent ;;
+    kickstart)     build_bridge; launchctl kickstart -k "$TARGET"; sleep 2; status_agent ;;
+  esac
+}
+
 # Sourced with CUBE_AGENT_LIB=1 (tests, plist preview): define the functions only.
 [ -n "${CUBE_AGENT_LIB:-}" ] && return 0 2>/dev/null
 
 case "${1:-status}" in
   install)   install_agent ;;
   uninstall) uninstall_agent ;;
-  restart)   build_bridge; launchctl kickstart -k "$TARGET"; sleep 2; status_agent ;;
+  restart)   restart_agent ;;
   status)    status_agent ;;
   logs)      tail -f "$LOG_DIR/bridge.log" ;;
   *) sed -n '2,12p' "${BASH_SOURCE[0]}"; exit 1 ;;
