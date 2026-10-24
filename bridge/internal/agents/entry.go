@@ -16,6 +16,7 @@ type entry struct {
 	TTY           string
 	Offset        int64
 	Pending       string
+	SkipLine      bool // tail: drop input up to the next newline (an over-long line)
 	PromptN       int
 	Menu          bool
 	CustomTitle   string
@@ -31,18 +32,27 @@ type entry struct {
 	Live      *Live     // the session as discovery last saw it (nil: never)
 	Answering string    // id of the prompt an Answer is typing into
 	promptSeq *int      // the tracker's prompt counter (nil: PromptN)
+	promptPfx string    // the tracker's prompt id prefix ("": "p")
 }
 
 // NextPromptID returns a fresh id for a new blocking prompt: from the
-// tracker's counter when the entry belongs to a tracker, so ids never repeat
-// across agents or a re-created agent; else from the entry's own count.
+// tracker's counter and prefix when the entry belongs to a tracker, so ids
+// never repeat across agents, a re-created agent or a bridge restart; else
+// from the entry's own count.
 func (e *entry) NextPromptID() string {
-	n := &e.PromptN
+	n, pfx := &e.PromptN, "p"
 	if e.promptSeq != nil {
-		n = e.promptSeq
+		n, pfx = e.promptSeq, e.promptPfx
 	}
 	*n++
-	return "p" + strconv.Itoa(*n)
+	return pfx + strconv.Itoa(*n)
+}
+
+// promptIDPrefix is a tracker's prompt id prefix: "p", its start time in
+// base-36 seconds, "-". Ids stay within the card's 15 characters until the
+// 10-millionth prompt (and the year 2106).
+func promptIDPrefix(start time.Time) string {
+	return "p" + strconv.FormatInt(max(start.Unix(), 0), 36) + "-"
 }
 
 // SetStatus changes status, stamping StatusSince only on a real change.

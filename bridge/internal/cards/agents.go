@@ -6,6 +6,7 @@ import (
 	"math"
 	"sort"
 	"strconv"
+	"strings"
 	"time"
 
 	"claude-status-cube/bridge/internal/agents"
@@ -19,7 +20,10 @@ const MaxPayloadBytes = 2048
 const MaxTiles = 8
 
 // Agents card field limits, in printable ASCII characters (a firmware buffer
-// needs one more byte for the NUL). Plan 3 sizes payload.h from these.
+// needs one more byte for the NUL). Plan 3 sizes payload.h from these. A
+// title or detail longer than its limit is cut to end in "..." within it.
+// When the payload budget drops the detail, q.cut is 1; when it drops the
+// whole prompt (Full variant only), the card's qc is 1.
 const (
 	TileIDChars       = 15  // Tile.I, AgentPrompt.I
 	TileNameChars     = 16  // Tile.N
@@ -40,6 +44,15 @@ const (
 // fitN keeps at most n characters (Fit's bytes include the NUL).
 func fitN(s string, n int) string { return Fit(s, n+1) }
 
+// fitMarked is fitN, but a cut string ends in "..." (within the n).
+func fitMarked(s string, n int) string {
+	all := Fit(s, math.MaxInt)
+	if len(all) <= n {
+		return all
+	}
+	return strings.TrimRight(all[:n-3], " ") + "..."
+}
+
 // Tile is one agent on the Agents card. It never carries a tool's detail
 // (paths, commands, URLs) or a prompt's text.
 type Tile struct {
@@ -58,11 +71,13 @@ type AgentPrompt struct {
 	I string         `json:"i"`           // agent id
 	P string         `json:"p"`           // prompt id
 	K string         `json:"k"`           // permission|question|input
-	T string         `json:"t"`           // title
-	D string         `json:"d"`           // detail
+	T string         `json:"t"`           // title ("..." when cut)
+	D string         `json:"d"`           // detail ("..." when cut; "" with Cut when dropped)
 	C string         `json:"c"`           // context
 	O []PromptOption `json:"o,omitempty"` // answer buttons
 	X string         `json:"x,omitempty"` // why buttons are off: "tmux" (not in a tmux pane); "" = answerable
+	// Cut is 1 when the payload budget dropped the detail D (D is then "").
+	Cut int `json:"cut,omitempty"`
 }
 
 // PromptOption is one answer button: the key typed into the pane and its label.
@@ -235,7 +250,7 @@ func contextPct(used, window int64) int {
 func promptOf(a agents.Agent) *AgentPrompt {
 	w := a.Waiting
 	q := &AgentPrompt{I: fitN(a.ID, TileIDChars), P: fitN(w.ID, PromptIDChars), K: fitN(w.Kind, PromptKindChars),
-		T: fitN(w.Title, PromptTitleChars), D: fitN(w.Detail, PromptDetailChars), C: fitN(w.Context, PromptCtxChars)}
+		T: fitMarked(w.Title, PromptTitleChars), D: fitMarked(w.Detail, PromptDetailChars), C: fitN(w.Context, PromptCtxChars)}
 	for _, o := range w.Options[:min(len(w.Options), PromptOptions)] {
 		q.O = append(q.O, PromptOption{K: fitN(o.Key, OptionKeyChars), L: fitN(o.Label, OptionLabelChars)})
 	}
@@ -246,11 +261,11 @@ func promptOf(a agents.Agent) *AgentPrompt {
 }
 
 // fitBudget trims p until it marshals to at most budget bytes, one step at a
-// time, least valuable first: the prompt's detail, options beyond 4, tiles
-// from the end down to 4, the prompt, the extra cards from the end, and as a
-// last resort (unreachable with today's field limits) the Agents card.
-// agentsAt is the Agents card's index (-1: none); cards from extraFrom on are
-// the extra cards.
+// time, least valuable first: the extra cards from the end, the prompt's
+// detail (q.cut = 1), options beyond 4, tiles from the end down to 4, the
+// prompt (qc = 1), and as a last resort (unreachable with today's field
+// limits) the Agents card. agentsAt is the Agents card's index (-1: none);
+// cards from extraFrom on are the extra cards.
 func fitBudget(p *Payload, agentsAt, extraFrom, budget int) {
 	ac := func() *Card {
 		if agentsAt < 0 || agentsAt >= len(p.Cards) {
@@ -260,8 +275,15 @@ func fitBudget(p *Payload, agentsAt, extraFrom, budget int) {
 	}
 	steps := []func() bool{
 		func() bool {
+			if len(p.Cards) > extraFrom {
+				p.Cards = p.Cards[:len(p.Cards)-1]
+				return true
+			}
+			return false
+		},
+		func() bool {
 			if c := ac(); c != nil && c.Q != nil && c.Q.D != "" {
-				c.Q.D = ""
+				c.Q.D, c.Q.Cut = "", 1
 				return true
 			}
 			return false
@@ -282,14 +304,7 @@ func fitBudget(p *Payload, agentsAt, extraFrom, budget int) {
 		},
 		func() bool {
 			if c := ac(); c != nil && c.Q != nil {
-				c.Q = nil
-				return true
-			}
-			return false
-		},
-		func() bool {
-			if len(p.Cards) > extraFrom {
-				p.Cards = p.Cards[:len(p.Cards)-1]
+				c.Q, c.QCut = nil, 1 // only the Full variant has a q to drop
 				return true
 			}
 			return false

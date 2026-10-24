@@ -128,7 +128,7 @@ func TestPermissionFlow(t *testing.T) {
 	mustHook(t, tr, map[string]any{"hook_event_name": "PermissionRequest", "tool_name": "Bash",
 		"tool_input": map[string]string{"command": "terraform apply"}})
 	a := only(t, tr)
-	if a.Status != Waiting || a.Waiting == nil || a.Waiting.ID != "p1" || a.Waiting.Detail != "terraform apply" || a.Pane != "%3" {
+	if a.Status != Waiting || a.Waiting == nil || a.Waiting.ID != pid(tr, 1) || a.Waiting.Detail != "terraform apply" || a.Pane != "%3" {
 		t.Fatalf("%+v %+v", a, a.Waiting)
 	}
 	want := []string{"yes", "yes, and always allow access to /tmp/at-proj from this project", "no"}
@@ -152,7 +152,7 @@ func TestAnswer(t *testing.T) {
 	id := agentID(sidA)
 	mustHook(t, tr, map[string]any{"hook_event_name": "PermissionRequest", "tool_name": "Bash",
 		"tool_input": map[string]string{"command": "terraform apply"}})
-	if err := tr.Answer(context.Background(), id, "p1", "1"); err != nil {
+	if err := tr.Answer(context.Background(), id, pid(tr, 1), "1"); err != nil {
 		t.Fatal(err)
 	}
 	if got := env.run.matching("tmux send-keys"); len(got) != 1 || got[0] != "tmux send-keys -t %3 -l 1" {
@@ -163,7 +163,7 @@ func TestAnswer(t *testing.T) {
 	}
 	mustHook(t, tr, map[string]any{"hook_event_name": "PermissionRequest", "tool_name": "Bash",
 		"tool_input": map[string]string{"command": "rm -rf /"}})
-	if err := tr.Answer(context.Background(), id, "p2", "3"); err != nil {
+	if err := tr.Answer(context.Background(), id, pid(tr, 2), "3"); err != nil {
 		t.Fatal(err)
 	}
 	if a := only(t, tr); a.Status != Idle {
@@ -178,20 +178,20 @@ func TestAnswerStale(t *testing.T) {
 	mustHook(t, tr, map[string]any{"hook_event_name": "PermissionRequest", "tool_name": "Bash",
 		"tool_input": map[string]string{"command": "terraform apply"}})
 	mustHook(t, tr, map[string]any{"hook_event_name": "PostToolUse", "tool_name": "Bash"})
-	if err := tr.Answer(context.Background(), id, "p1", "1"); !errors.Is(err, ErrStale) {
+	if err := tr.Answer(context.Background(), id, pid(tr, 1), "1"); !errors.Is(err, ErrStale) {
 		t.Fatalf("answered at the terminal: %v", err)
 	}
 	mustHook(t, tr, map[string]any{"hook_event_name": "PermissionRequest", "tool_name": "Bash",
 		"tool_input": map[string]string{"command": "make"}})
-	if err := tr.Answer(context.Background(), id, "p1", "1"); !errors.Is(err, ErrStale) {
+	if err := tr.Answer(context.Background(), id, pid(tr, 1), "1"); !errors.Is(err, ErrStale) {
 		t.Fatalf("a newer prompt: %v", err)
 	}
 	for _, k := range []string{"9", "", "1; rm -rf ~", "Enter"} {
-		if err := tr.Answer(context.Background(), id, "p2", k); !errors.Is(err, ErrBadKey) {
+		if err := tr.Answer(context.Background(), id, pid(tr, 2), k); !errors.Is(err, ErrBadKey) {
 			t.Fatalf("key %q: %v", k, err)
 		}
 	}
-	if err := tr.Answer(context.Background(), "nobody", "p2", "1"); !errors.Is(err, ErrNotFound) {
+	if err := tr.Answer(context.Background(), "nobody", pid(tr, 2), "1"); !errors.Is(err, ErrNotFound) {
 		t.Fatalf("unknown agent: %v", err)
 	}
 	if got := env.run.matching("tmux send-keys"); len(got) != 0 {
@@ -203,7 +203,7 @@ func TestAnswerNotInTmux(t *testing.T) {
 	tr, env := newTestTracker(t)
 	mustHook(t, tr, map[string]any{"hook_event_name": "PermissionRequest", "tool_name": "Bash",
 		"tool_input": map[string]string{"command": "make"}})
-	if err := tr.Answer(context.Background(), agentID(sidA), "p1", "1"); !errors.Is(err, ErrNotInTmux) {
+	if err := tr.Answer(context.Background(), agentID(sidA), pid(tr, 1), "1"); !errors.Is(err, ErrNotInTmux) {
 		t.Fatalf("got %v", err)
 	}
 	if got := env.run.matching("tmux send-keys"); len(got) != 0 {
@@ -223,7 +223,7 @@ func TestMenuAnswer(t *testing.T) {
 	if err := tr.Answer(context.Background(), a.ID, a.Waiting.ID, "2"); err != nil {
 		t.Fatal(err)
 	}
-	if got := env.run.matching("tmux send-keys"); len(got) != 1 || got[0] != "tmux send-keys -t %3 Up Up Down Enter" {
+	if got := env.run.matching("tmux send-keys"); len(got) != 1 || got[0] != "tmux send-keys -t %3 Down Enter" {
 		t.Fatalf("sent %q", got)
 	}
 	if a := only(t, tr); a.Status != Starting {
@@ -535,9 +535,9 @@ func TestAnswerConcurrentSameKeyOnce(t *testing.T) {
 		}
 	})
 	errs := make(chan error, 2)
-	go func() { errs <- tr.Answer(context.Background(), id, "p1", "1") }()
+	go func() { errs <- tr.Answer(context.Background(), id, pid(tr, 1), "1") }()
 	<-entered // the first is typing
-	go func() { errs <- tr.Answer(context.Background(), id, "p1", "1") }()
+	go func() { errs <- tr.Answer(context.Background(), id, pid(tr, 1), "1") }()
 	var second error
 	select {
 	case second = <-errs:
@@ -565,15 +565,15 @@ func TestAnswerSendFailureReleasesClaim(t *testing.T) {
 	id := agentID(sidA)
 	mustHook(t, tr, map[string]any{"hook_event_name": "PermissionRequest", "tool_name": "Bash",
 		"tool_input": map[string]string{"command": "make"}})
-	env.run.setFail("tmux send-keys -t %3 -l 1", true)
-	if err := tr.Answer(context.Background(), id, "p1", "1"); err == nil || errors.Is(err, ErrStale) {
+	env.run.setErr("tmux send-keys -t %3 -l 1", errors.New("can't find pane: %3"))
+	if err := tr.Answer(context.Background(), id, pid(tr, 1), "1"); err == nil || errors.Is(err, ErrStale) {
 		t.Fatalf("send failure: %v", err)
 	}
-	if a := only(t, tr); a.Status != Waiting || a.Waiting.ID != "p1" {
+	if a := only(t, tr); a.Status != Waiting || a.Waiting.ID != pid(tr, 1) {
 		t.Fatalf("still waiting: %+v", a)
 	}
-	env.run.setFail("tmux send-keys -t %3 -l 1", false)
-	if err := tr.Answer(context.Background(), id, "p1", "1"); err != nil {
+	env.run.setErr("tmux send-keys -t %3 -l 1", nil)
+	if err := tr.Answer(context.Background(), id, pid(tr, 1), "1"); err != nil {
 		t.Fatalf("retry: %v", err)
 	}
 }
@@ -648,7 +648,7 @@ func TestRescanKeepsToItsPrompt(t *testing.T) {
 	permission("b") // p2 replaces p1 before p1's re-scan runs
 	pending = nil
 	p1Scan()
-	if a := only(t, tr); a.Waiting.ID != "p2" || a.Waiting.Options[1].Label != guessed {
+	if a := only(t, tr); a.Waiting.ID != pid(tr, 2) || a.Waiting.Options[1].Label != guessed {
 		t.Fatalf("p2 changed by p1's re-scan: %+v", a.Waiting)
 	}
 	if len(pending) != 0 {
@@ -665,7 +665,7 @@ func TestRescanKeepsToItsPrompt(t *testing.T) {
 		}
 	})
 	p3Scan()
-	if a := only(t, tr); a.Waiting.ID != "p4" || a.Waiting.Options[1].Label != guessed {
+	if a := only(t, tr); a.Waiting.ID != pid(tr, 4) || a.Waiting.Options[1].Label != guessed {
 		t.Fatalf("p4 changed by p3's re-scan: %+v", a.Waiting)
 	}
 }

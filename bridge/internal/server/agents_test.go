@@ -33,6 +33,7 @@ type stubAgents struct {
 	hookErr   error
 	answers   []answerCall
 	answerErr error
+	answerCtx error // ctx.Err() as the last Answer saw it
 	syncs     atomic.Int32
 	tick      chan struct{}
 }
@@ -48,9 +49,10 @@ func (a *stubAgents) Hook(b []byte) error {
 	return a.hookErr
 }
 func (a *stubAgents) Sync(context.Context) { a.syncs.Add(1) }
-func (a *stubAgents) Answer(_ context.Context, agent, prompt, key string) error {
+func (a *stubAgents) Answer(ctx context.Context, agent, prompt, key string) error {
 	a.mu.Lock()
 	defer a.mu.Unlock()
+	a.answerCtx = ctx.Err()
 	a.answers = append(a.answers, answerCall{agent, prompt, key})
 	return a.answerErr
 }
@@ -320,6 +322,22 @@ func TestAnswerEndpoint(t *testing.T) {
 	}
 	if _, after := ag.counts(); after != before {
 		t.Fatalf("Answer called for bad requests")
+	}
+}
+
+// Fix 1: a client that hangs up does not cancel the send: a half-typed
+// answer would otherwise look failed and be typed again.
+func TestAnswerSurvivesClientCancel(t *testing.T) {
+	ag := newStubAgents(waitingAgent())
+	s := newAgentsTest(ag, nil)
+	r := cubeReq("POST", "/api/answer", answerBody("a1", "p1", "1"))
+	ctx, cancel := context.WithCancel(r.Context())
+	cancel() // the client is gone before the answer is typed
+	serve(s, r.WithContext(ctx))
+	ag.mu.Lock()
+	defer ag.mu.Unlock()
+	if len(ag.answers) != 1 || ag.answerCtx != nil {
+		t.Fatalf("answers %d, ctx %v", len(ag.answers), ag.answerCtx)
 	}
 }
 

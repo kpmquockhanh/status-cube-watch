@@ -69,7 +69,7 @@ func TestHookBridgeDown(t *testing.T) {
 	port, _ := strconv.Atoi(p)
 	start := time.Now()
 	runHook(strings.NewReader("{}"), port, hookClient())
-	if d := time.Since(start); d > 1200*time.Millisecond {
+	if d := time.Since(start); d > 600*time.Millisecond {
 		t.Fatalf("took %v", d)
 	}
 }
@@ -83,7 +83,7 @@ func TestHookSlowBridge(t *testing.T) {
 	port, _ := strconv.Atoi(p)
 	start := time.Now()
 	runHook(strings.NewReader("{}"), port, hookClient())
-	if d := time.Since(start); d > 1200*time.Millisecond {
+	if d := time.Since(start); d > 600*time.Millisecond {
 		t.Fatalf("took %v", d)
 	}
 }

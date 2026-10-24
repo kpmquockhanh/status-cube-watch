@@ -40,7 +40,7 @@ var rescanWaits = []time.Duration{250 * time.Millisecond, 900 * time.Millisecond
 
 var (
 	paneRe = regexp.MustCompile(`^%[0-9]+$`)
-	keyRe  = regexp.MustCompile(`^[0-9]{1,2}$`)
+	keyRe  = regexp.MustCompile(`^[1-9]$`) // one digit: MaxOptions
 )
 
 // TrackerDeps are the tracker's seams; zero values get the real thing.
@@ -57,11 +57,14 @@ type TrackerDeps struct {
 type Tracker struct {
 	d TrackerDeps
 
-	mu      sync.Mutex
-	entries map[string]*entry
-	prompts int    // prompt ids handed out, for the tracker's lifetime
-	lastRun uint64 // the discovery run whose misses were counted last
-	counted bool   // lastRun is set
+	// Every t.mu Lock is paired with a deferred Unlock in the same small
+	// function, so a panic can never leave the tracker locked.
+	mu           sync.Mutex
+	entries      map[string]*entry
+	prompts      int    // prompt ids handed out, for the tracker's lifetime
+	promptPrefix string // prefixes every prompt id: unique per tracker start
+	lastRun      uint64 // the discovery run whose misses were counted last
+	counted      bool   // lastRun is set
 
 	subMu   sync.Mutex
 	subs    map[int]chan struct{}
@@ -93,13 +96,14 @@ func NewTracker(d TrackerDeps) *Tracker {
 	if d.Discover == nil {
 		d.Discover = NewDiscovery(d.Projects)
 	}
-	return &Tracker{d: d, entries: map[string]*entry{}, subs: map[int]chan struct{}{}}
+	return &Tracker{d: d, entries: map[string]*entry{}, subs: map[int]chan struct{}{},
+		promptPrefix: promptIDPrefix(d.Now())}
 }
 
 // newEntry adds an agent for sessionID; its prompt ids come from the
 // tracker's counter. Called with t.mu held.
 func (t *Tracker) newEntry(id, sessionID string, status Status, now time.Time) *entry {
-	e := &entry{promptSeq: &t.prompts}
+	e := &entry{promptSeq: &t.prompts, promptPfx: t.promptPrefix}
 	e.ID, e.SessionID = id, sessionID
 	e.SetStatus(status, now)
 	t.entries[id] = e
@@ -118,30 +122,8 @@ func (t *Tracker) Hook(body []byte) error {
 	}
 	subagent := strings.Contains(ev.TranscriptPath, "/subagents/")
 	ev.TranscriptPath = t.trustedTranscript(ev.TranscriptPath)
-	now := t.d.Now()
 	id := agentID(ev.SessionID)
-
-	t.mu.Lock()
-	e := t.entries[id]
-	created := false
-	if e == nil {
-		// A subagent's hooks belong to its parent; an end is no news.
-		if subagent || ev.Name == "SessionEnd" {
-			t.mu.Unlock()
-			return nil
-		}
-		e = t.newEntry(id, ev.SessionID, Starting, now)
-		created = true
-	}
-	e.HookSeen, e.LastHook, e.Missed = true, now, 0
-	changed, scan := apply(e, ev, now)
-	changed = retitle(e) || changed || created
-	pane, promptID := e.Pane, ""
-	if e.Waiting != nil {
-		promptID = e.Waiting.ID
-	}
-	t.mu.Unlock()
-
+	changed, scan, pane, promptID := t.applyHookEvent(id, ev, subagent, t.d.Now())
 	if changed {
 		t.notify()
 	}
@@ -149,6 +131,37 @@ func (t *Tracker) Hook(body []byte) error {
 		t.rescan(id, promptID, 0)
 	}
 	return nil
+}
+
+// applyEvent is apply; tests swap it to check the lock survives a panic.
+var applyEvent = apply
+
+// applyHookEvent folds ev into agent id under the lock; pane and promptID
+// are what a re-scan needs.
+func (t *Tracker) applyHookEvent(id string, ev Event, subagent bool, now time.Time) (changed, scan bool, pane, promptID string) {
+	t.mu.Lock()
+	defer t.mu.Unlock()
+	e := t.entries[id]
+	created := false
+	if e == nil {
+		// A subagent's hooks belong to its parent; an end is no news.
+		if subagent || ev.Name == "SessionEnd" {
+			return false, false, "", ""
+		}
+		e = t.newEntry(id, ev.SessionID, Starting, now)
+		created = true
+	}
+	e.HookSeen, e.LastHook, e.Missed = true, now, 0
+	changed, scan = applyEvent(e, ev, now)
+	if e.Status == Starting { // any hook proves Claude is up
+		e.SetStatus(Idle, now)
+		changed = true
+	}
+	changed = retitle(e) || changed || created
+	if e.Waiting != nil {
+		promptID = e.Waiting.ID
+	}
+	return changed, scan, e.Pane, promptID
 }
 
 // rescan reads the pane after each of rescanWaits, replacing the guessed
@@ -168,30 +181,44 @@ func (t *Tracker) rescan(id, promptID string, step int) {
 // refineFromPane refines prompt promptID from the pane; false once that
 // prompt is gone.
 func (t *Tracker) refineFromPane(id, promptID string) bool {
-	open := func(e *entry) bool { return e != nil && e.Waiting != nil && e.Waiting.ID == promptID }
-	t.mu.Lock()
-	e := t.entries[id]
-	if !open(e) || e.Pane == "" {
-		t.mu.Unlock()
+	pane := t.openPromptPane(id, promptID)
+	if pane == "" {
 		return false
 	}
-	pane := e.Pane
-	t.mu.Unlock()
-
 	screen := t.d.Tmux.Capture(context.Background(), pane, paneHistory)
-
-	t.mu.Lock()
-	changed := false
-	e = t.entries[id]
-	still := open(e) && e.Pane == pane
-	if still {
-		changed = RefineOptions(e.Waiting, screen)
-	}
-	t.mu.Unlock()
+	changed, still := t.refineOpenPrompt(id, promptID, pane, screen)
 	if changed {
 		t.notify()
 	}
 	return still
+}
+
+// openPrompt: prompt promptID is agent e's open one.
+func openPrompt(e *entry, promptID string) bool {
+	return e != nil && e.Waiting != nil && e.Waiting.ID == promptID
+}
+
+// openPromptPane is the pane of agent id while promptID is its open prompt;
+// "" otherwise (or when not in tmux).
+func (t *Tracker) openPromptPane(id, promptID string) string {
+	t.mu.Lock()
+	defer t.mu.Unlock()
+	if e := t.entries[id]; openPrompt(e, promptID) {
+		return e.Pane
+	}
+	return ""
+}
+
+// refineOpenPrompt refines prompt promptID from screen, read from pane, if
+// that prompt is still open in that pane (still).
+func (t *Tracker) refineOpenPrompt(id, promptID, pane, screen string) (changed, still bool) {
+	t.mu.Lock()
+	defer t.mu.Unlock()
+	e := t.entries[id]
+	if !openPrompt(e, promptID) || e.Pane != pane {
+		return false, false
+	}
+	return RefineOptions(e.Waiting, screen), true
 }
 
 // Sync runs discovery, maps sessions to tmux panes, tails transcripts,
@@ -202,7 +229,19 @@ func (t *Tracker) Sync(ctx context.Context) {
 	panes := t.d.Tmux.Panes(ctx)
 	now := t.d.Now()
 
+	changed, jobs := t.syncStart(lives, run, ok, panes, now)
+	for i := range jobs {
+		jobs[i].run(ctx, t.d.Tmux, now)
+	}
+	if t.syncFinish(jobs, now) || changed {
+		t.notify()
+	}
+}
+
+// syncStart folds discovery and the tmux panes in and makes the read jobs.
+func (t *Tracker) syncStart(lives []Live, run uint64, ok bool, panes map[string]string, now time.Time) (bool, []syncJob) {
 	t.mu.Lock()
+	defer t.mu.Unlock()
 	var changed bool
 	if ok {
 		var seen map[string]bool
@@ -214,22 +253,18 @@ func (t *Tracker) Sync(ctx context.Context) {
 		}
 	}
 	changed = t.mapPanes(panes) || changed
-	jobs := t.syncJobs()
-	t.mu.Unlock()
+	return changed, t.syncJobs()
+}
 
-	for i := range jobs {
-		jobs[i].run(ctx, t.d.Tmux, now)
-	}
-
+// syncFinish folds the jobs' reads in and drops agents that are gone.
+func (t *Tracker) syncFinish(jobs []syncJob, now time.Time) bool {
 	t.mu.Lock()
+	defer t.mu.Unlock()
+	changed := false
 	for i := range jobs {
 		changed = t.applyJob(&jobs[i], now) || changed
 	}
-	changed = t.expire(now) || changed
-	t.mu.Unlock()
-	if changed {
-		t.notify()
-	}
+	return t.expire(now) || changed
 }
 
 // applyDiscovery adds newly found sessions and refreshes what discovery
@@ -262,7 +297,7 @@ func (t *Tracker) applyDiscovery(lives []Live, now time.Time) (changed bool, see
 			changed = true
 		}
 		if e.Transcript == "" && transcript != "" {
-			e.Transcript, e.Offset, e.Pending = transcript, 0, ""
+			e.Transcript, e.Offset, e.Pending, e.SkipLine = transcript, 0, "", false
 		}
 		changed = retitle(e) || changed
 	}
@@ -364,10 +399,10 @@ func (t *Tracker) applyJob(j *syncJob, now time.Time) bool {
 // when no hook moved the status since the job started.
 func mergeTail(e *entry, j *syncJob) bool {
 	s, r := &j.snap, &j.tailed
-	if e.Transcript != s.Transcript || e.Offset != s.Offset || e.Pending != s.Pending {
+	if e.Transcript != s.Transcript || e.Offset != s.Offset || e.Pending != s.Pending || e.SkipLine != s.SkipLine {
 		return false // re-read on the next Sync
 	}
-	e.Offset, e.Pending = r.Offset, r.Pending
+	e.Offset, e.Pending, e.SkipLine = r.Offset, r.Pending, r.SkipLine
 	if !j.tailChanged {
 		return false
 	}
@@ -405,11 +440,21 @@ func scanMenu(e *entry, screen string, now time.Time) bool {
 	case !ok && e.Menu:
 		e.Menu = false
 		if e.Status == Waiting {
-			e.SetStatus(Starting, now)
+			e.SetStatus(afterMenu(e), now)
 		}
 		return true
 	}
 	return false
+}
+
+// afterMenu is the status once a menu is gone: idle for an agent that sends
+// hooks (Claude is up, and hooks own the status), else starting until its
+// transcript says more.
+func afterMenu(e *entry) Status {
+	if e.HookSeen {
+		return Idle
+	}
+	return Starting
 }
 
 // liveStatus reads the state of a session that sends no hooks off the end of
@@ -510,86 +555,133 @@ func (t *Tracker) expire(now time.Time) bool {
 	return changed
 }
 
+// answerClaim is what Answer needs once it has claimed a prompt.
+type answerClaim struct {
+	pane    string
+	menu    bool
+	idx     int      // the chosen option
+	label   string   // its label
+	options []string // every option's label (menu: to recognise it on screen)
+}
+
 // Answer types the chosen option of the open prompt into the agent's pane:
-// the option's digit, or arrow keys for an unnumbered menu.
+// the option's digit, or, for an unnumbered menu, arrow keys from wherever
+// the cursor is now. A send that may have typed something (timeout, kill)
+// keeps the prompt claimed, so a retry can never type twice; only a send
+// tmux refused up front gives it back.
 func (t *Tracker) Answer(ctx context.Context, agentID, promptID, key string) error {
-	t.mu.Lock()
-	e := t.entries[agentID]
-	if e == nil {
-		t.mu.Unlock()
-		return ErrNotFound
-	}
-	p := e.Waiting
-	// A prompt another Answer is already typing into is answered.
-	if e.Status != Waiting || p == nil || p.ID != promptID || e.Answering == promptID {
-		t.mu.Unlock()
-		return ErrStale
-	}
-	idx, label := -1, ""
-	if keyRe.MatchString(key) {
-		for i, o := range p.Options {
-			if o.Key == key {
-				idx, label = i, o.Label
-			}
-		}
-	}
-	if idx < 0 {
-		t.mu.Unlock()
-		return ErrBadKey
-	}
-	pane, menu := e.Pane, e.Menu
-	if !paneRe.MatchString(pane) {
-		t.mu.Unlock()
-		return ErrNotInTmux
-	}
-	var keys []string
-	if menu {
-		for range p.Options {
-			keys = append(keys, "Up")
-		}
-		for range idx {
-			keys = append(keys, "Down")
-		}
-		keys = append(keys, "Enter")
-	}
-	e.Answering = promptID // claim it before the lock goes
-	t.mu.Unlock()
-
-	var err error
-	if menu {
-		err = t.d.Tmux.SendKeys(ctx, pane, "", keys...)
-	} else {
-		err = t.d.Tmux.SendKeys(ctx, pane, key)
-	}
-
-	now := t.d.Now()
-	t.mu.Lock()
-	e = t.entries[agentID]
-	if e != nil && e.Answering == promptID {
-		e.Answering = "" // answered, or given back when typing failed
-	}
+	c, err := t.claimPrompt(agentID, promptID, key)
 	if err != nil {
-		t.mu.Unlock()
 		return err
 	}
-	changed := false
-	if e != nil && e.Waiting != nil && e.Waiting.ID == promptID {
-		switch {
-		case e.Menu:
-			e.Menu = false
-			e.SetStatus(Starting, now)
-		case strings.HasPrefix(label, "no"):
-			e.SetStatus(Idle, now) // Claude stops and waits for instructions
-		default:
-			e.SetStatus(Running, now)
+	if c.menu {
+		var keys []string
+		keys, err = t.menuKeys(ctx, c)
+		if err == nil {
+			err = t.d.Tmux.SendKeys(ctx, c.pane, "", keys...)
 		}
-		changed = true
+	} else {
+		err = t.d.Tmux.SendKeys(ctx, c.pane, key)
 	}
-	t.mu.Unlock()
-	if changed {
+	if err != nil {
+		if errors.Is(err, ErrStale) || sentNothing(err) {
+			t.releasePrompt(agentID, promptID)
+		}
+		return err
+	}
+	if t.answered(agentID, promptID, c.label, t.d.Now()) {
 		t.notify()
 	}
 	return nil
+}
+
+// claimPrompt checks the answer and marks the prompt as being answered.
+func (t *Tracker) claimPrompt(agentID, promptID, key string) (answerClaim, error) {
+	t.mu.Lock()
+	defer t.mu.Unlock()
+	e := t.entries[agentID]
+	if e == nil {
+		return answerClaim{}, ErrNotFound
+	}
+	p := e.Waiting
+	// A prompt another Answer is typing (or may have typed) into is answered.
+	if e.Status != Waiting || p == nil || p.ID != promptID || e.Answering == promptID {
+		return answerClaim{}, ErrStale
+	}
+	c := answerClaim{pane: e.Pane, menu: e.Menu, idx: -1}
+	for i, o := range p.Options {
+		c.options = append(c.options, o.Label)
+		if keyRe.MatchString(key) && o.Key == key {
+			c.idx, c.label = i, o.Label
+		}
+	}
+	if c.idx < 0 {
+		return answerClaim{}, ErrBadKey
+	}
+	if !paneRe.MatchString(c.pane) {
+		return answerClaim{}, ErrNotInTmux
+	}
+	e.Answering = promptID // claim it before the lock goes
+	return c, nil
+}
+
+// menuKeys re-reads the pane and returns the arrow keys from the cursor's
+// row to the chosen one, then Enter; ErrStale when the pane no longer shows
+// that menu.
+func (t *Tracker) menuKeys(ctx context.Context, c answerClaim) ([]string, error) {
+	_, rows, cursor, ok := cursorMenu(t.d.Tmux.Capture(ctx, c.pane, 0))
+	if !ok || len(rows) != len(c.options) {
+		return nil, ErrStale
+	}
+	for i, l := range c.options {
+		if rows[i].Label != l {
+			return nil, ErrStale
+		}
+	}
+	var keys []string
+	for d := c.idx - cursor; d != 0; {
+		if d > 0 {
+			keys, d = append(keys, "Down"), d-1
+		} else {
+			keys, d = append(keys, "Up"), d+1
+		}
+	}
+	return append(keys, "Enter"), nil
+}
+
+// releasePrompt gives a claimed prompt back: nothing was typed.
+func (t *Tracker) releasePrompt(agentID, promptID string) {
+	t.mu.Lock()
+	defer t.mu.Unlock()
+	if e := t.entries[agentID]; e != nil && e.Answering == promptID {
+		e.Answering = ""
+	}
+}
+
+// answered moves the agent on after a sent answer; true when it changed.
+func (t *Tracker) answered(agentID, promptID, label string, now time.Time) bool {
+	t.mu.Lock()
+	defer t.mu.Unlock()
+	e := t.entries[agentID]
+	if e == nil {
+		return false
+	}
+	if e.Answering == promptID {
+		e.Answering = ""
+	}
+	if !openPrompt(e, promptID) {
+		return false
+	}
+	switch {
+	case e.Menu:
+		e.Menu = false
+		e.SetStatus(afterMenu(e), now)
+	case strings.HasPrefix(label, "no"):
+		e.SetStatus(Idle, now) // Claude stops and waits for instructions
+	default:
+		e.SetStatus(Running, now)
+	}
+	return true
 }
 
 // Snapshot returns copies of every agent, by id.
@@ -619,16 +711,21 @@ func (t *Tracker) Snapshot() []Agent {
 // ticks coalesce, the tracker never waits) and a function to stop.
 func (t *Tracker) Subscribe() (<-chan struct{}, func()) {
 	ch := make(chan struct{}, 1)
+	id := t.addSub(ch)
+	return ch, func() {
+		t.subMu.Lock()
+		defer t.subMu.Unlock()
+		delete(t.subs, id)
+	}
+}
+
+func (t *Tracker) addSub(ch chan struct{}) int {
 	t.subMu.Lock()
+	defer t.subMu.Unlock()
 	id := t.nextSub
 	t.nextSub++
 	t.subs[id] = ch
-	t.subMu.Unlock()
-	return ch, func() {
-		t.subMu.Lock()
-		delete(t.subs, id)
-		t.subMu.Unlock()
-	}
+	return id
 }
 
 func (t *Tracker) notify() {

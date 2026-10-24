@@ -29,12 +29,24 @@ type Event struct {
 // apply folds one hook event into the agent. It returns whether the agent
 // changed and whether the pane should be scanned for prompt options. The
 // caller has already checked ev.TranscriptPath (blank when not trusted).
+//
+// A hook that sets the status or a prompt owns it from then on: an on-screen
+// menu prompt it replaced is forgotten, so the next menu scan cannot wipe it.
 func apply(e *entry, ev Event, now time.Time) (changed, scanPane bool) {
+	status, waiting := e.Status, e.Waiting
+	changed, scanPane = applyHook(e, ev, now)
+	if e.Status != status || e.Waiting != waiting {
+		e.Menu = false
+	}
+	return changed, scanPane
+}
+
+func applyHook(e *entry, ev Event, now time.Time) (changed, scanPane bool) {
 	e.Background = false // hooks are the real status again
 	// Only the main transcript counts; a subagent's own file would swap the
 	// context ring to the subagent's and force a full re-read on the way back.
 	if ev.TranscriptPath != "" && e.Transcript != ev.TranscriptPath && !strings.Contains(ev.TranscriptPath, "/subagents/") {
-		e.Transcript, e.Offset, e.Pending = ev.TranscriptPath, 0, ""
+		e.Transcript, e.Offset, e.Pending, e.SkipLine = ev.TranscriptPath, 0, "", false
 	}
 	if ev.SessionID != "" {
 		e.SessionID = ev.SessionID
@@ -167,9 +179,10 @@ func permissionPrompt(e *entry, tool string, input json.RawMessage) *Prompt {
 func questionPrompt(e *entry, input json.RawMessage) *Prompt {
 	var in struct {
 		Questions []struct {
-			Question string `json:"question"`
-			Header   string `json:"header"`
-			Options  []struct {
+			Question    string `json:"question"`
+			Header      string `json:"header"`
+			MultiSelect bool   `json:"multiSelect"`
+			Options     []struct {
 				Label       string `json:"label"`
 				Description string `json:"description"`
 			} `json:"options"`
@@ -181,15 +194,17 @@ func questionPrompt(e *entry, input json.RawMessage) *Prompt {
 	q := in.Questions[0]
 	p := &Prompt{ID: e.NextPromptID(), Kind: "question", Title: lower(q.Question),
 		Context: fmt.Sprintf("question · 1 of %d", len(in.Questions))}
-	for i, o := range q.Options {
+	for i, o := range q.Options[:min(len(q.Options), MaxOptions)] {
 		label := o.Label
 		if o.Description != "" {
 			label += " — " + o.Description
 		}
 		p.Options = append(p.Options, Option{Key: fmt.Sprint(i + 1), Label: label, Primary: i == 0})
 	}
-	if len(in.Questions) > 1 || len(p.Options) == 0 {
-		p.Kind = "input" // multi-question forms are answered at the terminal
+	if len(in.Questions) > 1 || q.MultiSelect || len(p.Options) == 0 {
+		// Multi-question forms and multi-select questions (one digit toggles a
+		// box, it does not answer) are answered at the terminal.
+		p.Kind = "input"
 		p.Options = nil
 	}
 	return p

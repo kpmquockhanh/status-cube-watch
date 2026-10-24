@@ -327,6 +327,75 @@ func TestAgentsPayloadBudget(t *testing.T) {
 	if c.A[0].N != "du-an-dep-du-an-" || c.Q.T == "" || c.Q.D == "" || len(c.Q.O) != 6 {
 		t.Errorf("tile %+v q %+v", c.A[0], c.Q)
 	}
+	// With the extra cards on, they go before any prompt data.
+	p = Build(budgetEvents(), budgetOpts(true), agentsNow)
+	c = agentsCard(t, p)
+	if len(c.A) != MaxTiles || c.Q == nil || c.Q.D == "" || c.Q.Cut != 0 || len(c.Q.O) != 6 {
+		t.Fatalf("with extra cards: %d tiles, q %+v", len(c.A), c.Q)
+	}
+	if all := build(budgetEvents(), budgetOpts(true), agentsNow, 1<<20); len(p.Cards) >= len(all.Cards) {
+		t.Errorf("no extra card was dropped: %d cards", len(p.Cards))
+	}
+}
+
+// Fix 4: a cut title or detail ends in "..." within its maximum; short ones
+// are left alone; dropped detail and prompt are marked.
+func TestPromptCutMarks(t *testing.T) {
+	a := agent("m1", "f", agents.Waiting, time.Minute)
+	a.Waiting.Title = strings.Repeat("title ", 20)
+	a.Waiting.Detail = strings.Repeat("detail ", 40)
+	q := agentsCard(t, Build(nil, Opts{Agents: []agents.Agent{a}, ShowAgents: true, Full: true}, agentsNow)).Q
+	if len(q.T) != PromptTitleChars || !strings.HasSuffix(q.T, "...") || !strings.HasPrefix(q.T, "title title") {
+		t.Errorf("title %q (%d)", q.T, len(q.T))
+	}
+	if len(q.D) > PromptDetailChars || !strings.HasSuffix(q.D, "...") || strings.HasSuffix(q.D, " ...") {
+		t.Errorf("detail %q (%d)", q.D, len(q.D))
+	}
+	if q.Cut != 0 {
+		t.Errorf("cut set without the budget: %+v", q)
+	}
+	b := agent("m2", "f", agents.Waiting, time.Minute)
+	b.Waiting.Title = strings.Repeat("x", PromptTitleChars)
+	if q := agentsCard(t, Build(nil, Opts{Agents: []agents.Agent{b}, ShowAgents: true, Full: true}, agentsNow)).Q; q.T != b.Waiting.Title {
+		t.Errorf("a title that fits was changed: %q", q.T)
+	}
+
+	o := budgetOpts(false)
+	events := budgetEvents()
+	full := build(events, o, agentsNow, 1<<20)
+	noDetail := full
+	noDetail.Cards = append([]Card(nil), full.Cards...)
+	q2 := *noDetail.Cards[2].Q
+	q2.D = ""
+	noDetail.Cards[2].Q = &q2
+	got := build(events, o, agentsNow, size(t, noDetail)+len(`,"cut":1`))
+	if c := agentsCard(t, got); c.Q == nil || c.Q.D != "" || c.Q.Cut != 1 || c.QCut != 0 {
+		t.Fatalf("detail dropped: %+v", c.Q)
+	}
+	b2, _ := Marshal(got)
+	if !strings.Contains(string(b2), `"d":""`) || !strings.Contains(string(b2), `"cut":1`) {
+		t.Errorf("cut not in the JSON: %s", b2)
+	}
+	// The largest budget that drops the prompt marks it.
+	budget := MaxPayloadBytes
+	for ; budget > 0; budget-- {
+		if c := agentsCard(t, build(events, o, agentsNow, budget)); c == nil || c.Q == nil {
+			break
+		}
+	}
+	small := build(events, o, agentsNow, budget)
+	c := agentsCard(t, small)
+	if c == nil || c.Q != nil || c.QCut != 1 {
+		t.Fatalf("prompt dropped at %d: %+v", budget, c)
+	}
+	if b3, _ := Marshal(small); !strings.Contains(string(b3), `"qc":1`) {
+		t.Errorf("qc not in the JSON: %s", b3)
+	}
+	// The LAN variant never had a prompt: no mark.
+	o.Full = false
+	if c := agentsCard(t, build(events, o, agentsNow, budget)); c == nil || c.QCut != 0 {
+		t.Fatalf("LAN: %+v", c)
+	}
 }
 
 func TestAgentsTileCap(t *testing.T) {
@@ -361,20 +430,20 @@ func TestAgentsTrimOrder(t *testing.T) {
 	var expect []Payload
 	step := clone(full)
 	ac := func() *Card { return &step.Cards[agentsAt] }
-	ac().Q.D = ""
-	expect = append(expect, clone(step)) // 1: detail
-	ac().Q.O = ac().Q.O[:4]
-	expect = append(expect, clone(step)) // 2: options beyond 4
-	for len(ac().A) > 4 {
-		ac().A = ac().A[:len(ac().A)-1]
-		expect = append(expect, clone(step)) // 3: tiles from the end
-	}
-	ac().Q = nil
-	expect = append(expect, clone(step)) // 4: prompt
 	for len(step.Cards) > agentsAt+1 {
 		step.Cards = step.Cards[:len(step.Cards)-1]
-		expect = append(expect, clone(step)) // 5: extra cards from the end
+		expect = append(expect, clone(step)) // 1: extra cards from the end
 	}
+	ac().Q.D, ac().Q.Cut = "", 1
+	expect = append(expect, clone(step)) // 2: detail, marked
+	ac().Q.O = ac().Q.O[:4]
+	expect = append(expect, clone(step)) // 3: options beyond 4
+	for len(ac().A) > 4 {
+		ac().A = ac().A[:len(ac().A)-1]
+		expect = append(expect, clone(step)) // 4: tiles from the end
+	}
+	ac().Q, ac().QCut = nil, 1
+	expect = append(expect, clone(step)) // 5: prompt, marked
 	step.Cards = step.Cards[:agentsAt]
 	expect = append(expect, clone(step)) // last resort: the Agents card
 

@@ -3,6 +3,7 @@ package agents
 import (
 	"context"
 	"errors"
+	"slices"
 	"strings"
 	"sync"
 	"testing"
@@ -15,12 +16,20 @@ type fakeRun struct {
 	calls []string
 	out   map[string]string
 	fail  map[string]bool
+	errs  map[string]error    // a specific error for a command (exact match)
+	envs  map[string][]string // the extra environment each command last ran with
 	// onCall, when set, runs before each command is answered (outside the
 	// fake's lock): a slow command, or something happening meanwhile.
 	onCall func(cmd string)
 }
 
-func newFakeRun() *fakeRun { return &fakeRun{out: map[string]string{}, fail: map[string]bool{}} }
+func newFakeRun() *fakeRun {
+	return &fakeRun{out: map[string]string{}, fail: map[string]bool{}, errs: map[string]error{}, envs: map[string][]string{}}
+}
+
+func (f *fakeRun) setErr(cmd string, err error) { f.mu.Lock(); f.errs[cmd] = err; f.mu.Unlock() }
+
+func (f *fakeRun) envOf(cmd string) []string { f.mu.Lock(); defer f.mu.Unlock(); return f.envs[cmd] }
 
 func (f *fakeRun) set(cmd, out string) { f.mu.Lock(); f.out[cmd] = out; f.mu.Unlock() }
 
@@ -28,7 +37,7 @@ func (f *fakeRun) setFail(cmd string, fail bool) { f.mu.Lock(); f.fail[cmd] = fa
 
 func (f *fakeRun) setOnCall(h func(string)) { f.mu.Lock(); f.onCall = h; f.mu.Unlock() }
 
-func (f *fakeRun) run(_ context.Context, name string, args ...string) ([]byte, error) {
+func (f *fakeRun) run(ctx context.Context, name string, args ...string) ([]byte, error) {
 	cmd := strings.Join(append([]string{name}, args...), " ")
 	f.mu.Lock()
 	hook := f.onCall
@@ -39,6 +48,10 @@ func (f *fakeRun) run(_ context.Context, name string, args ...string) ([]byte, e
 	f.mu.Lock()
 	defer f.mu.Unlock()
 	f.calls = append(f.calls, cmd)
+	f.envs[cmd] = runEnv(ctx)
+	if err := f.errs[cmd]; err != nil {
+		return nil, err
+	}
 	if f.fail[cmd] {
 		return nil, errors.New("failed")
 	}
@@ -123,6 +136,37 @@ func TestTmuxSendKeysError(t *testing.T) {
 	tm := &Tmux{Bin: "tmux", Run: newFakeRun().run}
 	if err := tm.SendKeys(context.Background(), "%1", "1"); err == nil {
 		t.Fatal("a failed send-keys must report an error")
+	}
+}
+
+// Fix 9: tmux runs with a UTF-8 locale, so capture-pane keeps ❯ and │ under
+// launchd's minimal environment.
+func TestTmuxUTF8Env(t *testing.T) {
+	f := newFakeRun()
+	f.set("tmux", "")
+	tm := &Tmux{Bin: "tmux", Run: f.run}
+	tm.Panes(context.Background())
+	tm.Capture(context.Background(), "%1", 0)
+	_ = tm.SendKeys(context.Background(), "%1", "1", "Enter")
+	if len(f.calls) != 4 {
+		t.Fatalf("calls %q", f.calls)
+	}
+	for _, c := range f.calls {
+		if env := f.envOf(c); !slices.Contains(env, "LC_CTYPE=en_US.UTF-8") {
+			t.Errorf("%s ran with env %q", c, env)
+		}
+	}
+}
+
+// The real runner passes that environment on (checked with /usr/bin/env).
+func TestExecRunnerEnv(t *testing.T) {
+	out, err := execRunner(withRunEnv(context.Background(), "CUBE_TEST_ENV=x1"), "/usr/bin/env")
+	if err != nil {
+		t.Fatal(err)
+	}
+	// Report only the checks: the environment may hold secrets.
+	if !strings.Contains(string(out), "CUBE_TEST_ENV=x1\n") || !strings.Contains(string(out), "PATH=") {
+		t.Fatal("the extra variable or the inherited PATH is missing")
 	}
 }
 

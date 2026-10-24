@@ -8,6 +8,9 @@ import (
 	"strings"
 )
 
+// MaxOptions caps a prompt's options: an answer key is one digit, 1-9.
+const MaxOptions = 9
+
 // optionRe matches a numbered choice in Claude Code's dialogs, with or without
 // the selection cursor: "❯ 1. Yes", "  2. Yes, and don't ask again for …".
 var optionRe = regexp.MustCompile(`^[\s│|]*(?:[❯›>]\s*)?(\d{1,2})[.)]\s+(.+?)[\s│|]*$`)
@@ -27,7 +30,7 @@ func ParseOptions(pane string) []Option {
 		switch {
 		case n == 1:
 			run = []Option{{Key: "1", Label: cleanLabel(m[2])}}
-		case len(run) > 0 && n == len(run)+1:
+		case len(run) > 0 && n == len(run)+1 && n <= MaxOptions:
 			run = append(run, Option{Key: m[1], Label: cleanLabel(m[2])})
 		default:
 			continue
@@ -86,6 +89,14 @@ var cursorRe = regexp.MustCompile(`^\s{0,3}(❯\s|\s\s)\s*(\S.*?)\s*$`)
 // "Enter to confirm" footer (e.g. the workspace-trust dialog). title is the
 // dialog's first line.
 func ParseCursorMenu(pane string) (title string, opts []Option, ok bool) {
+	// At most 8 rows (the scan below looks 8 lines up), within MaxOptions.
+	title, opts, _, ok = cursorMenu(pane)
+	return title, opts, ok
+}
+
+// cursorMenu is ParseCursorMenu with every row and the index of the row the
+// cursor (❯) is on.
+func cursorMenu(pane string) (title string, opts []Option, cursor int, ok bool) {
 	lines := strings.Split(pane, "\n")
 	footer := -1
 	for i := len(lines) - 1; i >= 0; i-- {
@@ -95,7 +106,7 @@ func ParseCursorMenu(pane string) (title string, opts []Option, ok bool) {
 		}
 	}
 	if footer < 0 {
-		return "", nil, false
+		return "", nil, 0, false
 	}
 	start := footer
 	for i := footer - 1; i >= 0 && footer-i <= 8; i-- {
@@ -114,12 +125,12 @@ func ParseCursorMenu(pane string) (title string, opts []Option, ok bool) {
 			continue
 		}
 		if strings.HasPrefix(strings.TrimLeft(l, " "), "❯") {
-			selected = true
+			selected, cursor = true, len(opts)
 		}
 		opts = append(opts, Option{Key: strconv.Itoa(len(opts) + 1), Label: lower(m[2])})
 	}
 	if len(opts) < 2 || !selected {
-		return "", nil, false
+		return "", nil, 0, false
 	}
 	// Title: the first text line after the dialog's top rule.
 	top := 0
@@ -146,5 +157,5 @@ func ParseCursorMenu(pane string) (title string, opts []Option, ok bool) {
 		}
 	}
 	opts[primary].Primary = true
-	return lower(title), opts, true
+	return lower(title), opts, cursor, true
 }

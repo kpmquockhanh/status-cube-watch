@@ -15,11 +15,28 @@ import (
 // Runner runs a command and returns its stdout: the seam tests replace.
 type Runner func(ctx context.Context, name string, args ...string) ([]byte, error)
 
+type runEnvKey struct{}
+
+// withRunEnv asks the Runner to add env ("KEY=value") to the command's
+// inherited environment.
+func withRunEnv(ctx context.Context, env ...string) context.Context {
+	return context.WithValue(ctx, runEnvKey{}, append(runEnv(ctx), env...))
+}
+
+// runEnv is the extra environment withRunEnv put in ctx.
+func runEnv(ctx context.Context) []string {
+	env, _ := ctx.Value(runEnvKey{}).([]string)
+	return env
+}
+
 // execRunner runs the command for real, outside any project folder (nothing
-// for claude to trust or read there).
+// for claude to trust or read there), with the extra environment of ctx.
 func execRunner(ctx context.Context, name string, args ...string) ([]byte, error) {
 	cmd := exec.CommandContext(ctx, name, args...)
 	cmd.Dir = os.TempDir()
+	if env := runEnv(ctx); len(env) > 0 {
+		cmd.Env = append(os.Environ(), env...) // a later duplicate wins
+	}
 	out, err := cmd.Output()
 	var ee *exec.ExitError
 	if errors.As(err, &ee) && len(ee.Stderr) > 0 {
@@ -48,8 +65,12 @@ func NewTmux() *Tmux {
 	return &Tmux{Bin: bin, Run: execRunner}
 }
 
+// tmuxEnv: launchd gives the bridge no locale, and a tmux client without a
+// UTF-8 one turns ❯ and │ into "_" in capture-pane, which hides every dialog.
+var tmuxEnv = []string{"LC_CTYPE=en_US.UTF-8"}
+
 func (t *Tmux) run(ctx context.Context, args ...string) (string, error) {
-	ctx, cancel := context.WithTimeout(ctx, tmuxTimeout)
+	ctx, cancel := context.WithTimeout(withRunEnv(ctx, tmuxEnv...), tmuxTimeout)
 	defer cancel()
 	out, err := t.Run(ctx, t.Bin, args...)
 	return strings.TrimRight(string(out), "\n"), err
@@ -77,6 +98,26 @@ func (t *Tmux) Panes(ctx context.Context) map[string]string {
 func (t *Tmux) Capture(ctx context.Context, pane string, back int) string {
 	out, _ := t.run(ctx, "capture-pane", "-p", "-J", "-t", pane, "-S", "-"+strconv.Itoa(max(back, 0)))
 	return out
+}
+
+// sentNothing reports whether a failed tmux command certainly typed nothing:
+// tmux refused it up front (no server, no such pane) or could not be started.
+// A timeout, a kill or any other failure may have come after the keys landed.
+func sentNothing(err error) bool {
+	if err == nil || errors.Is(err, context.DeadlineExceeded) || errors.Is(err, context.Canceled) {
+		return false
+	}
+	if errors.Is(err, exec.ErrNotFound) || errors.Is(err, os.ErrNotExist) {
+		return true
+	}
+	msg := err.Error()
+	for _, refused := range []string{"can't find pane", "can't find window", "can't find session",
+		"no server running", "error connecting to"} {
+		if strings.Contains(msg, refused) {
+			return true
+		}
+	}
+	return false
 }
 
 // SendKeys types literal (if any) into the pane, then presses keys.

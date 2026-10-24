@@ -5,6 +5,7 @@ package agents
 import (
 	"context"
 	"encoding/json"
+	"log"
 	"os"
 	"path/filepath"
 	"regexp"
@@ -41,27 +42,34 @@ type Discoverer interface {
 }
 
 const (
-	agentsEvery   = 10 * time.Second // `claude agents --json` at most this often
-	agentsTimeout = 15 * time.Second
-	lookTimeout   = 10 * time.Second
-	scanTimeout   = 5 * time.Second // ps, lsof
+	agentsEvery     = 10 * time.Second // `claude agents --json` at most this often
+	agentsIdleEvery = 60 * time.Second // ... once no agent was seen for idleAfter
+	idleAfter       = 10 * time.Minute
+	lookRetry       = 5 * time.Minute // a failed claude lookup is retried this often
+	agentsTimeout   = 15 * time.Second
+	lookTimeout     = 10 * time.Second
+	scanTimeout     = 5 * time.Second // ps, lsof
 )
 
 // Discovery asks Claude Code itself (`claude agents --json`, at most every
-// 10 s), else scans processes (older Claude Code, or no claude on the login
-// PATH).
+// 10 s, every 60 s after 10 minutes without an agent), else scans processes
+// (older Claude Code, or no claude on the login PATH yet).
 type Discovery struct {
 	Run      Runner
 	Projects string // transcript folder (~/.claude/projects)
 	Now      func() time.Time
+	Logf     func(format string, args ...any) // nil = silent
 
 	mu          sync.Mutex
-	claudeBin   string // resolved once from the login shell; "-" = not found
+	claudeBin   string    // resolved from the login shell; "" = not (yet) found
+	lookFailed  time.Time // the last failed lookup (zero: none)
 	reported    []Live
 	reportedOK  bool
 	reportedAt  time.Time
 	reportedRun uint64
-	runs        uint64 // discovery runs so far
+	runs        uint64    // discovery runs so far
+	lastSeen    time.Time // the last run that listed an agent (or the first run)
+	fallback    bool      // the process scan is in use (said once in the log)
 }
 
 // nextRun numbers a new discovery run.
@@ -74,37 +82,110 @@ func (d *Discovery) nextRun() uint64 {
 
 // NewDiscovery is the real discoverer over transcripts in projects.
 func NewDiscovery(projects string) *Discovery {
-	return &Discovery{Run: execRunner, Projects: projects, Now: time.Now}
+	return &Discovery{Run: execRunner, Projects: projects, Now: time.Now, Logf: log.Printf}
 }
 
 func (d *Discovery) Sessions(ctx context.Context) ([]Live, uint64, bool) {
-	d.mu.Lock()
-	if d.claudeBin == "" {
-		d.mu.Unlock()
-		bin := lookPathLogin(ctx, d.Run, "claude")
-		if bin == "" {
-			bin = "-" // not installed: don't look again
-		}
-		d.mu.Lock()
-		if d.claudeBin == "" {
-			d.claudeBin = bin
-		}
-	}
-	bin, fresh := d.claudeBin, !d.reportedAt.IsZero() && d.Now().Sub(d.reportedAt) < agentsEvery
-	cached, ok, run := d.reported, d.reportedOK, d.reportedRun
-	d.mu.Unlock()
-	if !fresh && bin != "-" {
+	now := d.Now()
+	bin := d.claude(ctx, now)
+	cached, ok, run, fresh := d.cached(now)
+	if !fresh && bin != "" {
 		cached, ok = activeSessions(ctx, d.Run, bin, d.Projects)
 		run = d.nextRun()
-		d.mu.Lock()
-		d.reported, d.reportedOK, d.reportedAt, d.reportedRun = cached, ok, d.Now(), run
-		d.mu.Unlock()
+		d.store(cached, ok, run)
 	}
 	if ok {
+		d.useFallback(false, "")
 		return append([]Live{}, cached...), run, true
 	}
+	why := "`claude agents --json` failed"
+	if bin == "" {
+		why = "no claude on the login shell's PATH"
+	}
+	d.useFallback(true, why)
 	lives := liveSessions(ctx, d.Run, d.Projects)
+	if len(lives) > 0 {
+		d.seen(d.Now())
+	}
 	return lives, d.nextRun(), lives != nil
+}
+
+// claude is the claude binary, looked up through the login shell; after a
+// failed lookup it is looked up again at most every lookRetry.
+func (d *Discovery) claude(ctx context.Context, now time.Time) string {
+	if bin, look := d.needLookup(now); !look {
+		return bin
+	}
+	return d.looked(lookPathLogin(ctx, d.Run, "claude"), now)
+}
+
+func (d *Discovery) needLookup(now time.Time) (bin string, look bool) {
+	d.mu.Lock()
+	defer d.mu.Unlock()
+	return d.claudeBin, d.claudeBin == "" && (d.lookFailed.IsZero() || now.Sub(d.lookFailed) >= lookRetry)
+}
+
+func (d *Discovery) looked(bin string, now time.Time) string {
+	d.mu.Lock()
+	defer d.mu.Unlock()
+	if bin == "" {
+		d.lookFailed = now
+	} else if d.claudeBin == "" {
+		d.claudeBin = bin
+	}
+	return d.claudeBin
+}
+
+// cached is the last `claude agents` answer, fresh when younger than the
+// interval (agentsEvery, or agentsIdleEvery once no agent was seen for a while).
+func (d *Discovery) cached(now time.Time) (lives []Live, ok bool, run uint64, fresh bool) {
+	d.mu.Lock()
+	defer d.mu.Unlock()
+	if d.lastSeen.IsZero() {
+		d.lastSeen = now
+	}
+	every := agentsEvery
+	if now.Sub(d.lastSeen) >= idleAfter {
+		every = agentsIdleEvery
+	}
+	fresh = !d.reportedAt.IsZero() && now.Sub(d.reportedAt) < every
+	return d.reported, d.reportedOK, d.reportedRun, fresh
+}
+
+// store keeps one `claude agents` answer.
+func (d *Discovery) store(lives []Live, ok bool, run uint64) {
+	d.mu.Lock()
+	defer d.mu.Unlock()
+	now := d.Now()
+	d.reported, d.reportedOK, d.reportedAt, d.reportedRun = lives, ok, now, run
+	if ok && len(lives) > 0 {
+		d.lastSeen = now
+	}
+}
+
+func (d *Discovery) seen(now time.Time) {
+	d.mu.Lock()
+	defer d.mu.Unlock()
+	d.lastSeen = now
+}
+
+// useFallback logs once when discovery falls back to the process scan, and
+// once when `claude agents` answers again.
+func (d *Discovery) useFallback(on bool, why string) {
+	d.mu.Lock()
+	defer d.mu.Unlock()
+	if on == d.fallback {
+		return
+	}
+	d.fallback = on
+	if d.Logf == nil {
+		return
+	}
+	if on {
+		d.Logf("agents: %s; using the process scan", why)
+	} else {
+		d.Logf("agents: claude agents answers again")
+	}
 }
 
 // claudeAgent is one entry of `claude agents --json`.

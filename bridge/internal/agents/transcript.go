@@ -20,6 +20,19 @@ const (
 	maxChunks = 128
 )
 
+// maxPending caps the unfinished line kept between tail calls: past it the
+// line is dropped and skipped up to its newline (a var for tests).
+var maxPending = 16 << 20
+
+// keepPending keeps the unfinished line part, or drops it when too long.
+func keepPending(e *entry, part []byte) {
+	if len(part) > maxPending {
+		e.Pending, e.SkipLine = "", true
+		return
+	}
+	e.Pending = string(part)
+}
+
 // CompactTool is the activity shown while Claude compacts the conversation.
 const CompactTool = "Compact"
 
@@ -87,7 +100,7 @@ func tail(e *entry, now time.Time) bool {
 	}
 	defer f.Close()
 	if st, err := f.Stat(); err != nil || st.Size() < e.Offset {
-		e.Offset, e.Pending = 0, "" // truncated or replaced
+		e.Offset, e.Pending, e.SkipLine = 0, "", false // truncated or replaced
 	} else if st.Size() == e.Offset {
 		return false
 	}
@@ -105,13 +118,20 @@ func tail(e *entry, now time.Time) bool {
 			break
 		}
 		e.Offset += int64(len(buf))
+		if e.SkipLine { // the rest of a line too long to keep
+			nl := bytes.IndexByte(buf, '\n')
+			if nl < 0 {
+				continue
+			}
+			buf, e.SkipLine = buf[nl+1:], false
+		}
 		data := append([]byte(e.Pending), buf...)
 		last := bytes.LastIndexByte(data, '\n')
 		if last < 0 {
-			e.Pending = string(data)
+			keepPending(e, data)
 			continue
 		}
-		e.Pending = string(data[last+1:])
+		keepPending(e, data[last+1:])
 
 		for _, raw := range bytes.Split(data[:last], []byte{'\n'}) {
 			var l line

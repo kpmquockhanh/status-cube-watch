@@ -40,8 +40,9 @@ type Card struct {
 	Rows []Row        `json:"rows,omitempty"`
 	M    string       `json:"m,omitempty"`
 	MC   string       `json:"mc,omitempty"`
-	A    []Tile       `json:"a,omitempty"` // Agents card: the agents
-	Q    *AgentPrompt `json:"q,omitempty"` // Agents card: the longest-waiting prompt (Full only)
+	A    []Tile       `json:"a,omitempty"`  // Agents card: the agents
+	Q    *AgentPrompt `json:"q,omitempty"`  // Agents card: the longest-waiting prompt (Full only)
+	QCut int          `json:"qc,omitempty"` // Agents card: 1 = the payload budget dropped q (Full only)
 }
 
 // Payload is what GET /api/status serves.

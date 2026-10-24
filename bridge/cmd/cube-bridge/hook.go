@@ -28,4 +28,8 @@ func runHook(stdin io.Reader, port int, client *http.Client) {
 	resp.Body.Close()
 }
 
-func hookClient() *http.Client { return &http.Client{Timeout: time.Second} }
+// hookTimeout bounds what a hook can add to a Claude Code turn when the
+// bridge is slow or wedged; a loopback POST normally takes about 1 ms.
+const hookTimeout = 300 * time.Millisecond
+
+func hookClient() *http.Client { return &http.Client{Timeout: hookTimeout} }

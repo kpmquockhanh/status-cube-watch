@@ -388,6 +388,12 @@ func (s *Server) health() healthBody {
 // localhost:<port> (anything else may be a DNS-rebinding page), and there is
 // no Origin header (a browser always sends one with a POST, and a page has no
 // business reading the prompt either).
+//
+// Two accepted edge cases: a request in absolute form ("GET
+// http://127.0.0.1:8787/api/status") takes r.Host from the URI, which only a
+// local non-browser client can send; and the bridge's own preview page,
+// opened at http://127.0.0.1:<port>/, gets the full payload, since a
+// same-origin GET carries no Origin.
 func loopbackRequest(r *http.Request, port int) bool {
 	if _, browser := r.Header["Origin"]; browser {
 		return false
@@ -515,7 +521,9 @@ func (s *Server) answer(w http.ResponseWriter, r *http.Request) {
 		sendJSON(w, 400, errorBody{`want {"agent","prompt","key"}`})
 		return
 	}
-	err := s.d.Agents.Answer(r.Context(), a.Agent, a.Prompt, a.Key)
+	// Not cancelled when the client hangs up: a send cut off after the keys
+	// landed would look failed, and the tracker could not tell it apart.
+	err := s.d.Agents.Answer(context.WithoutCancel(r.Context()), a.Agent, a.Prompt, a.Key)
 	switch {
 	case err == nil:
 		send(w, 204, nil, jsonType)
