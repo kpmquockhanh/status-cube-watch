@@ -10,6 +10,8 @@ import Foundation
     static let tileRetry: TimeInterval = 15
     /// A last fix older than this is shown as weak GPS.
     static let fixStale: TimeInterval = 5
+    /// A compass reading older than this is not used (iOS stops sending while it is unreliable).
+    static let compassStale: TimeInterval = 2
     nonisolated static let concurrentTiles = 8
 
     private let server: NavServer
@@ -38,6 +40,11 @@ import Foundation
     private var lastFix: Fix?
     private var lastFixAt: Date?
     private var lastProgress: Progress?
+    /// What the tracker made of the last fix, before the compass had its say.
+    private var lastTracked: Progress?
+    /// The phone's latest compass reading and the offset learned from GPS while moving.
+    private var compassReading: (deg: Double, at: Date)?
+    private var fuser = HeadingFuser()
 
     /// Corridor tiles of the current route that are not held yet (only after a reroute).
     private(set) var missingTiles: Set<TileID> = []
@@ -103,7 +110,8 @@ import Foundation
         cancelTiles()
         rideID += 1
         missingTiles = []; lastTileAttempt = nil
-        lastFix = nil; lastFixAt = nil; lastProgress = nil
+        lastFix = nil; lastFixAt = nil; lastProgress = nil; lastTracked = nil
+        fuser = HeadingFuser()
     }
 
     private func begin(route r: Route, tiles t: [TileID: [StreetLine]], destination dest: Coord, style s: RouteStyle) {
@@ -129,8 +137,10 @@ import Foundation
     public func update(_ fix: Fix) -> NavScene {
         guard let route, let tracker, state != .ended else { return emptyScene(.ended) }
         let t = now()
-        let p = tracker.update(fix)
-        lastFix = fix; lastFixAt = t; lastProgress = p
+        let raw = tracker.update(fix)
+        if moving(fix), !raw.gpsWeak, let c = compass(at: t) { fuser.learn(course: fix.course, compass: c, at: t) }
+        let p = withCompass(raw, fix: fix, at: t)
+        lastFix = fix; lastFixAt = t; lastTracked = raw; lastProgress = p
 
         if p.arrived || state == .arrived {
             if arrivedAt == nil { arrivedAt = t; cancelReroute() }
@@ -167,6 +177,32 @@ import Foundation
                           speed: lastFix?.speed ?? 0, maxBytes: frameBudget)
     }
 
+    /// A new compass reading, degrees from north. While the rider is slow the map turns with it
+    /// (rebuilt from the last fix, like `tick`); nil when nothing changes on the cube.
+    public func compass(_ deg: Double) -> NavScene? {
+        let t = now()
+        compassReading = (deg, t)
+        guard state != .ended, let f = lastFix, let raw = lastTracked, !moving(f) else { return nil }
+        lastProgress = withCompass(raw, fix: f, at: t)
+        return tick(now: t)
+    }
+
+    private func moving(_ fix: Fix) -> Bool { fix.speed >= RouteTracker.minHeadingSpeed && fix.course >= 0 }
+
+    private func compass(at t: Date) -> Double? {
+        guard let c = compassReading, t.timeIntervalSince(c.at) <= Self.compassStale else { return nil }
+        return c.deg
+    }
+
+    /// Moving: GPS course stands. Slow: the corrected compass when it is trusted, else the
+    /// tracker's last heading, marked as a guess.
+    private func withCompass(_ raw: Progress, fix: Fix, at t: Date) -> Progress {
+        guard !moving(fix) else { return raw }
+        var p = raw
+        if let c = compass(at: t), let h = fuser.heading(compass: c, at: t) { p.heading = h } else { p.headingGuess = true }
+        return p
+    }
+
     private func emptyScene(_ s: NavState) -> NavScene {
         NavScene(state: s, turn: .straight, exit: 0, dir: 0, gpsWeak: false, dist: "", street: "", eta: "",
                  route: [], streets: [])
@@ -201,7 +237,8 @@ import Foundation
         case .success(let r):
             begin(route: r, tiles: tiles, destination: destination ?? r.points.last ?? Coord(lat: 0, lon: 0), style: style)
             // The new tracker starts from the last fix (its first sight of it).
-            lastProgress = lastFix.map { tracker!.update($0) }
+            lastTracked = lastFix.map { tracker!.update($0) }
+            if let raw = lastTracked, let f = lastFix { lastProgress = withCompass(raw, fix: f, at: now()) }
             missingTiles = corridorTiles(route: r.points).subtracting(tiles.keys)
             lastTileAttempt = nil
             cancelTiles()
@@ -310,6 +347,9 @@ import Foundation
         } catch { throw StartError.server(0) }
         return out
     }
+
+    /// Test hook: the heading of the last scene built.
+    var lastHeading: Double? { lastProgress?.heading }
 
     /// Test hooks: wait for a reroute, a tile fetch or cache writes in flight.
     func waitForReroute() async { await rerouteTask?.value }

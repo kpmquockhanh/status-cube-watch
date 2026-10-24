@@ -36,6 +36,9 @@ public struct Progress: Equatable, Sendable {
     public var bearingToRoute: Double
     public var arrived: Bool
     public var gpsWeak: Bool
+    /// The rider is slow and `heading` is not from a trusted compass, so it may be wrong;
+    /// the cube draws the rider arrow grey, as for weak GPS. Set by `RideEngine`.
+    public var headingGuess = false
 }
 
 /// Follows a route on successive GPS fixes. Offline; straight segments in a local flat
@@ -199,7 +202,7 @@ public final class RouteTracker {
 }
 
 /// Smallest absolute angle between two bearings, degrees in [0, 180].
-private func angleDiff(_ a: Double, _ b: Double) -> Double {
+func angleDiff(_ a: Double, _ b: Double) -> Double {
     let d = abs(a - b).truncatingRemainder(dividingBy: 360)
     return d > 180 ? 360 - d : d
 }

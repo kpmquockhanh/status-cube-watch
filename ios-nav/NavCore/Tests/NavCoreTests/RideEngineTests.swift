@@ -20,7 +20,8 @@ private func lRoute() -> Route {
     ])
 }
 
-private func fix(_ c: Coord, acc: Double = 5, speed: Double = 10, course: Double = -1) -> Fix {
+/// Moving north by default: a known course, so the heading is GPS's and never a guess.
+private func fix(_ c: Coord, acc: Double = 5, speed: Double = 10, course: Double = 0) -> Fix {
     Fix(coord: c, accuracy: acc, speed: speed, course: course)
 }
 
@@ -487,6 +488,71 @@ private func monday(_ h: Int, _ m: Int = 0) -> Date {
     clock.advance(2)
     #expect(engine.tick()?.gpsWeak == true)
     #expect(!engine.update(fix(north(110))).gpsWeak)
+}
+
+// MARK: compass while slow
+
+/// Rides north at 10 m/s for `seconds` (one fix a second) with the phone's compass reading
+/// `compass` each time, so the engine learns the offset course - compass.
+@MainActor private func rideNorth(_ engine: RideEngine, _ clock: Clock, seconds: Int, compass: Double) {
+    for i in 0..<seconds {
+        _ = engine.compass(compass)
+        _ = engine.update(fix(north(10 + Double(i) * 10)))
+        clock.advance(1)
+    }
+}
+
+@MainActor @Test func slowWithALearnedCompassTurnsTheMapAndIsNotGrey() async throws {
+    let server = FakeNavServer(); await server.set(route: lRoute())
+    let clock = Clock()
+    let engine = makeEngine(server, clock)
+    try await engine.start(from: north(0), to: lRoute().points.last!)
+    // Phone sideways in a pocket: its compass says 90 while the bike goes north (offset -90).
+    rideNorth(engine, clock, seconds: 5, compass: 90)
+    #expect(engine.compass(90) == nil)                  // still moving: GPS stands, nothing to redraw
+    let stopped = engine.update(fix(north(60), speed: 0, course: -1))
+    #expect(!stopped.gpsWeak)
+    #expect(engine.lastHeading.map { abs($0) < 0.5 || abs($0 - 360) < 0.5 } == true)
+    // The rider turns the bike to face east while stopped: the map follows the compass at once.
+    let turned = try #require(engine.compass(180))
+    #expect(!turned.gpsWeak)
+    #expect(engine.lastHeading.map { abs($0 - 90) < 0.5 } == true)
+}
+
+@MainActor @Test func slowBeforeLearningIsGreyAndKeepsTheOldHeading() async throws {
+    let server = FakeNavServer(); await server.set(route: lRoute())
+    let clock = Clock()
+    let engine = makeEngine(server, clock)
+    try await engine.start(from: north(0), to: lRoute().points.last!)
+    _ = engine.compass(90)
+    #expect(!engine.update(fix(north(10))).gpsWeak)     // moving: GPS is right, not grey while learning
+    clock.advance(1)
+    _ = engine.compass(90)
+    let slow = engine.update(fix(north(12), speed: 0, course: -1))
+    #expect(slow.gpsWeak)
+    #expect(engine.lastHeading == 0)                    // today's behaviour: the last GPS heading
+}
+
+@MainActor @Test func slowWithAStaleCompassIsGrey() async throws {
+    let server = FakeNavServer(); await server.set(route: lRoute())
+    let clock = Clock()
+    let engine = makeEngine(server, clock)
+    try await engine.start(from: north(0), to: lRoute().points.last!)
+    rideNorth(engine, clock, seconds: 5, compass: 90)
+    clock.advance(3)                                    // iOS stopped sending compass readings
+    #expect(engine.update(fix(north(60), speed: 0, course: -1)).gpsWeak)
+}
+
+@MainActor @Test func aNewRideForgetsTheCorrection() async throws {
+    let server = FakeNavServer(); await server.set(route: lRoute())
+    let clock = Clock()
+    let engine = makeEngine(server, clock)
+    try await engine.start(from: north(0), to: lRoute().points.last!)
+    rideNorth(engine, clock, seconds: 5, compass: 90)
+    _ = engine.stop()
+    try await engine.start(from: north(0), to: lRoute().points.last!)
+    _ = engine.compass(90)
+    #expect(engine.update(fix(north(10), speed: 0, course: -1)).gpsWeak)
 }
 
 // MARK: HTTPNavServer against a stub URLProtocol

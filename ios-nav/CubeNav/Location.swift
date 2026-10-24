@@ -12,6 +12,11 @@ final class LocationService: NSObject, ObservableObject, CLLocationManagerDelega
     @Published private(set) var problem: String?
     /// Called for every valid fix.
     var onFix: ((Fix) -> Void)?
+    /// Called for every usable compass reading during a ride, degrees from north.
+    var onHeading: ((Double) -> Void)?
+
+    /// A compass reading less accurate than this is dropped (iOS wants calibration).
+    nonisolated static let maxHeadingError = 30.0
 
     private let manager = CLLocationManager()
 
@@ -41,9 +46,15 @@ final class LocationService: NSObject, ObservableObject, CLLocationManagerDelega
         manager.allowsBackgroundLocationUpdates = true
         manager.showsBackgroundLocationIndicator = true
         manager.startUpdatingLocation()
+        // The compass turns the map while the rider is too slow for a GPS course (`RideEngine.compass`).
+        if CLLocationManager.headingAvailable() {
+            manager.headingFilter = 2
+            manager.startUpdatingHeading()
+        }
     }
 
     func endRide() {
+        manager.stopUpdatingHeading()
         manager.allowsBackgroundLocationUpdates = false
         manager.showsBackgroundLocationIndicator = false
         if authorization != .authorizedAlways && authorization != .authorizedWhenInUse { manager.stopUpdatingLocation() }
@@ -65,6 +76,12 @@ final class LocationService: NSObject, ObservableObject, CLLocationManagerDelega
             self.fix = f; self.fixAt = Date(); self.problem = nil
             self.onFix?(f)
         }
+    }
+
+    nonisolated func locationManager(_ m: CLLocationManager, didUpdateHeading h: CLHeading) {
+        guard h.headingAccuracy >= 0, h.headingAccuracy <= Self.maxHeadingError else { return }
+        let deg = h.trueHeading >= 0 ? h.trueHeading : h.magneticHeading
+        Task { @MainActor in self.onHeading?(deg) }
     }
 
     nonisolated func locationManager(_ m: CLLocationManager, didFailWithError error: Error) {

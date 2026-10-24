@@ -42,6 +42,7 @@ final class RideController: ObservableObject {
         cubeLink.objectWillChange.sink { [weak self] in self?.objectWillChange.send() }.store(in: &bag)
         location.objectWillChange.sink { [weak self] in self?.objectWillChange.send() }.store(in: &bag)
         location.onFix = { [weak self] f in self?.handle(f) }
+        location.onHeading = { [weak self] h in self?.heading(h) }
     }
 
     func clearMessage() { message = nil; savedRouteAvailable = false }
@@ -166,6 +167,12 @@ final class RideController: ObservableObject {
         guard phase == .riding, let e = engine else { return }
         lastUpdate = Date()
         apply(e.update(f))
+    }
+
+    /// A compass reading: while the rider is slow it turns the map (the engine says when).
+    private func heading(_ deg: Double) {
+        guard phase == .riding, let e = engine else { return }
+        if let s = e.compass(deg) { apply(s) }
     }
 
     /// Once a second without a new fix, lets the engine move on with time alone (arrival hold,

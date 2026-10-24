@@ -127,7 +127,7 @@ Reassembled frame, little-endian:
 | turn | u8 | `NavTurn`: 0 Straight, 1 SlightLeft, 2 Left, 3 SharpLeft, 4 SlightRight, 5 Right, 6 SharpRight, 7 UTurn, 8 KeepLeft, 9 KeepRight, 10 Roundabout, 11 Arrive, 12 Rejoin |
 | exit | u8 | roundabout exit number, 0 = none |
 | dir | u8 | Rejoin arrow, 0..255 = 0..360° clockwise from screen-up (only meaningful for Rejoin) |
-| flags | u8 | bit0 = GPS weak (rider arrow drawn grey) |
+| flags | u8 | bit0 = GPS weak, or the rider is slow and the map's heading is a guess (no trusted compass yet): rider arrow drawn grey |
 | dist | u8 len + UTF-8 | ≤ 15 bytes, e.g. `150 m` |
 | street | u8 len + UTF-8 | ≤ 63 bytes |
 | eta | u8 len + UTF-8 | ≤ 23 bytes, e.g. `12 min` |

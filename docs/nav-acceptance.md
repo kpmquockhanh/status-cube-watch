@@ -47,6 +47,7 @@ you observed it. Logs: `pio device monitor` (cube; look for `[nav]` and `[ble]`)
 ## Dead zones
 
 - [ ] Tunnel or weak GPS: the phone keeps sending frames, so the rider arrow turns grey (weak GPS) and the map stays; `NO PHONE` does not appear.
+- [ ] Compass with the phone in a pocket: after ~5 s of riding, stop at a light; the arrow stays white and the map points the way the bike faces. Turn the bike while stopped: the map turns with it. At the very start of a ride (or after 2 min stopped) a stop shows a grey arrow instead.
 - [ ] Bluetooth gap (phone's Bluetooth toggled off and on, or the phone moved out of range): `NO PHONE` appears after 3 s, the map comes back on the next frame without a flicker of the deck, and the ride survives a gap shorter than 20 s.
 - [ ] A gap longer than 20 s ends the ride and shows the deck; the next frame starts a new one.
 - [ ] Arrived: the arrival screen shows for about 8 s, then the deck. A stray Arrived frame with no ride does not take the screen.

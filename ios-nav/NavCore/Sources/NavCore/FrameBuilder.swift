@@ -105,7 +105,7 @@ public func buildScene(progress: Progress, route: Route, streets: [StreetLine], 
         dir = UInt8(Int((rel / 360 * 256).rounded()) & 0xff)
     }
     var scene = NavScene(state: state, turn: turn, exit: rejoin ? 0 : (next?.exit ?? 0), dir: dir,
-                         gpsWeak: progress.gpsWeak, dist: dist, street: streetName, eta: eta, route: [], streets: [])
+                         gpsWeak: progress.gpsWeak || progress.headingGuess, dist: dist, street: streetName, eta: eta, route: [], streets: [])
     if ended { return scene }
 
     let mpp = rejoin ? min(3.0, max(1.5, progress.distanceToRoute / 100))
