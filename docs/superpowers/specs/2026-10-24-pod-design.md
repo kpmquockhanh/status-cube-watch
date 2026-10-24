@@ -1,6 +1,6 @@
 # Pod: a compact, rain-proof cube for the desk and the bike
 
-Status: draft for approval (2026-10-24).
+Status: approved (2026-10-24). Plan: `docs/superpowers/plans/2026-10-24-pod.md`.
 
 ## Intent
 
