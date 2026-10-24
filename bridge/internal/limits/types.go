@@ -17,6 +17,12 @@ type Window struct {
 // no reading, and a resets_at that is not a string as unknown, instead of
 // failing the whole document (cards.mjs only checks `typeof utilization`).
 func (w *Window) UnmarshalJSON(b []byte) error {
+	// Node treats a window that is not an object as no reading; null never
+	// reaches here for a *Window, but a number or string does.
+	if t := bytes.TrimSpace(b); len(t) == 0 || t[0] != '{' {
+		*w = Window{}
+		return nil
+	}
 	var raw struct {
 		Utilization json.RawMessage `json:"utilization"`
 		ResetsAt    json.RawMessage `json:"resets_at"`
