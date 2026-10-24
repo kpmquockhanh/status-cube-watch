@@ -9,7 +9,7 @@ import (
 	"io/fs"
 	"os"
 	"path/filepath"
-	"strings"
+	"regexp"
 )
 
 // Events are the Claude Code hook events the bridge listens to.
@@ -18,16 +18,25 @@ var Events = []string{"SessionStart", "UserPromptSubmit", "PreToolUse", "PostToo
 // matcherEvents get `"matcher": "*"` on their group, as in agents-deck's HooksSettings.
 var matcherEvents = map[string]bool{"PreToolUse": true, "PostToolUse": true, "PermissionRequest": true}
 
-// IsOurs reports whether a hook command is one Command wrote. It matches only
-// that shape, so a user's own hooks are never touched.
+// ourCommand is Command's exact output; the two quoted paths are compared in IsOurs.
+var ourCommand = regexp.MustCompile(`^\[ -x ('(?:[^']|'\\'')*') \] && ('(?:[^']|'\\'')*') hook --port [0-9]+ >/dev/null 2>&1; exit 0$`)
+
+// IsOurs reports whether a hook command is one Command wrote, whatever the
+// binary is called. It matches only that whole shape, so a user's own hooks
+// are never touched.
 func IsOurs(command string) bool {
-	return strings.Contains(command, "cube-bridge") && strings.Contains(command, "' hook --port ")
+	m := ourCommand.FindStringSubmatch(command)
+	return m != nil && m[1] == m[2]
 }
 
 // Install adds one group running command to every event in Events, after the
 // user's own groups, replacing any entries an earlier install left. Nothing
 // else in the file changes, key order included. A missing file is created.
+// command must be Command's output, or Uninstall could not find it again.
 func Install(path, command string) error {
+	if !IsOurs(command) {
+		return fmt.Errorf("%s: refusing to install %q: not a cube-bridge hook command", path, command)
+	}
 	return edit(path, true, func(top object) (object, bool, error) {
 		return apply(top, command)
 	})
@@ -43,13 +52,21 @@ func Uninstall(path string) error {
 
 // apply strips our hooks from top and, when command is set, appends our group
 // to every event. It reports whether anything changed.
+// Duplicate keys are refused in every object it reads or edits: Claude Code
+// keeps the last copy, this code would edit the first.
 func apply(top object, command string) (object, bool, error) {
+	if err := top.checkUnique("the top level"); err != nil {
+		return nil, false, err
+	}
 	i := top.index("hooks")
 	var hooks object
 	if i >= 0 {
 		var err error
 		if hooks, err = parseObject(top[i].Value); err != nil {
 			return nil, false, fmt.Errorf("\"hooks\": %w", err)
+		}
+		if err := hooks.checkUnique(`"hooks"`); err != nil {
+			return nil, false, err
 		}
 	}
 	changed := false
@@ -59,7 +76,10 @@ func apply(top object, command string) (object, bool, error) {
 		if err != nil {
 			return nil, false, fmt.Errorf("\"hooks\".%q: %w", ev.Key, err)
 		}
-		kept, removed := stripGroups(groups)
+		kept, removed, err := stripGroups(groups)
+		if err != nil {
+			return nil, false, fmt.Errorf("\"hooks\".%q: %w", ev.Key, err)
+		}
 		if removed && len(kept) == 0 {
 			changed = true
 			continue // an event only we used
@@ -97,11 +117,15 @@ func apply(top object, command string) (object, bool, error) {
 
 // stripGroups removes our hooks from each group, dropping groups left with none.
 // Groups without our hooks, or not shaped as expected, keep their raw bytes.
-func stripGroups(groups []json.RawMessage) (kept []json.RawMessage, removed bool) {
-	for _, g := range groups {
+// A group object with a duplicate key is an error.
+func stripGroups(groups []json.RawMessage) (kept []json.RawMessage, removed bool, err error) {
+	for n, g := range groups {
 		obj, err := parseObject(g)
 		j := -1
 		if err == nil {
+			if err := obj.checkUnique(fmt.Sprintf("group %d", n)); err != nil {
+				return nil, false, err
+			}
 			j = obj.index("hooks")
 		}
 		if j < 0 {
@@ -134,7 +158,7 @@ func stripGroups(groups []json.RawMessage) (kept []json.RawMessage, removed bool
 			removed = true
 		}
 	}
-	return kept, removed
+	return kept, removed, nil
 }
 
 func ourGroup(event, command string) json.RawMessage {
@@ -277,6 +301,18 @@ func (o object) index(key string) int {
 		}
 	}
 	return -1
+}
+
+// checkUnique returns an error naming the first key that appears twice in o.
+func (o object) checkUnique(where string) error {
+	seen := make(map[string]bool, len(o))
+	for _, f := range o {
+		if seen[f.Key] {
+			return fmt.Errorf("duplicate key %q in %s", f.Key, where)
+		}
+		seen[f.Key] = true
+	}
+	return nil
 }
 
 // parseObject decodes one JSON object (and nothing after it) keeping key order

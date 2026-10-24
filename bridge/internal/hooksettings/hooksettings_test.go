@@ -126,6 +126,88 @@ func TestIsOurs(t *testing.T) {
 	}
 }
 
+func TestIsOursAnyBinaryName(t *testing.T) {
+	for _, b := range []string{"/usr/local/bin/cubebridge", "/Users/u/it's a dir/my bridge"} {
+		cmd := Command(b, 8787)
+		if !IsOurs(cmd) {
+			t.Fatalf("not ours: %q", cmd)
+		}
+		p := writeFixture(t, fixture, 0o644)
+		for _, port := range []int{8787, 9000} {
+			if err := Install(p, Command(b, port)); err != nil {
+				t.Fatal(err)
+			}
+		}
+		got := load(t, read(t, p))
+		for _, ev := range Events {
+			n := 0
+			for _, g := range got.groups[ev] {
+				if ours(t, g, Command(b, 9000)) {
+					n++
+				}
+			}
+			if len(got.groups[ev]) != len(load(t, []byte(fixture)).groups[ev])+1 || n != 1 {
+				t.Fatalf("%s: %s", ev, got.groups[ev])
+			}
+		}
+		if err := Uninstall(p); err != nil {
+			t.Fatal(err)
+		}
+		if b := read(t, p); !sameJSON(t, b, []byte(fixture)) {
+			t.Fatalf("not restored:\n%s", b)
+		}
+	}
+	// near misses: different paths in the two places, extra text, no port
+	for _, c := range []string{
+		"[ -x '/a' ] && '/b' hook --port 1 >/dev/null 2>&1; exit 0",
+		Command("/a", 1) + "; rm -rf x",
+		"echo; " + Command("/a", 1),
+		"[ -x '/a' ] && '/a' hook --port  >/dev/null 2>&1; exit 0",
+	} {
+		if IsOurs(c) {
+			t.Fatalf("matched: %q", c)
+		}
+	}
+}
+
+func TestInstallRefusesForeignCommand(t *testing.T) {
+	p := writeFixture(t, fixture, 0o644)
+	if err := Install(p, "echo hi"); err == nil {
+		t.Fatal("no error")
+	}
+	if b := read(t, p); string(b) != fixture {
+		t.Fatalf("written: %s", b)
+	}
+}
+
+func TestDuplicateKeysRefused(t *testing.T) {
+	cmd := Command(bin, 8787)
+	for _, body := range []string{
+		`{"hooks":{"Stop":[]},"x":1,"hooks":{"Stop":[]}}`,
+		`{"model":"a","model":"b"}`,
+		`{"hooks":{"Stop":[],"Stop":[{"hooks":[]}]}}`,
+		`{"hooks":{"Stop":[{"hooks":[],"hooks":[{"type":"command","command":` + quote(cmd) + `}]}]}}`,
+	} {
+		p := writeFixture(t, body, 0o644)
+		for name, fn := range map[string]func() error{
+			"install":   func() error { return Install(p, cmd) },
+			"uninstall": func() error { return Uninstall(p) },
+		} {
+			err := fn()
+			if err == nil || !strings.Contains(err.Error(), "duplicate key") || !strings.Contains(err.Error(), p) {
+				t.Fatalf("%s %s: %v", name, body, err)
+			}
+		}
+		if b := read(t, p); string(b) != body {
+			t.Fatalf("%s: written %s", body, b)
+		}
+		entries, _ := os.ReadDir(filepath.Dir(p))
+		if len(entries) != 1 {
+			t.Fatalf("%s: stray files %v", body, entries)
+		}
+	}
+}
+
 func TestInstallKeepsUserHooks(t *testing.T) {
 	p := writeFixture(t, fixture, 0o644)
 	cmd := Command(bin, 8787)
