@@ -11,6 +11,7 @@ constexpr int DIVIDER = 3;  // R3 200K over R7 100K: VBAT = VADC x 3
 
 BatteryFilter g_filter;
 uint32_t g_lastSample = 0;
+uint32_t g_rawMv = 0;
 
 void sample() {
   // Median rather than mean: the screen refresh and WiFi bursts pull the rail
@@ -27,6 +28,7 @@ void sample() {
     v[j + 1] = x;
   }
   const uint32_t mv = (v[SAMPLES / 2 - 1] + v[SAMPLES / 2]) / 2 * DIVIDER;
+  g_rawMv = mv;
   g_filter.update(mv);
   // Handy when checking a new board: what the divider really reads.
   Serial.printf("[bat] raw %lu..%lu mV x3, shown %lu mV -> %u%%%s\n", (unsigned long)v[0] * DIVIDER,
@@ -34,6 +36,11 @@ void sample() {
                 g_filter.view().onUsb ? " (no cell, USB)" : "");
 }
 }  // namespace
+
+void batteryHoldPower() {
+  pinMode(PIN_SYS_EN, OUTPUT);
+  digitalWrite(PIN_SYS_EN, HIGH);
+}
 
 void batteryBegin() {
   sample();
@@ -47,3 +54,5 @@ void batteryUpdate(uint32_t nowMs) {
 }
 
 BatteryView batteryView() { return g_filter.view(); }
+uint32_t batteryRawMv() { return g_rawMv; }
+uint32_t batteryMv() { return g_filter.mv(); }

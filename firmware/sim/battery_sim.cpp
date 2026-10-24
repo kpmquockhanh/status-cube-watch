@@ -4,5 +4,6 @@
 #include "battery_env.h"
 
 void batteryBegin() {}
+void batteryHoldPower() {}
 void batteryUpdate(uint32_t) {}
 BatteryView batteryView() { return batteryViewFromEnv(); }

@@ -40,4 +40,7 @@
 
 // --- Misc on-board peripherals -----------------------------------------
 #define PIN_BAT_ADC   1   // battery voltage divider
+// Battery power latch: PWR switches the board on, and it stays on after PWR is
+// released only while SYS_EN is HIGH (battery.cpp). On USB it makes no difference.
+#define PIN_SYS_EN   41
 #define PIN_BUZZER   42   // passive buzzer, PWM (buzzer.cpp); an older board revision used 33

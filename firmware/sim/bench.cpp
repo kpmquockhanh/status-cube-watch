@@ -493,6 +493,7 @@ bool imuReadAccel(float &ax, float &ay, float &az) {
 }
 
 void batteryBegin() {}
+void batteryHoldPower() {}
 void batteryUpdate(uint32_t now) {
   static uint32_t last = 0;
   if (last && now - last < 5000) return;

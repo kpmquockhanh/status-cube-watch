@@ -6,6 +6,9 @@
 
 #include <Arduino.h>
 #include "battery.h"
+#ifdef BATTERY_LOG
+#include "battery_log.h"
+#endif
 #include "ble.h"
 #include "buzzer.h"
 #include "config.h"
@@ -421,6 +424,7 @@ uint32_t sleepMs() { return (uint32_t)deviceSettings().sleepMin * 60000u; }
 
 void setup() {
   const bool buzzOk = buzzerBegin();  // first: until then the buzzer pin floats (buzzer.h)
+  batteryHoldPower();  // on battery, the board stays on after PWR is released only once this runs
   Serial.begin(115200);
   delay(200);
   Serial.println("\n[boot] claude-status-cube");
@@ -436,6 +440,9 @@ void setup() {
   touch.begin();
   imuUp = imuBegin();  // after touch.begin(), which starts the shared I2C bus
   batteryBegin();
+#ifdef BATTERY_LOG
+  batteryLogBegin();
+#endif
 
   // BLE first: the stack must be up before bleBonded() means anything. The
   // setup portal is asked for by holding the screen; WiFi is joined at boot
@@ -480,6 +487,10 @@ void loop() {
   pollTouch();
   pollOrientation(now);
   batteryUpdate(now);
+#ifdef BATTERY_LOG
+  // "link" = the Mac delivered a payload in the last 15 s (its resend is every 5 s).
+  batteryLogUpdate(now, screenOn, bleLastGood() != 0 && now - bleLastGood() < 15000);
+#endif
 
   // Which transport feeds the cube (transport_policy.h): BLE while the Mac is
   // delivering, WiFi when it is not.
