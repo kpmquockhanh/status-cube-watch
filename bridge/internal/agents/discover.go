@@ -32,11 +32,12 @@ type Live struct {
 	Reported   bool // status came from Claude Code itself
 }
 
-// Discoverer lists the running Claude Code sessions. A nil result means the
-// discovery failed (nothing can be concluded from it); a successful one that
-// finds nothing returns an empty, non-nil slice.
+// Discoverer lists the running Claude Code sessions. ok is false when the
+// discovery failed (nothing can be concluded from it). run identifies the
+// discovery run the list comes from: a cached list is served with the run it
+// was read in, so a session is "missing" once per run, not once per call.
 type Discoverer interface {
-	Sessions(ctx context.Context) []Live
+	Sessions(ctx context.Context) (lives []Live, run uint64, ok bool)
 }
 
 const (
@@ -54,11 +55,21 @@ type Discovery struct {
 	Projects string // transcript folder (~/.claude/projects)
 	Now      func() time.Time
 
-	mu         sync.Mutex
-	claudeBin  string // resolved once from the login shell; "-" = not found
-	reported   []Live
-	reportedOK bool
-	reportedAt time.Time
+	mu          sync.Mutex
+	claudeBin   string // resolved once from the login shell; "-" = not found
+	reported    []Live
+	reportedOK  bool
+	reportedAt  time.Time
+	reportedRun uint64
+	runs        uint64 // discovery runs so far
+}
+
+// nextRun numbers a new discovery run.
+func (d *Discovery) nextRun() uint64 {
+	d.mu.Lock()
+	defer d.mu.Unlock()
+	d.runs++
+	return d.runs
 }
 
 // NewDiscovery is the real discoverer over transcripts in projects.
@@ -66,7 +77,7 @@ func NewDiscovery(projects string) *Discovery {
 	return &Discovery{Run: execRunner, Projects: projects, Now: time.Now}
 }
 
-func (d *Discovery) Sessions(ctx context.Context) []Live {
+func (d *Discovery) Sessions(ctx context.Context) ([]Live, uint64, bool) {
 	d.mu.Lock()
 	if d.claudeBin == "" {
 		d.mu.Unlock()
@@ -80,18 +91,20 @@ func (d *Discovery) Sessions(ctx context.Context) []Live {
 		}
 	}
 	bin, fresh := d.claudeBin, !d.reportedAt.IsZero() && d.Now().Sub(d.reportedAt) < agentsEvery
-	cached, ok := d.reported, d.reportedOK
+	cached, ok, run := d.reported, d.reportedOK, d.reportedRun
 	d.mu.Unlock()
 	if !fresh && bin != "-" {
 		cached, ok = activeSessions(ctx, d.Run, bin, d.Projects)
+		run = d.nextRun()
 		d.mu.Lock()
-		d.reported, d.reportedOK, d.reportedAt = cached, ok, d.Now()
+		d.reported, d.reportedOK, d.reportedAt, d.reportedRun = cached, ok, d.Now(), run
 		d.mu.Unlock()
 	}
 	if ok {
-		return append([]Live{}, cached...)
+		return append([]Live{}, cached...), run, true
 	}
-	return liveSessions(ctx, d.Run, d.Projects)
+	lives := liveSessions(ctx, d.Run, d.Projects)
+	return lives, d.nextRun(), lives != nil
 }
 
 // claudeAgent is one entry of `claude agents --json`.
@@ -135,6 +148,9 @@ func activeSessions(ctx context.Context, run Runner, claudeBin, projects string)
 		}
 		l.Transcript = findTranscript(projects, a.Cwd, a.SessionID)
 		out = append(out, l)
+	}
+	if len(list) > 0 && len(out) == 0 {
+		return nil, false // entries but none usable: the format changed, not "nothing running"
 	}
 	return out, true
 }

@@ -74,9 +74,9 @@ func TestDiscoveryClaudeAgents(t *testing.T) {
 	now := time.Unix(1_800_000_000, 0)
 	d := &Discovery{Run: f.run, Projects: projects, Now: func() time.Time { return now }}
 
-	got := d.Sessions(context.Background())
-	if len(got) != 2 {
-		t.Fatalf("want 2 sessions (bad id dropped), got %+v", got)
+	got, gen1, ok := d.Sessions(context.Background())
+	if !ok || len(got) != 2 {
+		t.Fatalf("want 2 sessions (bad id dropped), got %v %+v", ok, got)
 	}
 	a, b := got[0], got[1]
 	if a.SessionID != sidA || a.TTY != "/dev/ttys012" || a.Cwd != "/work/app" || !a.Busy || a.Background || !a.Reported || a.Transcript != tr || a.PID != 101 {
@@ -89,10 +89,14 @@ func TestDiscoveryClaudeAgents(t *testing.T) {
 		t.Fatalf("missing transcript falls back to the default path: %q", b.Transcript)
 	}
 
-	// Within 10 s the list is reused; the login shell is asked only once.
-	d.Sessions(context.Background())
+	// Within 10 s the list is reused (same run); the login shell is asked only once.
+	if _, gen2, ok := d.Sessions(context.Background()); !ok || gen2 != gen1 {
+		t.Fatalf("a cached run is the same run: %d vs %d", gen2, gen1)
+	}
 	now = now.Add(11 * time.Second)
-	d.Sessions(context.Background())
+	if _, gen3, ok := d.Sessions(context.Background()); !ok || gen3 == gen1 {
+		t.Fatal("a fresh run is a new run")
+	}
 	if n := len(f.matching("/usr/local/bin/claude agents")); n != 2 {
 		t.Fatalf("claude agents ran %d times, want 2", n)
 	}
@@ -140,9 +144,9 @@ func TestDiscoveryProcessScan(t *testing.T) {
 	f.set("/usr/sbin/lsof -a -d cwd -p", "p201\nfcwd\nn/work/a\np202\nfcwd\nn/work/b\n")
 	d := &Discovery{Run: f.run, Projects: projects, Now: time.Now}
 
-	got := d.Sessions(context.Background())
-	if len(got) != 2 {
-		t.Fatalf("got %+v", got)
+	got, gen1, ok := d.Sessions(context.Background())
+	if !ok || len(got) != 2 {
+		t.Fatalf("got %v %+v", ok, got)
 	}
 	a, b := got[0], got[1]
 	if a.PID != 201 || a.SessionID != sidC || a.TTY != "/dev/ttys001" || a.Cwd != "/work/a" || a.Reported {
@@ -160,9 +164,34 @@ func TestDiscoveryProcessScan(t *testing.T) {
 	if len(f.matching("/bin/zsh")) != 1 {
 		t.Fatal("lookup once")
 	}
-	d.Sessions(context.Background())
+	if _, gen2, _ := d.Sessions(context.Background()); gen2 == gen1 {
+		t.Fatal("every process scan is a new run")
+	}
 	if len(f.matching("/bin/zsh")) != 1 {
 		t.Fatal("a missing claude is not looked up again")
+	}
+}
+
+// Fix 4: a `claude agents --json` whose entries no longer decode (renamed
+// fields) is not "nothing running": the process scan runs instead.
+func TestDiscoveryAgentsRenamedFields(t *testing.T) {
+	f := newFakeRun()
+	f.set("/bin/zsh -lc command -v 'claude'", "/usr/local/bin/claude\n")
+	f.set("/usr/local/bin/claude agents --json", `[{"session_id":"`+sidA+`","workdir":"/work/app","pid":101},{"session_id":"`+sidB+`","workdir":"/work/api"}]`)
+	f.set("/bin/ps -o pid=,tty= -p", "")
+	f.set("/bin/ps -axww -o pid=,lstart=,tty=,args=", "  300 Thu Oct 22 10:00:00 2026 ttys009 vim\n")
+	d := &Discovery{Run: f.run, Projects: t.TempDir(), Now: time.Now}
+	if _, _, ok := d.Sessions(context.Background()); !ok {
+		t.Fatal("the process scan answered")
+	}
+	if len(f.matching("/bin/ps -axww")) != 1 {
+		t.Fatal("process scan not used")
+	}
+	// An empty list is a real answer: nothing running, no process scan.
+	f.set("/usr/local/bin/claude agents --json", `[]`)
+	d = &Discovery{Run: f.run, Projects: t.TempDir(), Now: time.Now}
+	if got, _, ok := d.Sessions(context.Background()); !ok || len(got) != 0 || len(f.matching("/bin/ps -axww")) != 1 {
+		t.Fatalf("empty list: %v %+v", ok, got)
 	}
 }
 
@@ -172,9 +201,9 @@ func TestDiscoveryAgentsFailFallsBack(t *testing.T) {
 	f.fail["/usr/local/bin/claude agents --json"] = true // too old: no `agents`
 	f.set("/bin/ps -axww -o pid=,lstart=,tty=,args=", "  300 Thu Oct 22 10:00:00 2026 ttys009 vim\n")
 	d := &Discovery{Run: f.run, Projects: t.TempDir(), Now: time.Now}
-	got := d.Sessions(context.Background())
-	if got == nil || len(got) != 0 {
-		t.Fatalf("a scan that finds nothing is a successful empty list: %#v", got)
+	got, _, ok := d.Sessions(context.Background())
+	if !ok || len(got) != 0 {
+		t.Fatalf("a scan that finds nothing is a successful empty list: %v %#v", ok, got)
 	}
 	if len(f.matching("/bin/ps -axww")) != 1 {
 		t.Fatal("process scan not used")
@@ -184,7 +213,7 @@ func TestDiscoveryAgentsFailFallsBack(t *testing.T) {
 func TestDiscoveryFailure(t *testing.T) {
 	f := newFakeRun() // everything fails: ps too
 	d := &Discovery{Run: f.run, Projects: t.TempDir(), Now: time.Now}
-	if got := d.Sessions(context.Background()); got != nil {
-		t.Fatalf("a failed discovery is nil: %#v", got)
+	if got, _, ok := d.Sessions(context.Background()); ok || got != nil {
+		t.Fatalf("a failed discovery: %v %#v", ok, got)
 	}
 }

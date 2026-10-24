@@ -59,6 +59,9 @@ type Tracker struct {
 
 	mu      sync.Mutex
 	entries map[string]*entry
+	prompts int    // prompt ids handed out, for the tracker's lifetime
+	lastRun uint64 // the discovery run whose misses were counted last
+	counted bool   // lastRun is set
 
 	subMu   sync.Mutex
 	subs    map[int]chan struct{}
@@ -93,6 +96,16 @@ func NewTracker(d TrackerDeps) *Tracker {
 	return &Tracker{d: d, entries: map[string]*entry{}, subs: map[int]chan struct{}{}}
 }
 
+// newEntry adds an agent for sessionID; its prompt ids come from the
+// tracker's counter. Called with t.mu held.
+func (t *Tracker) newEntry(id, sessionID string, status Status, now time.Time) *entry {
+	e := &entry{promptSeq: &t.prompts}
+	e.ID, e.SessionID = id, sessionID
+	e.SetStatus(status, now)
+	t.entries[id] = e
+	return e
+}
+
 // Hook folds one Claude Code hook payload into its agent, creating the agent
 // for a session it has not seen yet.
 func (t *Tracker) Hook(body []byte) error {
@@ -117,45 +130,50 @@ func (t *Tracker) Hook(body []byte) error {
 			t.mu.Unlock()
 			return nil
 		}
-		e = &entry{}
-		e.ID, e.SessionID = id, ev.SessionID
-		e.SetStatus(Starting, now)
-		t.entries[id] = e
+		e = t.newEntry(id, ev.SessionID, Starting, now)
 		created = true
 	}
 	e.HookSeen, e.LastHook, e.Missed = true, now, 0
 	changed, scan := apply(e, ev, now)
 	changed = retitle(e) || changed || created
-	pane := e.Pane
+	pane, promptID := e.Pane, ""
+	if e.Waiting != nil {
+		promptID = e.Waiting.ID
+	}
 	t.mu.Unlock()
 
 	if changed {
 		t.notify()
 	}
-	if scan && pane != "" {
-		t.rescan(id, 0)
+	if scan && pane != "" && promptID != "" {
+		t.rescan(id, promptID, 0)
 	}
 	return nil
 }
 
 // rescan reads the pane after each of rescanWaits, replacing the guessed
-// options of the open prompt with the ones on screen.
-func (t *Tracker) rescan(id string, step int) {
+// options of prompt promptID with the ones on screen; it stops once that
+// prompt is no longer the open one.
+func (t *Tracker) rescan(id, promptID string, step int) {
 	if step >= len(rescanWaits) {
 		return
 	}
 	t.d.After(rescanWaits[step], func() {
-		t.refineFromPane(id)
-		t.rescan(id, step+1)
+		if t.refineFromPane(id, promptID) {
+			t.rescan(id, promptID, step+1)
+		}
 	})
 }
 
-func (t *Tracker) refineFromPane(id string) {
+// refineFromPane refines prompt promptID from the pane; false once that
+// prompt is gone.
+func (t *Tracker) refineFromPane(id, promptID string) bool {
+	open := func(e *entry) bool { return e != nil && e.Waiting != nil && e.Waiting.ID == promptID }
 	t.mu.Lock()
 	e := t.entries[id]
-	if e == nil || e.Waiting == nil || e.Pane == "" {
+	if !open(e) || e.Pane == "" {
 		t.mu.Unlock()
-		return
+		return false
 	}
 	pane := e.Pane
 	t.mu.Unlock()
@@ -164,25 +182,37 @@ func (t *Tracker) refineFromPane(id string) {
 
 	t.mu.Lock()
 	changed := false
-	if e := t.entries[id]; e != nil && e.Pane == pane && e.Waiting != nil {
+	e = t.entries[id]
+	still := open(e) && e.Pane == pane
+	if still {
 		changed = RefineOptions(e.Waiting, screen)
 	}
 	t.mu.Unlock()
 	if changed {
 		t.notify()
 	}
+	return still
 }
 
 // Sync runs discovery, maps sessions to tmux panes, tails transcripts,
 // tracks subagents, reads the status of sessions that send no hooks, scans
 // starting agents for arrow-key menus and drops agents that are gone.
 func (t *Tracker) Sync(ctx context.Context) {
-	lives := t.d.Discover.Sessions(ctx)
+	lives, run, ok := t.d.Discover.Sessions(ctx)
 	panes := t.d.Tmux.Panes(ctx)
 	now := t.d.Now()
 
 	t.mu.Lock()
-	changed := t.applyDiscovery(lives, now)
+	var changed bool
+	if ok {
+		var seen map[string]bool
+		changed, seen = t.applyDiscovery(lives, now)
+		// A cached list is the same run again: its misses count once.
+		if !t.counted || run != t.lastRun {
+			t.countMisses(seen, now)
+			t.lastRun, t.counted = run, true
+		}
+	}
 	changed = t.mapPanes(panes) || changed
 	jobs := t.syncJobs()
 	t.mu.Unlock()
@@ -202,15 +232,11 @@ func (t *Tracker) Sync(ctx context.Context) {
 	}
 }
 
-// applyDiscovery adds newly found sessions, refreshes what discovery knows
-// about the others and counts misses. lives == nil (a failed discovery)
-// changes nothing.
-func (t *Tracker) applyDiscovery(lives []Live, now time.Time) bool {
-	if lives == nil {
-		return false
-	}
-	changed := false
-	seen := map[string]bool{}
+// applyDiscovery adds newly found sessions and refreshes what discovery
+// knows about the others (a successful discovery only); seen holds the
+// agent ids it listed.
+func (t *Tracker) applyDiscovery(lives []Live, now time.Time) (changed bool, seen map[string]bool) {
+	seen = map[string]bool{}
 	for _, l := range lives {
 		if !IsSessionID(l.SessionID) {
 			continue
@@ -220,16 +246,13 @@ func (t *Tracker) applyDiscovery(lives []Live, now time.Time) bool {
 		transcript := t.trustedTranscript(l.Transcript)
 		e := t.entries[id]
 		if e == nil {
-			e = &entry{}
-			e.ID, e.SessionID = id, l.SessionID
 			// No transcript yet: a fresh session, maybe still in a dialog
 			// (workspace trust) that no hook reports.
 			status := Idle
 			if transcript == "" {
 				status = Starting
 			}
-			e.SetStatus(status, now)
-			t.entries[id] = e
+			e = t.newEntry(id, l.SessionID, status, now)
 			changed = true
 		}
 		live := l
@@ -243,6 +266,11 @@ func (t *Tracker) applyDiscovery(lives []Live, now time.Time) bool {
 		}
 		changed = retitle(e) || changed
 	}
+	return changed, seen
+}
+
+// countMisses counts one discovery run that did not list an agent.
+func (t *Tracker) countMisses(seen map[string]bool, now time.Time) {
 	for id, e := range t.entries {
 		if seen[id] || e.Status == Exited {
 			continue
@@ -253,7 +281,6 @@ func (t *Tracker) applyDiscovery(lives []Live, now time.Time) bool {
 		}
 		e.Missed++
 	}
-	return changed
 }
 
 // mapPanes matches each session's terminal to a tmux pane.
@@ -493,7 +520,8 @@ func (t *Tracker) Answer(ctx context.Context, agentID, promptID, key string) err
 		return ErrNotFound
 	}
 	p := e.Waiting
-	if e.Status != Waiting || p == nil || p.ID != promptID {
+	// A prompt another Answer is already typing into is answered.
+	if e.Status != Waiting || p == nil || p.ID != promptID || e.Answering == promptID {
 		t.mu.Unlock()
 		return ErrStale
 	}
@@ -524,6 +552,7 @@ func (t *Tracker) Answer(ctx context.Context, agentID, promptID, key string) err
 		}
 		keys = append(keys, "Enter")
 	}
+	e.Answering = promptID // claim it before the lock goes
 	t.mu.Unlock()
 
 	var err error
@@ -532,14 +561,19 @@ func (t *Tracker) Answer(ctx context.Context, agentID, promptID, key string) err
 	} else {
 		err = t.d.Tmux.SendKeys(ctx, pane, key)
 	}
-	if err != nil {
-		return err
-	}
 
 	now := t.d.Now()
 	t.mu.Lock()
+	e = t.entries[agentID]
+	if e != nil && e.Answering == promptID {
+		e.Answering = "" // answered, or given back when typing failed
+	}
+	if err != nil {
+		t.mu.Unlock()
+		return err
+	}
 	changed := false
-	if e := t.entries[agentID]; e != nil && e.Waiting != nil && e.Waiting.ID == promptID {
+	if e != nil && e.Waiting != nil && e.Waiting.ID == promptID {
 		switch {
 		case e.Menu:
 			e.Menu = false

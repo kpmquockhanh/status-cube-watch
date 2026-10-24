@@ -15,14 +15,27 @@ type fakeRun struct {
 	calls []string
 	out   map[string]string
 	fail  map[string]bool
+	// onCall, when set, runs before each command is answered (outside the
+	// fake's lock): a slow command, or something happening meanwhile.
+	onCall func(cmd string)
 }
 
 func newFakeRun() *fakeRun { return &fakeRun{out: map[string]string{}, fail: map[string]bool{}} }
 
 func (f *fakeRun) set(cmd, out string) { f.mu.Lock(); f.out[cmd] = out; f.mu.Unlock() }
 
+func (f *fakeRun) setFail(cmd string, fail bool) { f.mu.Lock(); f.fail[cmd] = fail; f.mu.Unlock() }
+
+func (f *fakeRun) setOnCall(h func(string)) { f.mu.Lock(); f.onCall = h; f.mu.Unlock() }
+
 func (f *fakeRun) run(_ context.Context, name string, args ...string) ([]byte, error) {
 	cmd := strings.Join(append([]string{name}, args...), " ")
+	f.mu.Lock()
+	hook := f.onCall
+	f.mu.Unlock()
+	if hook != nil {
+		hook(cmd)
+	}
 	f.mu.Lock()
 	defer f.mu.Unlock()
 	f.calls = append(f.calls, cmd)

@@ -26,15 +26,23 @@ type entry struct {
 	EndedAt       time.Time
 
 	// Tracker bookkeeping (bridge only).
-	LastHook time.Time // when the last hook arrived
-	Missed   int       // successful discoveries in a row without this session
-	Live     *Live     // the session as discovery last saw it (nil: never)
+	LastHook  time.Time // when the last hook arrived
+	Missed    int       // successful discoveries in a row without this session
+	Live      *Live     // the session as discovery last saw it (nil: never)
+	Answering string    // id of the prompt an Answer is typing into
+	promptSeq *int      // the tracker's prompt counter (nil: PromptN)
 }
 
-// NextPromptID returns a fresh id for a new blocking prompt.
+// NextPromptID returns a fresh id for a new blocking prompt: from the
+// tracker's counter when the entry belongs to a tracker, so ids never repeat
+// across agents or a re-created agent; else from the entry's own count.
 func (e *entry) NextPromptID() string {
-	e.PromptN++
-	return "p" + strconv.Itoa(e.PromptN)
+	n := &e.PromptN
+	if e.promptSeq != nil {
+		n = e.promptSeq
+	}
+	*n++
+	return "p" + strconv.Itoa(*n)
 }
 
 // SetStatus changes status, stamping StatusSince only on a real change.

@@ -6,26 +6,31 @@ import (
 	"errors"
 	"os"
 	"path/filepath"
+	"strings"
 	"sync"
 	"syscall"
 	"testing"
 	"time"
 )
 
+// fakeDisc serves its last run until set is called again, as Discovery
+// serves a cached `claude agents` run.
 type fakeDisc struct {
 	mu    sync.Mutex
 	lives []Live // nil = discovery failed
+	gen   uint64
 }
 
-func (f *fakeDisc) set(l []Live) { f.mu.Lock(); f.lives = l; f.mu.Unlock() }
+// set is a new discovery run (nil: a failed one).
+func (f *fakeDisc) set(l []Live) { f.mu.Lock(); f.lives = l; f.gen++; f.mu.Unlock() }
 
-func (f *fakeDisc) Sessions(context.Context) []Live {
+func (f *fakeDisc) Sessions(context.Context) ([]Live, uint64, bool) {
 	f.mu.Lock()
 	defer f.mu.Unlock()
 	if f.lives == nil {
-		return nil
+		return nil, f.gen, false
 	}
-	return append([]Live{}, f.lives...)
+	return append([]Live{}, f.lives...), f.gen, true
 }
 
 type testEnv struct {
@@ -311,11 +316,15 @@ func TestExpiry(t *testing.T) {
 	// A session that just sent a hook is alive even if a (cached) discovery
 	// has not seen it yet.
 	mustHook(t, tr, map[string]any{"hook_event_name": "UserPromptSubmit", "session_id": sidC})
+	env.disc.set([]Live{})
 	tr.Sync(context.Background())
+	env.disc.set([]Live{})
 	tr.Sync(context.Background())
 	only(t, tr)
 	env.advance(16 * time.Second)
+	env.disc.set([]Live{})
 	tr.Sync(context.Background())
+	env.disc.set([]Live{})
 	tr.Sync(context.Background())
 	if len(tr.Snapshot()) != 0 {
 		t.Fatal("quiet and missing twice: still there")
@@ -507,5 +516,156 @@ func TestMergeTailHookWins(t *testing.T) {
 	e3.Transcript = path + ".new"
 	if mergeTail(e3, &j3) || e3.Offset != 0 {
 		t.Fatal("a stale read must be dropped")
+	}
+}
+
+// Fix 1: two taps on the same prompt at once type one key.
+func TestAnswerConcurrentSameKeyOnce(t *testing.T) {
+	tr, env := newTestTracker(t)
+	discovered(t, tr, env, "")
+	id := agentID(sidA)
+	mustHook(t, tr, map[string]any{"hook_event_name": "PermissionRequest", "tool_name": "Bash",
+		"tool_input": map[string]string{"command": "make"}})
+	release := make(chan struct{})
+	entered := make(chan struct{}, 2)
+	env.run.setOnCall(func(cmd string) {
+		if strings.HasPrefix(cmd, "tmux send-keys") {
+			entered <- struct{}{}
+			<-release // a slow send-keys
+		}
+	})
+	errs := make(chan error, 2)
+	go func() { errs <- tr.Answer(context.Background(), id, "p1", "1") }()
+	<-entered // the first is typing
+	go func() { errs <- tr.Answer(context.Background(), id, "p1", "1") }()
+	var second error
+	select {
+	case second = <-errs:
+	case <-entered:
+		close(release)
+		t.Fatal("the second answer is typing too")
+	case <-time.After(5 * time.Second):
+		close(release)
+		t.Fatal("the second answer hangs")
+	}
+	close(release)
+	first := <-errs
+	if first != nil || !errors.Is(second, ErrStale) {
+		t.Fatalf("first %v, second %v", first, second)
+	}
+	if got := env.run.matching("tmux send-keys"); len(got) != 1 {
+		t.Fatalf("sent %q", got)
+	}
+}
+
+// Fix 1: a failed send-keys gives the prompt back.
+func TestAnswerSendFailureReleasesClaim(t *testing.T) {
+	tr, env := newTestTracker(t)
+	discovered(t, tr, env, "")
+	id := agentID(sidA)
+	mustHook(t, tr, map[string]any{"hook_event_name": "PermissionRequest", "tool_name": "Bash",
+		"tool_input": map[string]string{"command": "make"}})
+	env.run.setFail("tmux send-keys -t %3 -l 1", true)
+	if err := tr.Answer(context.Background(), id, "p1", "1"); err == nil || errors.Is(err, ErrStale) {
+		t.Fatalf("send failure: %v", err)
+	}
+	if a := only(t, tr); a.Status != Waiting || a.Waiting.ID != "p1" {
+		t.Fatalf("still waiting: %+v", a)
+	}
+	env.run.setFail("tmux send-keys -t %3 -l 1", false)
+	if err := tr.Answer(context.Background(), id, "p1", "1"); err != nil {
+		t.Fatalf("retry: %v", err)
+	}
+}
+
+// Fix 2: prompt ids never repeat, also across a dropped and re-created agent.
+func TestPromptIDsUniqueAcrossRecreation(t *testing.T) {
+	tr, env := newTestTracker(t)
+	seen := map[string]bool{}
+	prompt := func() {
+		mustHook(t, tr, map[string]any{"hook_event_name": "PermissionRequest", "tool_name": "Bash",
+			"tool_input": map[string]string{"command": "make"}})
+		a := only(t, tr)
+		if seen[a.Waiting.ID] {
+			t.Fatalf("prompt id %s reused", a.Waiting.ID)
+		}
+		seen[a.Waiting.ID] = true
+	}
+	prompt()
+	prompt()
+	mustHook(t, tr, map[string]any{"hook_event_name": "SessionEnd"})
+	env.advance(61 * time.Second)
+	tr.Sync(context.Background())
+	if len(tr.Snapshot()) != 0 {
+		t.Fatal("not expired")
+	}
+	// claude --resume <same id>: same agent id, new prompts.
+	mustHook(t, tr, map[string]any{"hook_event_name": "SessionStart"})
+	prompt()
+	// Another session's prompts don't collide either.
+	mustHook(t, tr, map[string]any{"hook_event_name": "PermissionRequest", "session_id": sidB, "tool_name": "Bash",
+		"tool_input": map[string]string{"command": "make"}})
+	for _, a := range tr.Snapshot() {
+		if a.SessionID == sidB && seen[a.Waiting.ID] {
+			t.Fatalf("prompt id %s reused by another agent", a.Waiting.ID)
+		}
+	}
+}
+
+// Fix 3: misses count per discovery run, not per Sync serving a cached run.
+func TestMissCountedPerRun(t *testing.T) {
+	tr, env := newTestTracker(t)
+	env.disc.set([]Live{{Cwd: "/work/b", SessionID: sidB}})
+	tr.Sync(context.Background())
+	env.disc.set([]Live{}) // one real run without it…
+	for range 5 {
+		tr.Sync(context.Background()) // …served again and again from the cache
+	}
+	only(t, tr)
+	env.disc.set([]Live{}) // a second real run without it
+	tr.Sync(context.Background())
+	if len(tr.Snapshot()) != 0 {
+		t.Fatal("missing from two runs: still there")
+	}
+}
+
+// Fix 5: a re-scan scheduled for one prompt never edits a newer one.
+func TestRescanKeepsToItsPrompt(t *testing.T) {
+	tr, env := newTestTracker(t)
+	var pending []func()
+	tr.d.After = func(_ time.Duration, f func()) { pending = append(pending, f) }
+	discovered(t, tr, env, "")
+	env.run.set("tmux capture-pane", permissionPane)
+	permission := func(cmd string) {
+		mustHook(t, tr, map[string]any{"hook_event_name": "PermissionRequest", "tool_name": "Bash",
+			"tool_input": map[string]string{"command": cmd}})
+	}
+	const guessed = "yes, and don't ask again"
+
+	permission("a") // p1: re-scan scheduled
+	p1Scan := pending[0]
+	pending = nil
+	permission("b") // p2 replaces p1 before p1's re-scan runs
+	pending = nil
+	p1Scan()
+	if a := only(t, tr); a.Waiting.ID != "p2" || a.Waiting.Options[1].Label != guessed {
+		t.Fatalf("p2 changed by p1's re-scan: %+v", a.Waiting)
+	}
+	if len(pending) != 0 {
+		t.Fatal("a superseded re-scan must not go on")
+	}
+
+	permission("c") // p3
+	p3Scan := pending[0]
+	pending = nil
+	env.run.setOnCall(func(cmd string) {
+		if strings.HasPrefix(cmd, "tmux capture-pane") {
+			env.run.setOnCall(nil)
+			permission("d") // p4 arrives while p3's re-scan reads the pane
+		}
+	})
+	p3Scan()
+	if a := only(t, tr); a.Waiting.ID != "p4" || a.Waiting.Options[1].Label != guessed {
+		t.Fatalf("p4 changed by p3's re-scan: %+v", a.Waiting)
 	}
 }
