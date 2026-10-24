@@ -472,6 +472,17 @@ expect_solid "detent resists the turn back (70 deg)"    check_qt_detent -D qt_a=
 expect_empty "detent sits free when locked (90 deg)"    check_qt_detent -D qt_a=90
 expect_manifold "quarter-turn test boss"     qt_test_boss     --max 36.1 36.1 9.1
 expect_manifold "quarter-turn test receiver" qt_test_receiver --max 31.1 31.1 7.1
+
+# desk foot: holds the pod leaned back, either way up, clear of the desk, with the Type-C free
+for t in 0 180; do
+  expect_empty "pod clear of the foot (turn $t)"                  check_foot_pod   -D pod_turn=$t
+  expect_empty "pod clears the desk on the foot (turn $t)"        check_foot_desk  -D pod_turn=$t
+  expect_empty "cable and open plug clear the foot (turn $t)"     check_foot_cable -D pod_turn=$t
+  expect_empty "pod's centre is over the foot (turn $t)"          check_foot_cog   -D pod_turn=$t
+done
+expect_solid "control: foot_h=25 puts the pod into the desk"     check_foot_desk -D foot_h=25
+expect_error "control: foot_d=20 puts the centre off the foot"    check_foot_cog -D foot_d=20
+expect_manifold "foot" foot --max 40.1 52.1 46.6
 fi
 
 exit $fail

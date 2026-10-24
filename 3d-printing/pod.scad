@@ -75,6 +75,16 @@ qt_detent = 0.4;            // bump height into the notches on the boss's top fa
 qt_bump_r = 6;  qt_bump_d = 1.6;   // bump position (radius, receiver angle 0) and size
 qt_lock = 90;               // insert with the pod landscape, turn 90 deg to portrait
 qt_a = 90;  qt_lift = 0;    // check_qt: boss turned qt_a from insert, pulled qt_lift out
+// Desk foot. World frame: desk at z = 0, x across, y away from the reader. The pod leans back foot_lean from
+// vertical with its boss centre foot_h above the desk; pod_turn = 180 mounts it the other way up.
+foot_lean = 20;
+foot_h = 32;                // boss centre above the desk
+foot_w = 40;  foot_d = 52;  // base footprint; 40 stays inside the pod's sides, so the Type-C side is free
+foot_yc = 4;                // base centre, world y (the boss is at y = 0)
+foot_base_t = 2;            // base plate under the hull
+foot_pad_d = 8;  foot_pad_depth = 0.8;  foot_pad_in = 6;   // rubber-foot recesses
+desk_gap = 2;               // least gap from the pod to the desk
+pod_turn = 0;
 ledge = 0;                  // check_ledges: 0 = bottom ledge, 1 = top ledge
 carrier_clr = 0.2;          // carrier outline inside the cavity, per side
 post_d = 3;  preload = 0.2; // posts press this far into the PCB rear
@@ -315,6 +325,36 @@ module qt_receiver_body() difference() { qt_receiver(); qt_bump(); }
 // the boss turned a deg from insert and pulled `lift` back out of the receiver
 module qt_turn(a, lift) translate([0, 0, -lift]) rotate([0, 0, a - qt_lock]) children();
 
+// ---- desk foot ---------------------------------------------------------------------------
+// Mount frame M: the boss centre on the pod's back plane, pod axes. M -> world on the foot.
+module foot_frame() translate([0, 0, foot_h]) rotate([-foot_lean, 0, 0]) children();
+module on_foot() foot_frame() rotate([0, pod_turn, 0]) translate([-qt_c[0], -back_y, -qt_c[1]]) children();
+module receiver_on_foot() foot_frame() rotate([-90, 0, 0]) qt_receiver();
+qt_back = qt_floor_z + qt_floor;               // receiver's rear face, M y
+// the pod's envelope (tub, boss excepted, and plate), grown by g
+module pod_box(g = 0) translate([out_x0 - g, face_y - g, out_z0 - g]) cube([out_x1 - out_x0 + 2*g, back_y - face_y + 2*g, out_z1 - out_z0 + 2*g]);
+module foot_base2d() translate([-foot_w/2, foot_yc - foot_d/2]) offset(r = 3) offset(delta = -3) square([foot_w, foot_d]);
+module foot() difference() {
+  union() {
+    difference() {
+      hull() {
+        foot_frame() translate([0, qt_back - 0.01, 0]) rotate([-90, 0, 0]) cylinder(d = qt_base_d, h = 2, $fn = 96);
+        linear_extrude(foot_base_t) foot_base2d();
+      }
+      on_foot() pod_box(0.5);
+      foot_frame() translate([0, -50, 0]) rotate([-90, 0, 0]) cylinder(d = qt_base_d + 0.4, h = 50 + qt_back - 0.5, $fn = 96);   // the receiver overlaps the hull by 0.5
+    }
+    receiver_on_foot();
+  }
+  for (sx = [-1, 1], sy = [-1, 1]) translate([sx*(foot_w/2 - foot_pad_in), foot_yc + sy*(foot_d/2 - foot_pad_in), -0.01])
+    cylinder(d = foot_pad_d, h = foot_pad_depth + 0.01);
+}
+module foot_pod() on_foot() { tub(); plate(); }
+// the pod's centre (its envelope's, where the cell and the board sit) in world coordinates
+function rotx(p, a) = [p[0], p[1]*cos(a) - p[2]*sin(a), p[1]*sin(a) + p[2]*cos(a)];
+pod_ctr_m = [(out_x0 + out_x1)/2 - qt_c[0], (face_y + back_y)/2 - back_y, (out_z0 + out_z1)/2 - qt_c[1]];
+pod_ctr = [0, 0, foot_h] + rotx(pod_turn == 180 ? [-pod_ctr_m[0], pod_ctr_m[1], -pod_ctr_m[2]] : pod_ctr_m, -foot_lean);
+
 // ---- reference values ------------------------------------------------------------
 module meta() echo(str("POD{\"w\":", out_x1 - out_x0, ",\"l\":", out_z1 - out_z0, ",\"d\":", back_y, "}"));
 
@@ -368,5 +408,11 @@ else if (part == "check_qt") intersection() { qt_turn(qt_a, qt_lift) qt_boss(); 
 else if (part == "check_qt_detent") intersection() { qt_turn(qt_a, 0) qt_boss(); qt_bump(); }
 else if (part == "qt_test_boss") { translate([-18, -18, -4]) cube([36, 36, 4]); qt_boss(); }
 else if (part == "qt_test_receiver") translate([0, 0, qt_floor_z + qt_floor]) rotate([180, 0, 0]) qt_receiver();
+else if (part == "foot") foot();
+else if (part == "check_foot_pod") intersection() { foot(); foot_pod(); }
+else if (part == "check_foot_desk") intersection() { foot_pod(); translate([-100, -100, -100]) cube([200, 200, 100 + desk_gap]); }
+else if (part == "check_foot_cable") intersection() { foot(); on_foot() { cable_ghost(); plug_place() plug_cap_open(); } }
+else if (part == "check_foot_cog") assert(abs(pod_ctr[0]) <= foot_w/2 - 5 && abs(pod_ctr[1] - foot_yc) <= foot_d/2 - 5,
+                                         str("pod centre ", pod_ctr, " is not 5 inside the foot"));
 else if (part == "check_antenna_metal") intersection() { metal(); antenna_zone(metal_keep); }
 else assert(false, str("unknown part: ", part));
