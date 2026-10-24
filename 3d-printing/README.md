@@ -6,7 +6,7 @@ The board facts come from Waveshare's STEP model of the board (`ESP32-S3-Touch-L
 
 - **Wedge** (`stand.scad`, below): one closed body and a base plate.
 - **Easel** (`easel.scad`, see [Easel stand](#easel-stand)): a slim bezel at 65 deg on a low tray that holds the cell; screws only, every part prints flat without supports.
-- **Pod** (`pod.scad`, see [Pod](#pod)): a closed, rain-proof case for the board and a 6.2 x 34 x 41 mm cell, with a Garmin-style quarter-turn boss, a desk foot and a handlebar clamp. MJF nylon and TPU, from a printing service.
+- **Pod** (`pod.scad`, see [Pod](#pod)): a closed, rain-proof case for the board and a 6.2 x 34 x 41 mm cell, with a Garmin-style quarter-turn boss, a desk foot and a handlebar clamp. MJF nylon and TPU from a printing service, plus a sponge gasket.
 
 The wedge is a two-part printed desk stand for the Waveshare ESP32-S3-Touch-LCD-1.69 and a 12 x 40 x 65 mm LiPo. The board sits in a glass pocket in the sloped front face (65 deg screen angle by default), the cell lies flat in a bay behind and below it, and a base plate with two pusher posts closes the bottom and presses the board into the pocket. Everything is parametric in `stand.scad`; `test.sh` checks the geometry with boolean-intersection tests.
 
@@ -193,18 +193,18 @@ There are no easel preview images (no headless PNG export here); `part="assembly
 
 `pod.scad`, designed in `docs/superpowers/specs/2026-10-24-pod-design.md`. A closed case for the board and a 6.2 x 34 x 41 mm cell that lives on the desk next to the monitor and goes on the bike when needed, in the rain too. The cell sits behind the board, shifted along the long axis so nothing metal is over the chip antenna (see [Antenna](#antenna)), with 5 mm of extra bay length (`bat_buf`, 3..5) for a protection board at the lead end (`lead_end = "bottom"` or `"top"`). A quarter-turn boss on the back locks into the desk foot or the bar clamp; store-bought Garmin mounts should take it too (`VERIFY`). No button holes: the board stays on, and RST / BOOT / PWR are reached by opening the case. No sound hole either, so the buzzer is muffled.
 
-Envelope: 40.8 x 62.3 mm, 27.1 mm from the face to the back (tub 24.2, plate and squeezed gasket 2.9), plus 5.0 for the boss. `part="meta"` echoes the tub's figures.
+Envelope: 40.8 x 63.5 mm, 26.5 mm from the face to the back (tub 23.5, plate and squeezed gasket 3.0), plus 5.0 for the boss. `part="meta"` echoes the tub's figures.
 
 ### Print list
 
-Printed by a service: rigid parts in **MJF PA12**, the gasket and the plug in **TPU** (MJF TPU, or cut the gasket from 1.2 mm silicone sheet and use a ready-made rubber plug). MJF needs no supports, so orientation is the service's choice.
+Printed by a service: rigid parts in **MJF PA12**, the plug in **TPU** (or a ready-made rubber plug). The gasket is **1.5 mm closed-cell silicone sponge**, cut to `pod-gasket.dxf`: about 700 mm² of it is squeezed, and sponge takes some 15–25 N for that, which four M2 screws and the carrier can carry. Solid TPU would need hundreds of newtons and bow the carrier into the cell. MJF needs no supports, so orientation is the service's choice.
 
 | File | Part | Material | Qty |
 |---|---|---|---|
 | `pod-tub.stl` | rear shell: board pocket, carrier ledges, cell bay, four blind pilots, Type-C opening, tether anchor, quarter-turn boss | PA12 | 1 |
 | `pod-plate.stl` | front plate: window, four countersinks, skirt that sets the gasket squeeze | PA12 | 1 |
-| `pod-carrier.stl` | carrier: four posts press the PCB, pegs in its notches, lead groove and slot | PA12 | 1 |
-| `pod-gasket.stl` | 1.2 mm gasket over the glass border and the rim | TPU | 1 |
+| `pod-carrier.stl` | carrier: four posts press the PCB, Ø1.95 pegs in its notches, lead groove and a slot open to the edge | PA12 | 1 |
+| `pod-gasket.dxf` (`pod-gasket.stl` as a 3D reference) | gasket over the glass border and the rim | 1.5 mm closed-cell silicone sponge, cut | 1 |
 | `pod-plug.stl` | Type-C plug with a strap and a pin into the anchor | TPU | 1 |
 | `pod-foot.stl` | desk foot, 20 deg lean, quarter-turn receiver | PA12 | 1 |
 | `pod-clamp-top.stl`, `pod-clamp-bottom.stl` | handlebar clamp for a 31.8 mm bar, receiver on top | PA12 | 1 each |
@@ -215,20 +215,20 @@ Printed by a service: rigid parts in **MJF PA12**, the gasket and the plug in **
 
 ### Hardware
 
-4 x M2 x 8 countersunk (front plate into the tub's pilots), 2 x M3 x 16 and 2 x M3 nuts (clamp), a 1.5 mm adhesive foam pad the size of the cell (behind it, squeezed to 1.0), 4 x Ø8 rubber feet (foot), a cheap Garmin quarter-turn mount (to check the boss).
+4 x M2 x 8 countersunk (front plate into the tub's pilots), 2 x M3 x 16 and 2 x M3 nuts (clamp), a 1.5 mm adhesive foam pad the size of the cell (behind it; the bay squeezes it to 1.0, at least 0.3 even with the cell pushed forward), 4 x Ø8 rubber feet (foot), a cheap Garmin quarter-turn mount (to check the boss). Without a protection board in the buffer, fill it with a 5 mm foam block so the cell cannot slide.
 
 ### Assembly order
 
 1. Foam pad on the back of the bay; cell in, with its lead and protection board at the `lead_end` end of the bay (default: the bottom).
-2. Thread the lead through the carrier's slot from behind; carrier into the cavity, rear face on the two ledges.
+2. Lay the lead into the carrier's slot from its open edge (the plug cannot pass a slot), then the carrier into the cavity, rear face on the two ledges. Spare lead folds into the buffer beside the protection board.
 3. Plug the lead into the board's BAT header (beside the Type-C, opening towards the board centre) and lay it in the carrier's groove.
 4. Press the board onto the carrier's pegs, glass outwards: the glass front ends flush with the rim.
 5. Gasket on, then the plate; four M2 x 8 countersunk screws, evenly, until the plate's skirt meets the rim.
-6. Plug into the Type-C opening, pin into the anchor hole below it.
+6. Plug into the Type-C opening, pin into the blind anchor hole 6 mm below it.
 
 ### Seal
 
-One flat gasket does all the sealing. The glass front and the tub's rim are in one plane (y = 0), and the plate squeezes the gasket on both, from 1.2 to 0.9 mm (`gk_t`, `gk_sq`); the plate's skirt lands on the rim and stops the squeeze there. Every way into the cavity crosses at least 1.0 mm of squeezed gasket (`seal_land`, checked): from a screw hole (the pilots are blind, so water down a screw goes nowhere else), from the seam at the side, and from the window across the glass border to the glass edge. The pod window has r = 3 corners for that last one (board.scad's r = 2 leaves 0.84). The Type-C opening is closed by the plug's body, 0.15 mm oversize per side (`plug_int`, `VERIFY`). Rain and road spray, not dunking.
+One flat gasket does all the sealing. The glass front and the tub's rim are in one plane (y = 0), and the plate squeezes the gasket on both, from 1.5 to 1.0 mm (`gk_t`, `gk_sq`); the plate's skirt lands on the rim and stops the squeeze there. The 0.5 squeeze covers the board sitting 0.35 back (tolerance plus the carrier bowing under the gasket's load, checked). Every way into the cavity crosses at least 1.0 mm of squeezed gasket (`seal_land`, checked): from a screw hole (the pilots and the tether anchor are blind, so water down them goes nowhere else), from the seam at the side, and from the window across the glass border to the glass edge. The pod window has r = 3 corners for that last one (board.scad's r = 2 leaves 0.84); with the board off by its root-sum-square play (±0.35 in x and z: pegs, carrier, plate on its screws) at least 0.7 is left. The Type-C opening is closed by the plug's body, 0.15 mm oversize per side (`plug_int`, `VERIFY`), in a relief that keeps a 0.8 web to the cavity. Rain and road spray, not dunking.
 
 ### Desk and bike
 
@@ -238,20 +238,21 @@ On the desk, the foot holds the pod 20 deg back from vertical (`foot_lean`), cle
 
 ### Checks
 
-`./test.sh pod`, on top of the board checks shared with the stands. With the board's STEP model: the carrier presses only the PCB and keeps 0.29 mm from the tallest rear part (the 2-pin header), the tub 1.17 mm from the Type-C shell, the plug 1.89 mm. The quarter-turn checks insert, the turn, the lock, retention when pulled 0.5 mm, and the detent; the foot checks the pod against the foot and the desk, the cable and the open plug, and that the pod's centre is 5 mm inside the base, both ways up.
+`./test.sh pod`, on top of the board checks shared with the stands. With the board's STEP model: the carrier presses only the PCB and keeps 0.29 mm from the tallest rear part (the 2-pin header), the tub 1.17 mm from the Type-C shell, the plug 1.89 mm. The quarter-turn checks insert, the turn, the lock, retention when pulled 0.5 mm, and the detent: a dome on a 6 mm finger (root strain 1.3% for its 0.4 rise, under 2%) that presses 0.05 into a round dimple when locked, so the boss is held against the hooks and the dimple's walls cam it out when turned; the foot checks the pod against the foot and the desk, the cable and the open plug, and that the pod's centre is 5 mm inside the base, both ways up.
 
 ### VERIFY (pod-specific, on top of the board items in `board.scad`)
 
 - The antenna position (`ant_*` in `board.scad`): the 6 x 2 x 1 mm STEP part assumed to be the chip antenna. The bay starts `ant_keep` = 3 past it; every metal part (cell, buffer, lead, screws) keeps `metal_keep` = 2 off its footprint.
 - Every quarter-turn dimension (`qt_*`). No published Garmin drawing was found, so these are starting values; the pod's own receivers use them too, so the pod fits its foot and clamp either way. Check against a real mount on the test pair.
 - The BAT header and the lead route (`bat_*`, `cord_*`), as in the easel; which end of the real cell the lead leaves from, and the protection board's length (`lead_end`, `bat_buf`).
-- `plug_int` (the plug's grip in the opening) and the gasket squeeze on the first print.
+- `plug_int` (the plug's grip in the opening), the gasket squeeze, and the detent's click (`qt_detent`, `qt_notch`) on the first print.
 - USB starting the board after a flat cell (above).
 
 Export:
 
 ```sh
 tools/openscad --backend=manifold -D 'part="tub"' -o pod-tub.stl pod.scad   # also plate, carrier, gasket, plug, foot, clamp_top (-> pod-clamp-top.stl), clamp_bottom, shim_25, shim_22, qt_test_boss (-> pod-qt-boss.stl), qt_test_receiver
+tools/openscad -D 'part="gasket_2d"' -o pod-gasket.dxf pod.scad
 ```
 
 `part="assembly"`, `"section"`, `"on_foot_view"` and `"on_bar_view"` render the pod in place for viewing.

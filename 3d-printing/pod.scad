@@ -16,14 +16,15 @@ include <board.scad>   // board facts, fit tunables (clr, lip_t, ...) and board 
 board_flip = false;         // only the unflipped board is designed: the bay position follows the antenna
 O = [0, 0, 0];  lean = 0;   // the pod frame is the board-local frame
 sag = 0;                    // board lowered along the glass, for the checks
-glass_dy = 0;               // board moved along y (MJF tolerance), for the checks
+glass_dx = 0;  glass_dy = 0;  glass_dz = 0;   // board moved off nominal (MJF tolerance, peg slop), for the checks
 nudge = 0.02;               // separates faces that touch by design, in collision checks only
 
 // Cell: [length along z, width along x, thickness along y]
 bat = [41, 34, 6.2];
 bat_buf = 5;                // extra bay length at the lead end, for a protection board (3..5)
-bcl = 0.4;                  // cell clearance, per side
-pad_t = 1.0;                // adhesive foam behind the cell, squeezed
+bcl = 0.4;                  // cell clearance, per side in x and z
+bcl_y = 0.1;                // cell to the carrier
+pad_free = 1.5;  pad_t = 1.0;   // adhesive foam behind the cell: as bought, and squeezed in the bay
 lead_end = "bottom";        // end of the cell the lead and the protection board are at: "bottom" | "top"
 
 // Antenna (board.scad: ant_*). The bay starts ant_keep past it; every metal part keeps metal_keep off its
@@ -32,17 +33,20 @@ ant_keep = 3;
 metal_keep = 2;
 
 wall = 3.0;                 // side and bottom walls: room for the gasket and the bottom pilots
-top_wall = 4.2;             // top wall: takes the two top pilots
+top_wall = 5.4;             // top wall: takes the two top pilots, their countersinks clear of the face's edge break
 back_t = 2.0;               // back wall behind the cell
 step = 1.0;                 // the front cavity runs this far past the bay's top: the carrier's top ledge
 carrier_t = 3.2;            // carrier plate (keeps 1.6 behind the lead groove)
 pilot_d = 1.8;  pilot_in = 1.4;   // M2 self-tapping pilots; pilot wall to the cavity at the bottom corners
 pilot_depth = 8;            // blind, from the rim face
 edge_r = 2;                 // outer vertical edges
-anchor_d = 1.6;  anchor_l = 3;    // blind hole in the right side for the plug's tether pin
-// Gasket and front plate: one flat TPU gasket over the glass border and the rim (flush at y = 0), squeezed
-// from gk_t to gk_c by the plate, whose outer skirt lands on the rim and sets the squeeze.
-gk_t = 1.2;  gk_sq = 0.3;   // free thickness, squeeze
+anchor_d = 1.6;  anchor_l = 2;    // blind hole in the right side for the plug's tether pin (1.0 short of the cavity)
+relief_web = 0.8;           // least wall between the cavity and the Type-C plug relief
+// Gasket and front plate: one flat gasket over the glass border and the rim (flush at y = 0), squeezed from
+// gk_t to gk_c by the plate, whose outer skirt lands on the rim and sets the squeeze. Closed-cell silicone
+// sponge: about 700 mm2 of it squeezed takes some 15-25 N, which four M2 and the carrier carry (solid TPU
+// would take hundreds of N and bow the carrier into the cell). The squeeze covers board tolerance and that bow.
+gk_t = 1.5;  gk_sq = 0.5;   // free thickness, squeeze
 face_t = 2.0;               // front plate
 face_cham = 0.6;            // 45 deg break on the face's outer edge
 skirt_w = 1.0;              // skirt round the plate's rear, inside the outline
@@ -58,8 +62,9 @@ plug_int = 0.15;            // VERIFY on the first print: per side, into the rel
 plug_flange = 1.0;          // flange past the relief, per side
 plug_lip = 1.0;             // flange thickness
 plug_gap = 0.2;             // body tip to the relief floor
-strap_w = 2.0;  strap_t = 0.8;
-pin_d = 1.9;                // into the Ø1.6 anchor hole
+strap_w = 2.0;  strap_t = 1.0;
+tether_l = 6;               // flange edge to the pin centre: room for the strap to fold as the plug opens
+tether_pin_d = 1.9;         // into the Ø1.6 anchor hole
 plug_open = true;           // check_open_plug_cable: the plug hanging open (false = closed, the control)
 // Quarter-turn (Garmin style). VERIFY every value against a real Garmin mount: no published drawing was
 // found (third-party designs give only the outer disc, 32.5 or 33.5, and the 20 mm hole spacing), so these
@@ -71,8 +76,11 @@ qt_hook_t = 2.2;            // hook thickness
 qt_clr = 0.2;
 qt_base_d = 31;             // receiver outer
 qt_floor = 2.0;             // receiver floor behind the boss
-qt_detent = 0.4;            // bump height into the notches on the boss's top face
-qt_bump_r = 6;  qt_bump_d = 1.6;   // bump position (radius, receiver angle 0) and size
+qt_detent = 0.4;            // dome height past the floor face
+qt_notch = 0.15;            // dimple depth in the boss's top: the dome presses qt_detent - qt_clr - qt_notch into it (preload)
+qt_bump_r = 6.4;  qt_bump_d = 1.6;   // dome position (radius, receiver angle 0) and base size
+qt_finger_root = 0.4;       // the finger is rooted here and runs out past the dome: 6 mm of lever
+qt_finger_t = 0.8;
 qt_lock = 90;               // insert with the pod landscape, turn 90 deg to portrait
 qt_a = 90;  qt_lift = 0;    // check_qt: boss turned qt_a from insert, pulled qt_lift out
 // Desk foot. World frame: desk at z = 0, x across, y away from the reader. The pod leans back foot_lean from
@@ -100,7 +108,7 @@ shim_l = 14;
 ledge = 0;                  // check_ledges: 0 = bottom ledge, 1 = top ledge
 carrier_clr = 0.2;          // carrier outline inside the cavity, per side
 post_d = 3;  preload = 0.2; // posts press this far into the PCB rear
-peg_d = 1.8;  peg_l = 1.0;  // pegs into the PCB notches; peg_l = 0 turns them off
+peg_d = 1.95;  peg_l = 1.0; // pegs into the Ø2.36 PCB notches: the largest that clears them on the STEP model (2.0 touches); peg_l = 0 turns them off
 
 // Battery lead, as in the easel: the MX1.25 BAT header beside the Type-C opens towards the board centre, so
 // the lead leaves flat across the PCB rear, climbs into a groove in the carrier's front face at cord_x and
@@ -112,13 +120,14 @@ cord_w = 3.0;  cord_depth = 1.6;              // groove width, and depth into th
 cord_x = 20;                                  // board x of the groove
 bat_exit = 3.5;                               // VERIFY: free run past the plug where the lead climbs over the rear parts
 slot_w = 4;  slot_h = 3;                      // lead slot through the carrier (x, z)
+lead_notch = true;                            // the slot runs out to the carrier's edge: the cell's plug cannot pass a slot
 
 assert(!board_flip, "pod: board_flip is not supported");
 assert(bat_buf >= 3 && bat_buf <= 5, "pod: bat_buf must be 3..5");
 assert(lead_end == "bottom" || lead_end == "top", "pod: lead_end must be \"bottom\" or \"top\"");
 
 // ---- derived ----------------------------------------------------------------
-bay_w = bat[1] + 2*bcl;  bay_l = bat[0] + bat_buf + 2*bcl;  bay_t = bat[2] + 2*bcl + pad_t;
+bay_w = bat[1] + 2*bcl;  bay_l = bat[0] + bat_buf + 2*bcl;  bay_t = bat[2] + bcl_y + pad_t;
 bay_x0 = glass_b/2 - bay_w/2;  bay_x1 = bay_x0 + bay_w;
 bay_z0 = ant_a1 + ant_keep;  bay_z1 = bay_z0 + bay_l;
 plate_y0 = board_t + clr;                      // carrier front face
@@ -131,12 +140,16 @@ out_z0 = -clr - wall;    out_z1 = cav_z1 + top_wall;
 // z range of the pouch and of the buffer block (protection board) inside the bay
 buf_z0 = lead_end == "bottom" ? bay_z0 + bcl : bay_z1 - bcl - bat_buf;
 pouch_z0 = lead_end == "bottom" ? bay_z0 + bcl + bat_buf : bay_z0 + bcl;
-// Screw points (x, z): two on the diagonal out of each lower corner arc of the cavity, two in the top wall.
+// Screw points (x, z): two on the diagonal out of each lower corner arc of the cavity, two in the top wall,
+// seal_land of gasket from the cavity.
+top_screw_z = cav_z1 + seal_land + gk_hole_d/2 + 0.2;
 pilot_r = glass_r + clr + pilot_in + pilot_d/2;
 screw_pts = [[glass_r - pilot_r/sqrt(2), glass_r - pilot_r/sqrt(2)],
              [glass_b - glass_r + pilot_r/sqrt(2), glass_r - pilot_r/sqrt(2)],
-             [bay_x0 + 5, cav_z1 + top_wall/2], [bay_x1 - 5, cav_z1 + top_wall/2]];
-anchor_pt = [usb_y, usb_a - usb_plug_w/2 - 3];   // tether anchor on the right side face (board y, z)
+             [bay_x0 + 5, top_screw_z], [bay_x1 - 5, top_screw_z]];
+anchor_pt = [usb_y, usb_a - usb_plug_w/2 - plug_flange - tether_l];   // tether anchor on the right side face (board y, z)
+// the plug relief starts relief_web outside the cavity (board.scad's usb_plug_x0 would leave 0.52)
+relief_x0 = max(pcb_b0 + pcb_b + usb_plug_x0, bay_x1 + relief_web);
 // PCB notches (board-local x, z)
 holes = [for (bx = [hole_ib, pcb_b - hole_ib], az = [hole_ia, pcb_a - hole_ia]) [pcb_b0 + bx, pcb_a0 + az]];
 shoulder_y = pcb_rear - preload;
@@ -144,13 +157,13 @@ slot_z = lead_end == "bottom" ? bay_z0 + bat_buf/2 : bay_z1 - bat_buf/2;   // ce
 cord_y = plate_y0 + cord_depth - cord_d/2 - 0.1;
 
 // ---- ghosts ------------------------------------------------------------------------
-// The board with its four PCB notches, moved by glass_dy and lowered by sag.
-module board_at() translate([0, glass_dy, -sag]) difference() {
+// The board with its four PCB notches, moved by glass_dx/dy/dz and lowered by sag.
+module board_at() translate([glass_dx, glass_dy, glass_dz - sag]) difference() {
   board_ghost();
   for (h = holes) translate([h[0], pcb_y0 - 0.1, h[1]]) rotate([-90, 0, 0]) cylinder(d = hole_d, h = pcb_t + 0.2);
 }
 // pouch and protection-board block, the full cell section, against the carrier
-module cell_ghost() translate([bay_x0 + bcl, bay_y0 + bcl, 0]) {
+module cell_ghost(dy = bcl_y) translate([bay_x0 + bcl, bay_y0 + dy, 0]) {
   translate([0, 0, pouch_z0]) cube([bat[1], bat[2], bat[0]]);
   translate([0, 0, buf_z0]) cube([bat[1], bat[2], bat_buf]);
 }
@@ -172,6 +185,10 @@ module posts() for (h = holes) ycyl(h, post_d, shoulder_y, plate_y0 + 0.01);
 module pegs() if (peg_l > 0) for (h = holes) ycyl(h, peg_d, shoulder_y - peg_l, shoulder_y + 0.01);
 module cord_groove() hull() for (z = [bat_z, slot_z]) ycyl([cord_x, z], cord_w, plate_y0 - 0.01, plate_y0 + cord_depth);
 module lead_slot() translate([cord_x - slot_w/2, plate_y0 - 0.01, slot_z - slot_h/2]) cube([slot_w, carrier_t + 0.02, slot_h]);
+// the slot opened to the carrier's nearer edge (bottom or top), so the lead drops in from the side
+module lead_notch() if (lead_notch)
+  translate([cord_x - slot_w/2, plate_y0 - 0.01, lead_end == "bottom" ? -20 : slot_z])
+    cube([slot_w, carrier_t + 0.02, lead_end == "bottom" ? slot_z + 20 : 100]);
 module carrier() difference() {
   union() {
     translate([0, plate_y0, 0]) xz_extrude(carrier_t) offset(delta = -carrier_clr) cav2d();
@@ -180,6 +197,7 @@ module carrier() difference() {
   }
   cord_groove();
   lead_slot();
+  lead_notch();
 }
 module carrier_print() translate([0, 0, bay_y0]) rotate([-90, 0, 0]) carrier();
 // Parts on the PCB rear, up to board_t, except around the header and the run where the lead climbs out.
@@ -202,13 +220,14 @@ module cord_ghost() {
 module tub_body() xz_extrude(back_y) rrect(out_x0, out_z0, out_x1 - out_x0, out_z1 - out_z0, edge_r);
 module pilots(d = pilot_d, y1 = pilot_depth) for (p = screw_pts) ycyl(p, d, -1, y1);
 module anchor_hole() translate([out_x1 + 0.01, anchor_pt[0], anchor_pt[1]]) rotate([0, -90, 0]) cylinder(d = anchor_d, h = anchor_l + 0.01);
+module plug_relief() translate([relief_x0, usb_y - usb_plug_h/2, usb_a - usb_plug_w/2]) cube([20, usb_plug_h, usb_plug_w]);
 module tub() union() { tub_shell(); qt_on_pod() qt_boss(); }
 module tub_shell() difference() {
   tub_body();
   translate([0, -1, 0]) xz_extrude(bay_y0 + 1) cav2d();
   translate([bay_x0, bay_y0 - 0.01, bay_z0]) cube([bay_w, bay_t + 0.01, bay_l]);
   usb_slot(20);
-  usb_plug_relief(20);
+  plug_relief();
   pilots();
   anchor_hole();
 }
@@ -264,7 +283,7 @@ module screws() for (p = screw_pts) {
 // ---- Type-C plug ------------------------------------------------------------------------
 // Plug-local frame (print orientation): x = board z, y = board y, z = into the wall from the flange's outer
 // face; origin on the relief centre. plug_place() maps it onto the tub's right side.
-plug_depth = out_x1 - (pcb_b0 + pcb_b + usb_plug_x0) - plug_gap;
+plug_depth = out_x1 - relief_x0 - plug_gap;
 plug_root = -(usb_plug_w/2 + plug_flange);    // flange lower edge, where the strap starts and the plug hinges
 pin_x = anchor_pt[1] - usb_a;
 module plug_place() translate([out_x1 + plug_lip, usb_y, usb_a]) rotate([0, -90, 0]) children();
@@ -275,8 +294,8 @@ module plug_body() hull() {   // 0.3 lead-in at the tip
 }
 module plug_cap() { linear_extrude(plug_lip) plug_flange2d(); plug_body(); }
 module plug_strap() {
-  translate([pin_x - pin_d/2 - 0.6, -strap_w/2, plug_lip - strap_t]) cube([plug_root + 0.5 - (pin_x - pin_d/2 - 0.6), strap_w, strap_t]);
-  translate([pin_x, 0, plug_lip - strap_t]) cylinder(d = pin_d, h = strap_t + anchor_l - 0.2);
+  translate([pin_x - tether_pin_d/2 - 0.6, -strap_w/2, plug_lip - strap_t]) cube([plug_root + 0.5 - (pin_x - tether_pin_d/2 - 0.6), strap_w, strap_t]);
+  translate([pin_x, 0, plug_lip - strap_t]) cylinder(d = tether_pin_d, h = strap_t + anchor_l - 0.2);
 }
 module tplug() { plug_cap(); plug_strap(); }
 // open: the cap turned 180 deg about the flange's lower outer edge, hanging below the opening
@@ -284,8 +303,8 @@ module plug_cap_open() translate([plug_root, 0, 0]) rotate([0, 180, 0]) translat
 module plug_print() tplug();
 // a Type-C overmold straight out from the relief floor, and the cable on from it
 module cable_ghost() {
-  translate([pcb_b0 + pcb_b + usb_plug_x0 + 0.2, usb_y - 3.25, usb_a - 6.25]) cube([25, 6.5, 12.5]);
-  translate([pcb_b0 + pcb_b + usb_plug_x0 + 25, usb_y, usb_a]) rotate([0, 90, 0]) cylinder(d = 4, h = 60);
+  translate([relief_x0 + 0.2, usb_y - 3.25, usb_a - 6.25]) cube([25, 6.5, 12.5]);
+  translate([relief_x0 + 25, usb_y, usb_a]) rotate([0, 90, 0]) cylinder(d = 4, h = 60);
 }
 // the strip of side face the flange must land on (the relief opening is the plug minus plug_int)
 module plug_seat() plug_place() translate([0, 0, plug_lip + nudge]) linear_extrude(0.2) difference() {
@@ -305,16 +324,24 @@ module qt_tabs(r = qt_tab_r, w = qt_tab_w, z0 = qt_gap, h = qt_tab_t) translate(
 }
 module qt_boss() difference() {
   union() { translate([0, 0, -0.01]) cylinder(d = qt_neck_d, h = qt_top + 0.01, $fn = 96); qt_tabs(); }
-  // the detent notches, both ends, so the pod locks either way up
-  for (sx = [-1, 1]) translate([sx*qt_bump_r - (qt_bump_d + 0.2)/2, -(qt_bump_d + 0.2)/2, qt_top - qt_detent - 0.1])
-    cube([qt_bump_d + 0.2, qt_bump_d + 0.2, 1]);
+  // the detent dimples, both ends, so the pod locks either way up; their round walls cam the dome out
+  for (sx = [-1, 1]) translate([sx*qt_bump_r, 0, qt_top - qt_notch + qt_dimple_r]) sphere(r = qt_dimple_r, $fn = 48);
 }
 // boss-local -> pod, and back
 module qt_on_pod() translate([qt_c[0], back_y, qt_c[1]]) rotate([-90, 0, 0]) children();
 module qt_from_pod() rotate([90, 0, 0]) translate([-qt_c[0], -back_y, -qt_c[1]]) children();
-module qt_bump() translate([qt_bump_r, 0, qt_floor_z - qt_detent]) cylinder(d = qt_bump_d, h = qt_detent + 0.01);
-// the cup and hooks; the bump sits on a finger cut free on three sides and thinned to 0.8, which flexes on the turn
-module qt_receiver() {
+// a dome qt_detent high on a qt_bump_d base
+qt_dome_r = ((qt_bump_d/2)*(qt_bump_d/2) + qt_detent*qt_detent)/(2*qt_detent);
+qt_dimple_r = 1.2;
+module qt_bump() if (qt_detent > 0) intersection() {
+  translate([qt_bump_r, 0, qt_floor_z - qt_detent + qt_dome_r]) sphere(r = qt_dome_r, $fn = 48);
+  translate([qt_bump_r - 2, -2, qt_floor_z - qt_detent - 0.01]) cube([4, 4, qt_detent + 0.02]);
+}
+// root strain of the finger for the dome's full rise: 3 d t / (2 a^2)
+qt_strain = 3*qt_detent*qt_finger_t/(2*pow(qt_bump_r - qt_finger_root, 2));
+// the cup and hooks; the dome sits near the tip of a finger rooted at qt_finger_root, cut free on three
+// sides and thinned to qt_finger_t, which flexes on the turn
+module qt_receiver(bump = true) {
   difference() {
     translate([0, 0, qt_clr]) cylinder(d = qt_base_d, h = qt_floor_z + qt_floor - qt_clr, $fn = 96);
     translate([0, 0, -1]) cylinder(r = qt_neck_d/2 + qt_clr, h = qt_floor_z + 1, $fn = 96);                 // through the hooks
@@ -324,14 +351,14 @@ module qt_receiver() {
       cylinder(r = qt_tab_r + qt_clr, h = qt_floor_z + 1, $fn = 96);
       translate([-(qt_tab_w/2 + qt_clr), -qt_base_d, 0]) cube([qt_tab_w + 2*qt_clr, 2*qt_base_d, qt_floor_z + 1]);
     }
-    // the finger: 6 long from the bump's far side, 3 wide, slots 0.6, thinned from behind
-    translate([qt_bump_r - 3.6, -2.1, qt_floor_z - 0.01]) difference() {
-      cube([6.6, 4.2, qt_floor + 0.02]);
-      translate([0.6, 0.6, -0.01]) cube([6.1, 3, qt_floor + 0.04]);
+    // the finger: from qt_finger_root to 1.2 past the dome, 3 wide, slots 0.6, thinned from behind
+    translate([qt_finger_root, -2.1, qt_floor_z - 0.01]) difference() {
+      cube([qt_bump_r + 1.8 - qt_finger_root, 4.2, qt_floor + 0.02]);
+      translate([-0.01, 0.6, -0.01]) cube([qt_bump_r + 1.2 - qt_finger_root + 0.01, 3, qt_floor + 0.04]);
     }
-    translate([qt_bump_r - 3, -1.5, qt_floor_z + 0.8]) cube([6, 3, qt_floor]);
+    translate([qt_finger_root, -1.5, qt_floor_z + qt_finger_t]) cube([qt_bump_r + 1.2 - qt_finger_root, 3, qt_floor]);
   }
-  if (qt_detent > 0) qt_bump();
+  if (bump) qt_bump();
 }
 module qt_receiver_body() difference() { qt_receiver(); qt_bump(); }
 // the boss turned a deg from insert and pulled `lift` back out of the receiver
@@ -341,12 +368,12 @@ module qt_turn(a, lift) translate([0, 0, -lift]) rotate([0, 0, a - qt_lock]) chi
 // Mount frame M: the boss centre on the pod's back plane, pod axes. M -> world on the foot.
 module foot_frame() translate([0, 0, foot_h]) rotate([-foot_lean, 0, 0]) children();
 module on_foot() foot_frame() rotate([0, pod_turn, 0]) translate([-qt_c[0], -back_y, -qt_c[1]]) children();
-module receiver_on_foot() foot_frame() rotate([-90, 0, 0]) qt_receiver();
+module receiver_on_foot(bump = true) foot_frame() rotate([-90, 0, 0]) qt_receiver(bump);
 qt_back = qt_floor_z + qt_floor;               // receiver's rear face, M y
 // the pod's envelope (tub, boss excepted, and plate), grown by g
 module pod_box(g = 0) translate([out_x0 - g, face_y - g, out_z0 - g]) cube([out_x1 - out_x0 + 2*g, back_y - face_y + 2*g, out_z1 - out_z0 + 2*g]);
 module foot_base2d() translate([-foot_w/2, foot_yc - foot_d/2]) offset(r = 3) offset(delta = -3) square([foot_w, foot_d]);
-module foot() difference() {
+module foot(bump = true) difference() {
   union() {
     difference() {
       hull() {
@@ -356,7 +383,7 @@ module foot() difference() {
       on_foot() pod_box(0.5);
       foot_frame() translate([0, -50, 0]) rotate([-90, 0, 0]) cylinder(d = qt_base_d + 0.4, h = 50 + qt_back - 0.5, $fn = 96);   // the receiver overlaps the hull by 0.5
     }
-    receiver_on_foot();
+    receiver_on_foot(bump);
   }
   for (sx = [-1, 1], sy = [-1, 1]) translate([sx*(foot_w/2 - foot_pad_in), foot_yc + sy*(foot_d/2 - foot_pad_in), -0.01])
     cylinder(d = foot_pad_d, h = foot_pad_depth + 0.01);
@@ -474,6 +501,7 @@ else if (part == "at_plate") plate();
 else if (part == "at_gasket") gasket();
 else if (part == "plate") plate_print();
 else if (part == "gasket") gasket_print();
+else if (part == "gasket_2d") difference() { gasket2d(); pod_win_rect(); for (p = screw_pts) translate(p) circle(d = gk_hole_d); }   // the sponge gasket's cutting outline (DXF)
 else if (part == "check_window") intersection() { union() { plate(); gasket(); } translate([act_b0, -4, act_a0]) cube([act_b, 4 - nudge, act_a]); }
 else if (part == "check_gasket_glass") intersection() { translate([0, -nudge, 0]) gasket(gk_t); board_at(); }
 else if (part == "check_gasket_rim") intersection() { translate([0, -nudge, 0]) gasket(gk_t); tub(); }
@@ -483,7 +511,10 @@ else if (part == "check_plate_tub") intersection() { translate([0, -nudge, 0]) p
 else if (part == "check_seal_land") linear_extrude(1) intersection() {
     for (p = screw_pts) translate(p) circle(d = gk_hole_d + 2*seal_land); cav2d(); }
 else if (part == "check_gasket_band") linear_extrude(1) difference() { offset(r = seal_land) cav2d(); gasket2d(); }
-else if (part == "check_glass_land") linear_extrude(1) difference() { offset(r = seal_land) pod_win_rect(); rrect(0, 0, glass_b, glass_a, glass_r); }
+else if (part == "check_glass_land") linear_extrude(1) difference() { offset(r = seal_land) pod_win_rect(); translate([glass_dx, glass_dz]) rrect(0, 0, glass_b, glass_a, glass_r); }
+else if (part == "check_cs_face") linear_extrude(1) intersection() {
+    for (p = screw_pts) translate(p) circle(d = cs_d);
+    difference() { outline2d(); offset(delta = -face_cham - 0.4) outline2d(); } }
 else if (part == "at_plug") plug_place() tplug();
 else if (part == "plug") plug_print();
 // the body alone: the flange touches the side face by design, the pin bites the anchor hole by design
@@ -493,11 +524,13 @@ else if (part == "check_plug_board") intersection() { plug_place() tplug(); boar
 else if (part == "check_open_plug_cable") intersection() { plug_place() if (plug_open) plug_cap_open(); else plug_cap(); cable_ghost(); }
 // the receiver without its bump (a flexing finger), and the bump alone against the boss
 else if (part == "check_qt") intersection() { qt_turn(qt_a, qt_lift) qt_boss(); qt_receiver_body(); }
-else if (part == "check_qt_detent") intersection() { qt_turn(qt_a, 0) qt_boss(); qt_bump(); }
+else if (part == "check_qt_detent") intersection() { qt_turn(qt_a, qt_lift) qt_boss(); qt_bump(); }
+else if (part == "check_detent_strain") assert(qt_strain <= 0.02, str("detent finger strain ", qt_strain*100, "% > 2%"));
 else if (part == "qt_test_boss") { translate([-18, -18, -4]) cube([36, 36, 4]); qt_boss(); }
 else if (part == "qt_test_receiver") translate([0, 0, qt_floor_z + qt_floor]) rotate([180, 0, 0]) qt_receiver();
 else if (part == "foot") foot();
-else if (part == "check_foot_pod") intersection() { foot(); foot_pod(); }
+// the dome presses the boss by design (check_qt_detent)
+else if (part == "check_foot_pod") intersection() { foot(false); foot_pod(); }
 else if (part == "check_foot_desk") intersection() { foot_pod(); translate([-100, -100, -100]) cube([200, 200, 100 + desk_gap]); }
 else if (part == "check_foot_cable") intersection() { foot(); on_foot() { cable_ghost(); plug_place() plug_cap_open(); } }
 else if (part == "check_foot_cog") assert(abs(pod_ctr[0]) <= foot_w/2 - 5 && abs(pod_ctr[1] - foot_yc) <= foot_d/2 - 5,
@@ -514,5 +547,20 @@ else if (part == "assembly") pod_assembly();
 else if (part == "section") section_view();
 else if (part == "on_foot_view") on_foot_view();
 else if (part == "on_bar_view") on_bar_view();
+// the lead, as a Ø(cord_d + 0.2) rod, drops from the slot out through the carrier's edge
+else if (part == "check_lead_drop_in") intersection() {
+    carrier();
+    translate([cord_x, (plate_y0 + bay_y0)/2, slot_z]) mirror([0, 0, lead_end == "bottom" ? 1 : 0]) cylinder(d = cord_d + 0.2, h = 100); }
+// a 1.0 wall round the anchor hole and under its floor
+else if (part == "check_anchor_wall") difference() {
+    translate([out_x1 - 0.01, anchor_pt[0], anchor_pt[1]]) rotate([0, -90, 0]) cylinder(d = anchor_d + 2, h = anchor_l + 1 - nudge);
+    tub_shell(); anchor_hole(); }
+else if (part == "check_relief_web") difference() {
+    translate([bay_x1 + nudge, usb_y - usb_plug_h/2, usb_a - usb_plug_w/2]) cube([0.8 - 2*nudge, usb_plug_h, usb_plug_w]);
+    tub_shell(); usb_slot(20); }
+// the cell fully forward on the carrier, the pad as bought behind it, 0.3 forward: still into the back wall
+else if (part == "check_pad_squeeze") intersection() {
+    translate([bay_x0 + bcl, bay_y0 + bat[2] - 0.3, bay_z0 + bcl]) cube([bat[1], pad_free, bat[0]]); tub(); }
+else if (part == "check_tether") assert(plug_root - (pin_x + tether_pin_d/2) >= 5, "tether strap shorter than 5");
 else if (part == "check_antenna_metal") intersection() { metal(); antenna_zone(metal_keep); }
 else assert(false, str("unknown part: ", part));

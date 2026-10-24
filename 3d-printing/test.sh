@@ -288,7 +288,7 @@ expect_empty "battery lead clear (tilt 55)"                  check_cord -D tilt=
 expect_empty "battery lead clear (tilt 75)"                  check_cord -D tilt=75
 expect_empty "battery lead clear (clr 0.5)"                  check_cord -D clr=0.5
 expect_empty "battery lead clear (board 12 mm)"              check_cord -D board_t=12
-expect_solid "control: cord_depth=0.4 drags the lead over the rear parts" check_cord -D cord_depth=0.4 -D 'lead_end="top"'
+expect_solid "control: cord_depth=0.4 drags the lead over the rear parts" check_cord -D cord_depth=0.4
 expect_solid "control: bat_h=5 puts the plug into the plate"             check_cord -D bat_h=5
 expect_solid "control: bat_exit=1 leaves no room to climb out"           check_cord -D bat_exit=1
 expect_manifold "carrier"                carrier --max 40 55 13.7
@@ -400,12 +400,16 @@ expect_solid "shoulders press on the PCB"                       check_shoulders
 expect_empty "control: preload=-0.05 leaves the PCB loose"      check_shoulders -D preload=-0.05
 expect_empty "pegs sit inside the PCB notches"                  check_pegs
 expect_empty "cell clear of the carrier"                        check_cell_carrier
-expect_solid "control: bcl=-0.1 puts the cell into the carrier" check_cell_carrier -D bcl=-0.1
+expect_solid "control: bcl_y=-0.1 puts the cell into the carrier" check_cell_carrier -D bcl_y=-0.1
 expect_empty "battery lead clear, plug to bay"                  check_cord
 expect_empty "battery lead clear (lead at the top)"             check_cord -D 'lead_end="top"'
 expect_empty "battery lead clear (3 mm buffer)"                 check_cord -D bat_buf=3
 expect_solid "control: cord_depth=0.4 drags the lead over the rear parts" check_cord -D cord_depth=0.4 -D 'lead_end="top"'
 expect_empty "lead clear of the antenna (lead at the top)"      check_antenna_metal -D 'lead_end="top"'
+# the cell's plug cannot pass a slot: the lead drops into a notch from the carrier's edge
+expect_empty "lead drops into the carrier's notch from the edge"              check_lead_drop_in
+expect_empty "lead drops into the carrier's notch from the edge (lead at top)" check_lead_drop_in -D 'lead_end="top"'
+expect_solid "control: lead_notch=false traps the lead in a closed slot"      check_lead_drop_in -D lead_notch=false
 expect_manifold "carrier"                 carrier --max 34.6 54.9 9.3
 expect_manifold "carrier (lead at top)"   carrier --max 34.6 54.9 9.3 -D 'lead_end="top"'
 expect_step "carrier: shoulders press the PCB and nothing else" at_carrier "--touch-pcb --min-gap 0.2"
@@ -424,9 +428,15 @@ expect_empty "cell clear of the tub"                   check_cell_tub
 expect_empty "cell clear of the tub (3 mm buffer)"     check_cell_tub -D bat_buf=3
 expect_solid "control: pad_t=-0.6 puts the cell into the back" check_cell_tub -D pad_t=-0.6
 expect_empty "pilots keep a 1.0 wall"                  check_pilot_wall
+expect_empty "tether anchor hole keeps a 1.0 floor and wall" check_anchor_wall
+expect_solid "control: anchor_l=3 breaks into the cavity"    check_anchor_wall -D anchor_l=3
+expect_empty "Type-C relief keeps a 0.8 web to the cavity"   check_relief_web
+expect_solid "control: relief_web=0.3 thins the web"         check_relief_web -D relief_web=0.3
+expect_solid "pad is squeezed 0.3 even with the cell fully forward" check_pad_squeeze
+expect_empty "control: a 1.0 pad is not squeezed"            check_pad_squeeze -D pad_free=1.0
 expect_solid "control: pilot_in=0.3 breaks into the pocket" check_pilot_wall -D pilot_in=0.3
-expect_manifold "tub with boss"               tub --max 40.9 62.4 29.3
-expect_manifold "tub with boss (3 mm buffer)" tub --max 40.9 60.4 29.3 -D bat_buf=3
+expect_manifold "tub with boss"               tub --max 40.9 63.6 28.6
+expect_manifold "tub with boss (3 mm buffer)" tub --max 40.9 61.6 28.6 -D bat_buf=3
 expect_step "tub clear of the board"   at_tub "--min-gap 0.2"
 expect_step_fail "control: clr=-0.3 puts the glass into the pocket wall" at_tub "" -D clr=-0.3
 
@@ -437,6 +447,7 @@ expect_solid "control: win_margin=-2 covers the active area" check_window -D win
 expect_solid "gasket is squeezed on the glass"            check_gasket_glass
 expect_solid "gasket is squeezed on the glass (board 0.2 back)" check_gasket_glass -D glass_dy=0.2
 expect_empty "control: gk_sq=0 leaves the glass unsqueezed" check_gasket_glass -D gk_sq=0
+expect_solid "gasket squeezed with the board 0.35 back (tolerance and carrier deflection)" check_gasket_glass -D glass_dy=0.35
 expect_solid "gasket is squeezed on the rim"              check_gasket_rim
 expect_empty "plate lands on the rim, clear of the tub"   check_plate_tub
 expect_empty "board 0.2 forward still clears the plate"   check_plate_tub -D glass_dy=-0.2
@@ -446,9 +457,17 @@ expect_empty "seal_land from the seam to the cavity"      check_gasket_band
 expect_solid "control: wall=2 leaves no land"             check_gasket_band -D wall=2
 expect_empty "seal_land on the glass round the window"    check_glass_land
 expect_solid "control: win_margin=2 leaves no land"       check_glass_land -D win_margin=2
+for d in "-0.35 -0.35" "-0.35 0.35" "0.35 -0.35" "0.35 0.35"; do   # RSS of peg ±0.2, carrier ±0.2, plate on its screws ±0.2
+  set -- $d
+  expect_empty "0.7 of gasket on the glass, board off by $1, $2" check_glass_land -D glass_dx=$1 -D glass_dz=$2 -D seal_land=0.7
+done
+expect_solid "control: board off by 0.5, 0.5 leaves under 0.7" check_glass_land -D glass_dx=0.5 -D glass_dz=0.5 -D seal_land=0.7
+expect_empty "countersinks clear of the face's edge break"  check_cs_face
+expect_solid "control: top_wall=4.2 puts them on the edge"  check_cs_face -D top_wall=4.2
 expect_empty "screws clear of the antenna"                check_antenna_metal
-expect_manifold "plate"   plate  --max 40.9 62.4 3.0
-expect_manifold "gasket"  gasket --max 38.5 60.0 1.3
+expect_manifold "plate"   plate  --max 40.9 63.6 3.1
+expect_manifold "gasket"  gasket --max 38.5 61.2 1.6
+expect_pass "gasket cutting outline exports" sh -c "\"$OPENSCAD\" -D 'part=\"gasket_2d\"' -o build/pod-gasket.dxf pod.scad >/dev/null 2>&1 && grep -q LWPOLYLINE build/pod-gasket.dxf"
 expect_step "plate clear of the board"            at_plate  "--min-gap 0.2"
 expect_step "squeezed gasket clear of the board"  at_gasket ""
 
@@ -459,9 +478,11 @@ expect_solid "plug body seals the opening (interference)"   check_plug_seal
 expect_empty "plug flange lands on the side face"            check_plug_seat
 expect_solid "control: plug_flange=6 overhangs"              check_plug_seat -D plug_flange=6
 expect_empty "plug clear of the board"                       check_plug_board
+expect_empty "tether strap is at least 5 long"               check_tether
+expect_error "control: tether_l=2 is too short"              check_tether -D tether_l=2
 expect_empty "open plug clear of a plugged-in cable"         check_open_plug_cable
 expect_solid "control: the closed plug is where the cable goes" check_open_plug_cable -D plug_open=false
-expect_manifold "plug" plug --max 18.7 9.6 3.9
+expect_manifold "plug" plug --max 22.7 9.6 3.1
 expect_step "plug clear of the board" at_plug "--min-gap 0.2"
 
 # quarter-turn: the boss drops in landscape, turns 90 deg to portrait, the hooks hold it and a detent clicks
@@ -471,8 +492,11 @@ expect_empty "boss sits locked"                         check_qt -D qt_a=90 -D q
 expect_solid "locked boss cannot lift out"              check_qt -D qt_a=90 -D qt_lift=0.5
 expect_solid "locked boss cannot lift out (no detent)"  check_qt -D qt_a=90 -D qt_lift=0.5 -D qt_detent=0
 expect_empty "control: unlocked boss lifts out"         check_qt -D qt_a=0  -D qt_lift=5
-expect_solid "detent resists the turn back (70 deg)"    check_qt_detent -D qt_a=70
-expect_empty "detent sits free when locked (90 deg)"    check_qt_detent -D qt_a=90
+expect_solid "detent resists the turn back (70 deg, 0.06 out)"   check_qt_detent -D qt_a=70 -D qt_lift=0.06
+expect_empty "detent seats in its notch (90 deg, 0.06 out)"      check_qt_detent -D qt_a=90 -D qt_lift=0.06
+expect_solid "detent preloads the locked boss (90 deg)"          check_qt_detent -D qt_a=90 -D qt_lift=0
+expect_empty "detent finger strain under 2%"                     check_detent_strain
+expect_error "control: a finger rooted at r 9 is over-strained"  check_detent_strain -D qt_finger_root=9
 expect_manifold "quarter-turn test boss"     qt_test_boss     --max 36.1 36.1 9.1
 expect_manifold "quarter-turn test receiver" qt_test_receiver --max 31.1 31.1 7.1
 
