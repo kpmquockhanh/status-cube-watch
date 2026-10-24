@@ -25,11 +25,13 @@ import (
 )
 
 type stubLimits struct {
-	mu sync.Mutex
-	l  limits.Limits
+	mu    sync.Mutex
+	l     limits.Limits
+	calls atomic.Int32
 }
 
 func (s *stubLimits) Get(context.Context) limits.Limits {
+	s.calls.Add(1)
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	return s.l

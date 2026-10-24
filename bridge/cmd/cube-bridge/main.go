@@ -13,6 +13,7 @@ import (
 	"path/filepath"
 	"syscall"
 
+	"claude-status-cube/bridge/internal/agents"
 	"claude-status-cube/bridge/internal/config"
 	"claude-status-cube/bridge/internal/hooksettings"
 	"claude-status-cube/bridge/internal/limits"
@@ -170,12 +171,22 @@ func main() {
 
 	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
 	defer stop()
-	s := server.New(cfg, server.Deps{
+	deps := server.Deps{
 		Limits: limits.NewReader(),
 		Mail:   mail.NewReader(func(s string) { errLog.Println(s) }),
 		Source: source,
 		ErrLog: errLog,
-	})
+	}
+	// Only when on: a nil Deps.Agents is what turns the feature off.
+	if cfg.Agents {
+		projects := agents.DefaultProjects() // $CLAUDE_CONFIG_DIR/projects or ~/.claude/projects
+		deps.Agents = agents.NewTracker(agents.TrackerDeps{
+			Tmux:     agents.NewTmux(),
+			Discover: agents.NewDiscovery(projects),
+			Projects: projects,
+		})
+	}
+	s := server.New(cfg, deps)
 	if err := s.Run(ctx); err != nil {
 		errLog.Println(err)
 		stop()

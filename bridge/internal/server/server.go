@@ -5,6 +5,12 @@
 //	GET /health      -> liveness + last refresh result. Always 200 while the
 //	                    process serves (the Mac helper reads any other status
 //	                    as "no bridge"); a degraded bridge says so in the body.
+//	POST /hook       -> a Claude Code hook event (loopback only, agents on)
+//	POST /api/answer -> answer an agent's prompt (loopback only, agents on)
+//
+// Nothing on the LAN or in a browser may read prompt text or answer a prompt:
+// /api/status serves the full payload (with the prompt) only to a request
+// that passes loopbackRequest, and the two POSTs answer 404 to anything else.
 package server
 
 import (
@@ -13,17 +19,20 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"io"
 	"log"
 	"net"
 	"net/http"
 	"os"
 	"regexp"
+	"slices"
 	"strconv"
 	"sync"
 	"sync/atomic"
 	"time"
 
 	"claude-status-cube/bridge"
+	"claude-status-cube/bridge/internal/agents"
 	"claude-status-cube/bridge/internal/cards"
 	"claude-status-cube/bridge/internal/config"
 	"claude-status-cube/bridge/internal/limits"
@@ -39,27 +48,65 @@ type Deps struct {
 	Mail interface {
 		Get(context.Context, string, string) *mail.Mail
 	}
-	Source  sources.Source
+	Source sources.Source
+	// Agents is the agent tracker; nil when config Agents is off (no Agents
+	// card, /hook and /api/answer answer 404).
+	Agents interface {
+		Hook([]byte) error
+		Sync(context.Context)
+		Answer(ctx context.Context, agentID, promptID, key string) error
+		Snapshot() []agents.Agent
+		Subscribe() (<-chan struct{}, func())
+	}
 	Now     func() time.Time // nil = time.Now
 	Preview func() []byte    // nil = preview.html from the working directory when present, else bridge.PreviewHTML
 	Log     *log.Logger      // console.log; nil = stdout
 	ErrLog  *log.Logger      // console.warn/error; nil = stderr
 }
 
-// Server holds the current payload and the last refresh result.
+const (
+	agentsDebounce  = 150 * time.Millisecond // tracker changes are gathered this long before a rebuild
+	agentsSyncEvery = 3 * time.Second        // Tracker.Sync interval
+	maxHookBody     = 8 << 20                // same cap as the hook command's stdin
+	maxAnswerBody   = 4 << 10
+	maxHookErrors   = 100 // distinct hook errors logged; later new ones are not
+)
+
+// inputs are what the last refresh read. A rebuild after a tracker change
+// uses only these: it never reads limits or mail again, nor touches the
+// Source, which is not goroutine-safe.
+type inputs struct {
+	lim    limits.Limits
+	mail   *mail.Mail
+	events []sources.Event // a copy
+	billed *sources.Billed
+	err    string // the source failed: the BRIDGE ERROR card
+	extra  bool   // ExtraCards (off for the STARTING payload)
+}
+
+// Server holds the current payloads and the last refresh result.
 type Server struct {
 	cfg              config.Config
 	d                Deps
 	label            string // Source.Label(), constant: /health reads it without touching the source
 	hasRequestCounts bool
 
-	payload atomic.Pointer[cards.Payload]
+	// full carries the Agents card's prompt and goes only to loopbackRequest;
+	// lan is everyone else's. Without agents they are the same payload.
+	full, lan atomic.Pointer[cards.Payload]
 
-	mu          sync.Mutex
+	debounce, syncEvery time.Duration
+
+	mu          sync.Mutex // guards the fields below; held while a payload is built and stored
+	in          inputs
 	refreshed   bool
 	lastError   string // the source (transcripts / Admin API) failed
 	limitsError string // the rate-limit read failed
 	lastOk      int64  // epoch ms
+
+	hookErrMu   sync.Mutex
+	hookErrs    map[string]bool // hook error messages already logged
+	hookErrsCap bool            // maxHookErrors reached, said once
 }
 
 // New builds a server serving the STARTING payload until the first refresh.
@@ -76,16 +123,49 @@ func New(cfg config.Config, d Deps) *Server {
 	if d.ErrLog == nil {
 		d.ErrLog = log.New(os.Stderr, "", 0)
 	}
-	s := &Server{cfg: cfg, d: d, label: d.Source.Label(), hasRequestCounts: d.Source.HasRequestCounts()}
+	s := &Server{cfg: cfg, d: d, label: d.Source.Label(), hasRequestCounts: d.Source.HasRequestCounts(),
+		debounce: agentsDebounce, syncEvery: agentsSyncEvery, hookErrs: map[string]bool{}}
 	// Served until the first refresh lands: the usage card with empty rings and
 	// "starting" for a caption, so the cube has something valid to draw.
-	p := cards.Build(nil, cards.Opts{
+	s.in = inputs{lim: limits.Limits{Error: "starting up"}}
+	s.publishLocked()
+	return s
+}
+
+// publishLocked builds both payloads from s.in and the tracker's snapshot and
+// stores them. Called with s.mu held (or before s is shared), so a rebuild
+// can never store a payload older than the refresh that ran beside it.
+func (s *Server) publishLocked() {
+	lim := s.in.lim
+	o := cards.Opts{
 		Source:           s.label,
 		HasRequestCounts: s.hasRequestCounts,
-		Limits:           &limits.Limits{Error: "starting up"},
-	}, d.Now())
-	s.payload.Store(&p)
-	return s
+		Billed:           s.in.billed,
+		Error:            s.in.err,
+		ExtraCards:       s.in.extra,
+		Limits:           &lim,
+		Mail:             s.in.mail,
+	}
+	now := s.d.Now()
+	if s.d.Agents == nil {
+		p := cards.Build(s.in.events, o, now)
+		s.full.Store(&p)
+		s.lan.Store(&p)
+		return
+	}
+	o.Agents, o.ShowAgents = s.d.Agents.Snapshot(), true
+	lan := cards.Build(s.in.events, o, now)
+	o.Full = true
+	full := cards.Build(s.in.events, o, now)
+	s.full.Store(&full)
+	s.lan.Store(&lan)
+}
+
+// republish rebuilds both payloads from the last refresh's inputs.
+func (s *Server) republish() {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	s.publishLocked()
 }
 
 // defaultPreview re-reads preview.html from the working directory on every
@@ -127,18 +207,6 @@ func (s *Server) RefreshOnce(ctx context.Context) {
 		}
 	}
 
-	// Built after Source.Refresh: the admin source sets Billed there.
-	common := func() cards.Opts {
-		return cards.Opts{
-			Source:           s.label,
-			HasRequestCounts: s.hasRequestCounts,
-			Billed:           s.d.Source.Billed(),
-			ExtraCards:       s.cfg.ExtraCards,
-			Limits:           &lim,
-			Mail:             m,
-		}
-	}
-
 	// Transcript scanning only feeds the optional spend cards, so the default
 	// deck never touches the source at all.
 	var events []sources.Event
@@ -146,28 +214,81 @@ func (s *Server) RefreshOnce(ctx context.Context) {
 	if s.cfg.ExtraCards {
 		events, err = s.d.Source.Refresh(ctx)
 	}
+	// Read after Source.Refresh (the admin source sets Billed there), and here
+	// on the refresh goroutine: a rebuild must not touch the source.
+	in := inputs{lim: lim, mail: m, billed: s.d.Source.Billed(), extra: s.cfg.ExtraCards}
+	if err == nil {
+		in.events = slices.Clone(events)
+	} else {
+		in.err = err.Error()
+		in.events = slices.Clone(s.d.Source.Events())
+	}
 	now := s.d.Now()
 
-	var p cards.Payload
-	s.mu.Lock()
-	s.limitsError = lim.Error
-	if err == nil {
-		p = cards.Build(events, common(), now)
-		s.lastError = ""
-		s.lastOk = now.UnixMilli()
-	} else {
-		s.lastError = err.Error()
-		o := common()
-		o.Error = s.lastError
-		p = cards.Build(s.d.Source.Events(), o, now)
-	}
-	s.refreshed = true
-	s.mu.Unlock()
+	func() {
+		s.mu.Lock()
+		defer s.mu.Unlock()
+		s.limitsError = lim.Error
+		s.lastError = in.err
+		if err == nil {
+			s.lastOk = now.UnixMilli()
+		}
+		s.in = in
+		s.refreshed = true
+		s.publishLocked()
+	}()
 	// A refresh cut short by shutdown is not a failure worth a log line.
 	if err != nil && ctx.Err() == nil {
 		s.d.ErrLog.Println("refresh failed:", err.Error())
 	}
-	s.payload.Store(&p)
+}
+
+// watchAgents rebuilds the payloads soon after the tracker changes, so a new
+// prompt reaches the cube without waiting for the next refresh: changes are
+// gathered for s.debounce, then one rebuild from the last refresh's inputs.
+func (s *Server) watchAgents(ctx context.Context) {
+	ch, stop := s.d.Agents.Subscribe()
+	defer stop()
+	for {
+		select {
+		case <-ctx.Done():
+			return
+		case <-ch:
+		}
+		t := time.NewTimer(s.debounce)
+		select {
+		case <-ctx.Done():
+			t.Stop()
+			return
+		case <-t.C:
+		}
+		s.guard("agents rebuild failed:", s.republish)
+	}
+}
+
+// syncLoop runs Tracker.Sync every s.syncEvery until ctx ends, on its own
+// goroutine so slow tmux or `claude agents` calls never hold up the refresh.
+func (s *Server) syncLoop(ctx context.Context) {
+	for {
+		s.guard("agents sync failed:", func() { s.d.Agents.Sync(ctx) })
+		t := time.NewTimer(s.syncEvery)
+		select {
+		case <-ctx.Done():
+			t.Stop()
+			return
+		case <-t.C:
+		}
+	}
+}
+
+// guard runs f, logging a panic instead of ending the process.
+func (s *Server) guard(what string, f func()) {
+	defer func() {
+		if r := recover(); r != nil {
+			s.d.ErrLog.Println(what, fmt.Sprint(r))
+		}
+	}()
+	f()
 }
 
 // loop is a chain rather than a ticker: the next refresh starts only once
@@ -262,16 +383,153 @@ func (s *Server) health() healthBody {
 	}
 }
 
+// loopbackRequest is the loopback guard: the connection comes from a loopback
+// address, the Host header names this bridge exactly as 127.0.0.1:<port> or
+// localhost:<port> (anything else may be a DNS-rebinding page), and there is
+// no Origin header (a browser always sends one with a POST, and a page has no
+// business reading the prompt either).
+func loopbackRequest(r *http.Request, port int) bool {
+	if _, browser := r.Header["Origin"]; browser {
+		return false
+	}
+	host, _, err := net.SplitHostPort(r.RemoteAddr)
+	if ip := net.ParseIP(host); err != nil || ip == nil || !ip.IsLoopback() {
+		return false
+	}
+	p := strconv.Itoa(port)
+	return r.Host == "127.0.0.1:"+p || r.Host == "localhost:"+p
+}
+
+// arrivedOn is the local port the request came in on; 0 when unknown, which
+// no Host header matches, so the guard fails closed.
+func arrivedOn(r *http.Request) int {
+	if a, ok := r.Context().Value(http.LocalAddrContextKey).(*net.TCPAddr); ok {
+		return a.Port
+	}
+	return 0
+}
+
+func (s *Server) loopback(r *http.Request) bool { return loopbackRequest(r, arrivedOn(r)) }
+
+// cubeClient: agents are on and the request is the bridge's own hook command
+// or the Mac helper (loopback guard plus X-Cube-Client: 1).
+func (s *Server) cubeClient(r *http.Request) bool {
+	return s.d.Agents != nil && r.Header.Get("X-Cube-Client") == "1" && s.loopback(r)
+}
+
+func notFound(w http.ResponseWriter) { send(w, 404, []byte(`{"error":"not found"}`), jsonType) }
+
+type errorBody struct {
+	Error string `json:"error"`
+}
+
 func (s *Server) route(w http.ResponseWriter, r *http.Request) {
 	switch r.URL.Path {
 	case "/api/status":
-		sendJSON(w, 200, s.payload.Load())
+		p := s.lan.Load()
+		if s.loopback(r) {
+			p = s.full.Load()
+		}
+		// cards.Marshal is what the payload budget measured.
+		b, err := cards.Marshal(*p)
+		if err != nil {
+			panic(err)
+		}
+		send(w, 200, b, jsonType)
 	case "/health":
 		sendJSON(w, 200, s.health())
 	case "/", "/index.html":
 		send(w, 200, s.d.Preview(), "text/html; charset=utf-8")
+	case "/hook":
+		s.hook(w, r)
+	case "/api/answer":
+		s.answer(w, r)
 	default:
-		send(w, 404, []byte(`{"error":"not found"}`), jsonType)
+		notFound(w)
+	}
+}
+
+// postOnly answers 405 to anything but POST and reports whether to go on.
+func postOnly(w http.ResponseWriter, r *http.Request) bool {
+	if r.Method == http.MethodPost {
+		return true
+	}
+	w.Header().Set("Allow", http.MethodPost)
+	sendJSON(w, 405, errorBody{"method not allowed"})
+	return false
+}
+
+// hook hands a Claude Code hook event to the tracker. It always answers 204:
+// a hook must never learn about the bridge's problems (they are logged).
+func (s *Server) hook(w http.ResponseWriter, r *http.Request) {
+	if !s.cubeClient(r) {
+		notFound(w)
+		return
+	}
+	if !postOnly(w, r) {
+		return
+	}
+	body, err := io.ReadAll(http.MaxBytesReader(w, r.Body, maxHookBody))
+	if err == nil {
+		err = s.d.Agents.Hook(body)
+	}
+	if err != nil {
+		s.logHookError(err)
+	}
+	send(w, 204, nil, jsonType)
+}
+
+// logHookError logs each distinct message once, up to maxHookErrors of them.
+func (s *Server) logHookError(err error) {
+	msg := err.Error()
+	s.hookErrMu.Lock()
+	defer s.hookErrMu.Unlock()
+	switch {
+	case s.hookErrs[msg]:
+	case len(s.hookErrs) < maxHookErrors:
+		s.hookErrs[msg] = true
+		s.d.ErrLog.Println("hook failed:", msg)
+	case !s.hookErrsCap:
+		s.hookErrsCap = true
+		s.d.ErrLog.Printf("hook failed: %d distinct errors logged, further ones are not", maxHookErrors)
+	}
+}
+
+// answer types an answer to an agent's prompt into its tmux pane.
+func (s *Server) answer(w http.ResponseWriter, r *http.Request) {
+	if !s.cubeClient(r) {
+		notFound(w)
+		return
+	}
+	if !postOnly(w, r) {
+		return
+	}
+	var a struct {
+		Agent  string `json:"agent"`
+		Prompt string `json:"prompt"`
+		Key    string `json:"key"`
+	}
+	dec := json.NewDecoder(http.MaxBytesReader(w, r.Body, maxAnswerBody))
+	if err := dec.Decode(&a); err != nil || dec.Decode(&struct{}{}) != io.EOF ||
+		a.Agent == "" || a.Prompt == "" || a.Key == "" {
+		sendJSON(w, 400, errorBody{`want {"agent","prompt","key"}`})
+		return
+	}
+	err := s.d.Agents.Answer(r.Context(), a.Agent, a.Prompt, a.Key)
+	switch {
+	case err == nil:
+		send(w, 204, nil, jsonType)
+	case errors.Is(err, agents.ErrNotInTmux):
+		sendJSON(w, 409, errorBody{"not in tmux"})
+	case errors.Is(err, agents.ErrStale):
+		sendJSON(w, 409, errorBody{err.Error()})
+	case errors.Is(err, agents.ErrBadKey):
+		sendJSON(w, 400, errorBody{err.Error()})
+	case errors.Is(err, agents.ErrNotFound):
+		sendJSON(w, 404, errorBody{err.Error()})
+	default:
+		s.d.ErrLog.Println("answer failed:", err.Error())
+		sendJSON(w, 500, errorBody{err.Error()})
 	}
 }
 
@@ -371,6 +629,11 @@ func (s *Server) Run(ctx context.Context) error {
 	// take seconds (Keychain, network), and nothing should be refused meanwhile.
 	wg.Add(1)
 	go func() { defer wg.Done(); s.loop(ctx) }()
+	if s.d.Agents != nil {
+		wg.Add(2)
+		go func() { defer wg.Done(); s.watchAgents(ctx) }()
+		go func() { defer wg.Done(); s.syncLoop(ctx) }()
+	}
 
 	<-ctx.Done()
 	shutdown, cancel := context.WithTimeout(context.Background(), 2*time.Second)
