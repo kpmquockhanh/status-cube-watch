@@ -63,6 +63,31 @@ record_paths() {
   fi
 }
 
+# Adds / removes the bridge's Claude Code hooks in ~/.claude/settings.json ($CUBE_SETTINGS overrides,
+# for tests). The bridge works without them, so a failure only warns.
+bridge_bin() { echo "$APP_DST/Contents/Resources/bridge/cube-bridge"; }
+hooks_install() { # port
+  local args=(--port "$1")
+  [ -n "${CUBE_SETTINGS:-}" ] && args+=(--settings "$CUBE_SETTINGS")
+  if "$(bridge_bin)" hooks install "${args[@]}"; then
+    :  # the binary prints one line saying what it did
+  else
+    echo "warning: could not add the Claude Code hooks (the bridge works without them)" >&2
+  fi
+}
+hooks_uninstall() {
+  local args=()
+  [ -n "${CUBE_SETTINGS:-}" ] && args+=(--settings "$CUBE_SETTINGS")
+  if [ -x "$(bridge_bin)" ] && "$(bridge_bin)" hooks uninstall ${args[@]+"${args[@]}"}; then
+    :  # the binary prints one line saying what it did
+  else
+    echo "warning: could not remove the Claude Code hooks from ${CUBE_SETTINGS:-~/.claude/settings.json}" >&2
+  fi
+}
+
+# Sourced with CUBE_INSTALL_LIB=1 (tests): define the functions only.
+[ -n "${CUBE_INSTALL_LIB:-}" ] && return 0 2>/dev/null
+
 case "${1:-}" in
   install)
     "$HERE/build-app.sh"
@@ -70,6 +95,7 @@ case "${1:-}" in
     mkdir -p "$HOME/Applications" "$HOME/Library/LaunchAgents" "$HOME/Library/Logs"
     rm -rf "$APP_DST"
     cp -R "$HERE/build/ClaudeCubeLink.app" "$APP_DST"
+    hooks_install "${CUBE_PORT:-8787}"
     write_plist "$PLIST"
     record_paths
 
@@ -94,6 +120,7 @@ case "${1:-}" in
     ;;
   uninstall)
     stop_app
+    hooks_uninstall  # needs the app's bridge binary, so before it is deleted
     rm -f "$PLIST"
     rm -rf "$APP_DST"
     defaults delete "$BUNDLE_ID" bridgeDir 2>/dev/null || true

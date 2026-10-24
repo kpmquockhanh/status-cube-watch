@@ -74,6 +74,14 @@ public struct MenuModel: Equatable {
                     }
                     continue
                 }
+                // The Agents card (it carries the tile list `a`, and no gauge): one row, the
+                // status caption after the label. The tiles and the prompt `q` are not shown here.
+                if c["a"] is [[String: Any]], g == nil {
+                    let s1 = c["s1"] as? String ?? ""
+                    cards.append(CardRow(title: s1.isEmpty ? title : "\(title)  \(s1)", detail: s1, label: title,
+                                         value: c["v"] as? String ?? ""))
+                    continue
+                }
                 let detail = ["v", "s1", "s2"].compactMap { c[$0] as? String }.filter { !$0.isEmpty }
                     .joined(separator: " · ")
                 cards.append(CardRow(title: reading.map { "\(title)  \($0)%" } ?? title, detail: detail, label: title,

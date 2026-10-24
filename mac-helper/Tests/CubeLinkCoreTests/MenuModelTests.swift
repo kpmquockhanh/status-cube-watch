@@ -50,3 +50,18 @@ private func payload(_ g1: Int?, _ g2: Int? = 10) -> Data {
         CardRow(title: "Unread mail", detail: "12", label: "Unread mail", value: "12"),
     ])
 }
+
+@Test func agentsCardRow() {
+    let json = """
+    {"v":1,"cards":[
+      {"t":"CLAUDE","v":"4h 09m","s1":"to reset","s2":"","c":"green","g":14,"g2":53,
+       "rows":[{"k":"5H","p":"14%","r":"4h 09m"},{"k":"7D","p":"53%","r":"1d 1h"}]},
+      {"t":"AGENTS","v":"3","s1":"1 NEEDS YOU","s2":"","c":"accent",
+       "a":[{"i":1,"n":"api","l":"WAIT","k":"wait","p":0,"x":0},{"i":2,"n":"web","l":"WORK","k":"work","p":0,"x":0}]}]}
+    """
+    let m = MenuModel.make(payload: Data(json.utf8), bridgeUp: true, link: .connected)
+    #expect(m.barTitle == "14%")  // still the usage ring
+    #expect(m.cards.count == 3)
+    #expect(m.cards[2] == CardRow(title: "AGENTS  1 NEEDS YOU", detail: "1 NEEDS YOU", label: "AGENTS", value: "3"))
+    #expect(m.cards[2].fraction == nil)
+}

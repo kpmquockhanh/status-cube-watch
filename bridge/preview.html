@@ -124,6 +124,19 @@
   .stale { color: var(--red); }
   /* A dual card's s2 (the full reason a limits read failed) is not drawn on
      the device; the mock shows it here, outside the panel. */
+  /* The Agents card (a card with `a`): a plain list so the data can be read.
+     Plan 3 replaces this with a mirror of the firmware's tile grid; nothing
+     here follows the real layout. */
+  .agentsview { display: none; position: absolute; top: 40px; left: 18px; right: 18px; font-size: 12px; }
+  .device.agents .agentsview { display: block; }
+  .device.agents .ring, .device.agents .mid, .device.agents .mail, .device.agents .rows, .device.agents .read, .device.agents .name { display: none; }
+  .agentsview .head { font-size: 22px; font-weight: 700; }
+  .agentsview .cap { color: var(--dim); margin-bottom: 8px; }
+  .agentsview .tile { display: flex; gap: 8px; padding: 2px 0; }
+  .agentsview .tile .l { margin-left: auto; color: var(--dim); }
+  .agentsview .q { margin-top: 8px; padding-top: 6px; border-top: 1px solid var(--faint); }
+  .agentsview .q b { display: block; margin-bottom: 4px; }
+  .agentsview .q span { display: inline-block; margin: 0 6px 4px 0; padding: 1px 6px; border: 1px solid var(--faint); border-radius: 4px; }
   .note { color: var(--red); font-size: 12px; margin: 0; min-height: 1.5em; }
 </style>
 </head>
@@ -155,6 +168,7 @@
       <div class="value" id="v">--</div>
       <div class="cap" id="s1">waiting for bridge</div>
     </div>
+    <div class="agentsview" id="agentsview"></div>
     <div class="mail" id="mail"></div>
     <div class="rows" id="rows"></div>
     <div class="read"><span class="pct" id="pct"></span><span class="label" id="s2"></span></div>
@@ -186,6 +200,8 @@ function paint() {
   // A card with `g` is a ring; anything else keeps the big-number layout.
   const gauge = typeof card.g === 'number';
   const dual = gauge && typeof card.g2 === 'number';
+  const agents = Array.isArray(card.a);
+  device.classList.toggle('agents', agents);
   device.classList.toggle('text', !gauge);
   device.classList.toggle('dual', dual);
 
@@ -198,6 +214,15 @@ function paint() {
   s1.textContent = card.s1 || '';
   s2.textContent = card.s2 || '';
   note.textContent = dual && card.s2 ? `${card.t}: ${card.s2}` : '';
+
+  if (agents) {
+    const e = (x) => String(x ?? '').replace(/[&<>]/g, (ch) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;' }[ch]));
+    const tiles = card.a.map((a) =>
+      `<div class="tile"><span style="color:var(${a.k === 'wait' ? '--accent' : '--ink'})">${e(a.n)}</span><span class="l" style="${a.k === 'wait' ? 'color:var(--accent)' : ''}">${e(a.l)}</span></div>`).join('');
+    // `q` is only in the payload for loopback requests (this page on the bridge's own machine).
+    const q = card.q ? `<div class="q"><b>${e(card.q.t)}</b>${(card.q.o || []).map((o) => `<span>${e(o.l)}</span>`).join('')}</div>` : '';
+    agentsview.innerHTML = `<div class="head" style="color:${color}">${e(card.v)}</div><div class="cap">${e(card.s1)}</div>${tiles}${q}`;
+  }
 
   if (gauge) {
     const pctVal = Math.max(0, Math.min(100, card.g));

@@ -42,7 +42,7 @@ Everything runs on the main queue. `CBCentralManager` is created with `queue: .m
   3. If the link is ready, `PushPolicy` decides whether to send (on change, every 5 s, or when forced), and `CubeLink.send` sends.
 
   The cube's Control `01` ("send now", sent on subscribe) and the menu's Send now both force a tick.
-- **Payload bytes are passed through untouched.** `validatePayloadBody` only rejects an empty body, a body over 2048 bytes, or one that is not a JSON object. The helper never re-encodes the payload. `MenuModel` parses it separately for the menu: it reads `t`, `g`, `v`, `s1`, `s2`, `rows[{k,p,r}]` and `m`, and mirrors the 60/85 notches. A change to the payload contract in `bridge/internal/cards` can therefore need a matching change in `MenuModel`.
+- **Payload bytes are passed through untouched.** `validatePayloadBody` only rejects an empty body, a body over 2048 bytes, or one that is not a JSON object. The helper never re-encodes the payload. `MenuModel` parses it separately for the menu: it reads `t`, `g`, `v`, `s1`, `s2`, `rows[{k,p,r}]` and `m` (and `a`, only to list the Agents card as one `AGENTS  <s1>` row), and mirrors the 60/85 notches. A change to the payload contract in `bridge/internal/cards` can therefore need a matching change in `MenuModel`.
 - **`CubeLink` connection sequence.**
   1. Scan by service UUID, or reconnect by the identifier stored in defaults (`cubeIdentifier`).
   2. Connect and discover characteristics.

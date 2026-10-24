@@ -13,6 +13,9 @@ go test ./... && go vet ./...            # the suite; run both before committing
 go build -o cube-bridge ./cmd/cube-bridge && ./cube-bridge   # serves on :8787 (`config.json` is read from the working directory, so run from `bridge/` or pass `-config <path>`); CUBE_PORT=8788 if a LaunchAgent already holds 8787 (a busy port exits 1; SIGINT/SIGTERM stop it with exit 0)
 curl -s localhost:8787/api/status        # the payload the cube gets
 curl -s localhost:8787/health            # always 200 while serving; {ok, error, source, lastError, limitsError, lastOk}
+./cube-bridge hooks install|uninstall [--port N] [--settings PATH]   # add/remove the bridge's own Claude Code hooks (default ~/.claude/settings.json; use --settings with a temp file when trying it)
+echo '{"hook_event_name":"Stop","session_id":"x"}' | ./cube-bridge hook --port 8787   # what a hook runs: POST stdin to /hook, print nothing, exit 0
+CUBE_AGENTS=1 ./cube-bridge             # track Claude Code agents (off by default; config key `agents`)
 ./agent.sh restart                       # reload the LaunchAgent copy (label com.claude-status-cube.bridge, logs in ~/Library/Logs/claude-status-cube/)
 ```
 
@@ -38,6 +41,13 @@ The unread-mail badge is configured with `gmail.user` / `gmail.appPassword` in `
   - **The source** (`Source.Refresh`) runs only when `extraCards` is on. If it returns an error, a `BRIDGE ERROR` text card is put first, the source's last `events` are kept, and `/health` reports `lastError`.
 - Every response has an explicit `Content-Length` (never chunked), because the cube parses it with a very small HTTP client. Every request goes through `Handler()`, which recovers from a panic in a handler (answering 500 if nothing was written yet) so one bad request cannot end the process.
 - When `host` is pinned to a LAN address, the server also opens a second listener on `127.0.0.1` for the Mac helper. Failing to open that one is only a warning.
+
+## `internal/agents` and the agent endpoints
+
+- Only with `agents` on (`CUBE_AGENTS`, config `agents`). Off: no tracker, `/hook` and `/api/answer` answer 404, the payload is unchanged. `hooks install` does not depend on the flag.
+- `POST /hook` takes a Claude Code hook event, `POST /api/answer` takes `{"agent","prompt","key"}` and answers 204 / 400 / 404 / 405 / 409 (not in tmux, or the prompt moved on) / 500. Both go through the one loopback guard (loopback remote, `Host` `127.0.0.1:<port>` or `localhost:<port>`, no `Origin`) and need `X-Cube-Client: 1`; a request that fails gets 404. `GET /api/status` uses the same guard to pick the full payload (with `q`) over the LAN one. Both variants are at most 2048 bytes (`cards.MaxPayloadBytes`).
+- Testing seams: `agents.Runner` (`func(ctx, name, args...) ([]byte, error)`) stands in for every external command (tmux, ps, lsof, the login shell), and `agents.Discoverer` (`Sessions(ctx)`) for finding running sessions; tests must never run real `claude`, `tmux`, `ps` or `lsof`. Hook installation takes a settings path so tests use temp files; never point it at the real `~/.claude/settings.json`.
+- Files adapted from agents-deck start with an `// Adapted from agents-deck ... @ 699bba8, <path>` line; `internal/agents/NOTICE.md` names the repository, commit and files.
 
 ## External reads fail soft
 

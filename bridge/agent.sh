@@ -75,8 +75,30 @@ build_bridge() {
   (cd "$DIR" && go build -o "$DIR/cube-bridge" ./cmd/cube-bridge)
 }
 
+# Adds the bridge's Claude Code hooks to ~/.claude/settings.json (or $CUBE_SETTINGS, for tests) and
+# removes them again. The bridge works without them, so a failure only warns.
+hooks_install() { # binary port
+  local args=(--port "$2")
+  [ -n "${CUBE_SETTINGS:-}" ] && args+=(--settings "$CUBE_SETTINGS")
+  if "$1" hooks install "${args[@]}"; then
+    :  # the binary prints one line saying what it did
+  else
+    echo "warning: could not add the Claude Code hooks (the bridge works without them)" >&2
+  fi
+}
+hooks_uninstall() { # binary
+  local args=()
+  [ -n "${CUBE_SETTINGS:-}" ] && args+=(--settings "$CUBE_SETTINGS")
+  if [ -x "$1" ] && "$1" hooks uninstall ${args[@]+"${args[@]}"}; then
+    :  # the binary prints one line saying what it did
+  else
+    echo "warning: could not remove the Claude Code hooks from ${CUBE_SETTINGS:-~/.claude/settings.json}" >&2
+  fi
+}
+
 install_agent() {
   build_bridge
+  hooks_install "$DIR/cube-bridge" "$PORT"
   echo "bridge  $DIR/cube-bridge"
   echo "logs    $LOG_DIR/bridge.log"
   mkdir -p "$LOG_DIR" "$(dirname "$PLIST")"
@@ -100,6 +122,7 @@ install_agent() {
 }
 
 uninstall_agent() {
+  hooks_uninstall "$DIR/cube-bridge"
   launchctl bootout "$TARGET" 2>/dev/null || true
   rm -f "$PLIST"
   echo "removed $PLIST"

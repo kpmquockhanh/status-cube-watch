@@ -185,6 +185,28 @@ CUBE_SOURCE=admin ./cube-bridge
 
 (or copy `config.example.json` to `config.json` and set it there).
 
+### Claude agents (optional, off by default)
+
+The bridge can also follow your running Claude Code sessions (which are working, which wait for you)
+and put an AGENTS card in the payload. It is off until the firmware that draws it ships, and nothing
+changes on the cube while it is off. To try the data:
+
+```sh
+CUBE_AGENTS=1 ./cube-bridge          # or "agents": true in config.json
+```
+
+The bridge learns about sessions from hooks. `./agent.sh install` and `mac-helper/install.sh install`
+add the bridge's own entries to `~/.claude/settings.json` (and `uninstall` removes them); you can also run
+`cube-bridge hooks install|uninstall [--port N] [--settings PATH]` yourself. Each entry runs
+`cube-bridge hook`, which posts the event to the bridge on `127.0.0.1` and always exits 0, so it never slows
+Claude down, even with the bridge off. Nothing else in the file is touched: a one-time backup is kept as
+`settings.json.cube-bridge.bak`, and a file that is not valid JSON is left alone. Sessions are also
+discovered with `claude agents --json` and tmux, and a prompt can be answered only for an agent in a tmux
+pane. The prompt text is served only to requests from the Mac itself; the cube and anything else on the
+LAN get the agent names and states. When the Mac app runs the bridge, its Bridge settings do not have
+this switch yet. The agent tracking code is adapted from
+[agents-deck](https://github.com/brushknight/agents-deck); see `bridge/internal/agents/NOTICE.md`.
+
 ### 2. Firmware
 
 ```bash
