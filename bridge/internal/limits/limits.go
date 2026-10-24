@@ -146,7 +146,7 @@ func (r *Reader) Get(ctx context.Context) Limits {
 		if res.StatusCode == http.StatusTooManyRequests {
 			wait = backoff
 			if s, err := strconv.ParseFloat(res.Header.Get("Retry-After"), 64); err == nil && s > 0 {
-				wait = time.Duration(s * float64(time.Second))
+				wait = time.Duration(min(s, maxBackoff.Seconds()) * float64(time.Second))
 			}
 			wait = min(max(wait, backoff), maxBackoff)
 		}

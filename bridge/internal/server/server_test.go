@@ -408,3 +408,47 @@ func TestReaderPanicIsLogged(t *testing.T) {
 		})
 	}
 }
+
+func TestRefreshCancelledIsNotLogged(t *testing.T) {
+	ctx, cancel := context.WithCancel(context.Background())
+	src := &stubSource{refresh: func(context.Context) ([]sources.Event, error) {
+		cancel()
+		return nil, context.Canceled
+	}}
+	var buf bytes.Buffer
+	s := New(config.Config{RefreshMs: 5000, ExtraCards: true}, Deps{
+		Limits: &stubLimits{l: goodLimits()}, Mail: stubMail{}, Source: src,
+		Now: func() time.Time { return fixedNow }, Log: quiet, ErrLog: log.New(&buf, "", 0),
+	})
+	s.RefreshOnce(ctx)
+	if buf.Len() != 0 {
+		t.Fatalf("logged on shutdown: %q", buf.String())
+	}
+	src.refresh = func(context.Context) ([]sources.Event, error) { return nil, errors.New("boom") }
+	s.RefreshOnce(context.Background())
+	if !strings.Contains(buf.String(), "refresh failed: boom") {
+		t.Fatalf("real failure not logged: %q", buf.String())
+	}
+}
+
+func TestJSONNotHTMLEscaped(t *testing.T) {
+	ev := sources.Event{T: fixedNow.Add(-time.Hour).UnixMilli(), Model: "claude-opus-4", Project: "a&b<c>",
+		Input: 1000, Output: 500, Cost: 1.25}
+	src := &stubSource{events: []sources.Event{ev},
+		refresh: func(context.Context) ([]sources.Event, error) { return nil, errors.New("x & <y>") }}
+	s, _ := newTest(config.Config{RefreshMs: 5000, ExtraCards: true}, src, goodLimits())
+	s.RefreshOnce(context.Background())
+	for _, path := range []string{"/api/status", "/health"} {
+		rec := get(t, s.Handler(), path)
+		body := rec.Body.String()
+		if strings.Contains(body, `\u00`) || !strings.Contains(body, "x & <y>") {
+			t.Fatalf("%s escaped: %s", path, body)
+		}
+		if strings.HasSuffix(body, "\n") || rec.Header().Get("Content-Length") != strconv.Itoa(rec.Body.Len()) {
+			t.Fatalf("%s framing: len %s body %d", path, rec.Header().Get("Content-Length"), rec.Body.Len())
+		}
+		if !json.Valid(rec.Body.Bytes()) {
+			t.Fatalf("%s invalid JSON", path)
+		}
+	}
+}

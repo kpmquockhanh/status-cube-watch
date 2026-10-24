@@ -41,7 +41,7 @@ func serve(greet bool, script func(read func() string, write func(string))) (net
 
 func newTestReader(clock *fakeClock, conns ...net.Conn) (*Reader, *int32) {
 	var dials int32
-	r := NewReader()
+	r := NewReader(nil)
 	r.Now = clock.now
 	r.Log = func(string) {}
 	r.Dial = func(ctx context.Context) (net.Conn, error) {

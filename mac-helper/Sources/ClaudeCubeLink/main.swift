@@ -40,13 +40,14 @@ let argv = CommandLine.arguments
 if let i = argv.firstIndex(of: "--port"), i + 1 < argv.count, let p = Int(argv[i + 1]) { port = p }
 
 // After the environment, what install.sh recorded in the app's defaults: a launch from Finder or
-// `open` has no LaunchAgent environment and "/" as its working directory. The bridge normally ships inside the bundle (Contents/Resources/bridge); a bridge/
-// near the working directory or the app bundle covers `swift run` in the repo.
+// `open` has no LaunchAgent environment and "/" as its working directory. The bridge normally ships
+// inside the bundle (Contents/Resources/bridge); a bridge/ near the working directory or the app
+// bundle covers `swift run` in the repo.
 let cwd = FileManager.default.currentDirectoryPath
 let bridgeDir = URL(fileURLWithPath: BridgeSupervisor.findBridgeDir(
     env: env, recorded: UserDefaults.standard.string(forKey: "bridgeDir"),
     searchFrom: [Bundle.main.resourcePath ?? "", cwd, Bundle.main.bundlePath],
-    exists: { FileManager.default.fileExists(atPath: $0) })
+    exists: { FileManager.default.isExecutableFile(atPath: $0) })
     ?? env["CUBE_BRIDGE_DIR"] ?? cwd + "/bridge")
 let binaryPath = bridgeDir.appendingPathComponent("cube-bridge").path
 let binaryFound = FileManager.default.isExecutableFile(atPath: binaryPath)

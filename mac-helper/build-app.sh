@@ -9,6 +9,7 @@
 set -euo pipefail
 cd "$(dirname "$0")"
 
+command -v go >/dev/null 2>&1 || { echo "go not found: install Go 1.24+" >&2; exit 1; }
 swift build -c release
 APP=build/ClaudeCubeLink.app
 rm -rf "$APP"
@@ -23,9 +24,8 @@ cp icon/AppIcon.icns "$APP/Contents/Resources/AppIcon.icns"
 # the child as environment variables.
 BRIDGE="$PWD/../bridge"
 APP_ABS="$PWD/$APP"
-command -v go >/dev/null 2>&1 || { echo "go not found: install Go 1.24+" >&2; exit 1; }
 mkdir -p "$APP/Contents/Resources/bridge"
-(cd "$BRIDGE" && GOOS=darwin GOARCH=arm64 go build -trimpath -o "$APP_ABS/Contents/Resources/bridge/cube-bridge" ./cmd/cube-bridge)
+(cd "$BRIDGE" && go build -trimpath -o "$APP_ABS/Contents/Resources/bridge/cube-bridge" ./cmd/cube-bridge)
 IDENTITY="${CUBE_SIGN_IDENTITY:-$(security find-identity -v -p codesigning 2>/dev/null |
   awk '/"(Apple Development|Developer ID Application):/ { print $2; exit }')}"
 IDENTITY="${IDENTITY:--}"

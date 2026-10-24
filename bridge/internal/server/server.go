@@ -8,6 +8,7 @@
 package server
 
 import (
+	"bytes"
 	"context"
 	"encoding/json"
 	"errors"
@@ -162,7 +163,8 @@ func (s *Server) RefreshOnce(ctx context.Context) {
 	}
 	s.refreshed = true
 	s.mu.Unlock()
-	if err != nil {
+	// A refresh cut short by shutdown is not a failure worth a log line.
+	if err != nil && ctx.Err() == nil {
 		s.d.ErrLog.Println("refresh failed:", err.Error())
 	}
 	s.payload.Store(&p)
@@ -206,8 +208,20 @@ func send(w http.ResponseWriter, code int, body []byte, contentType string) {
 
 const jsonType = "application/json"
 
+// marshal is json.Marshal without the \u003c escapes for <, > and &: they
+// cost bytes on the BLE link and the Node bridge never wrote them.
+func marshal(v any) ([]byte, error) {
+	var buf bytes.Buffer
+	enc := json.NewEncoder(&buf)
+	enc.SetEscapeHTML(false)
+	if err := enc.Encode(v); err != nil {
+		return nil, err
+	}
+	return bytes.TrimSuffix(buf.Bytes(), []byte("\n")), nil
+}
+
 func sendJSON(w http.ResponseWriter, code int, v any) {
-	b, err := json.Marshal(v)
+	b, err := marshal(v)
 	if err != nil {
 		panic(err)
 	}
@@ -220,7 +234,7 @@ func (n nullString) MarshalJSON() ([]byte, error) {
 	if n == "" {
 		return []byte("null"), nil
 	}
-	return json.Marshal(string(n))
+	return marshal(string(n))
 }
 
 type healthBody struct {
@@ -341,7 +355,8 @@ func (s *Server) Run(ctx context.Context) error {
 		s.d.Log.Printf("  device    http://%s/api/status", net.JoinHostPort(ip, strconv.Itoa(port)))
 	}
 
-	srv := &http.Server{Handler: s.Handler(), ErrorLog: s.d.ErrLog, ReadHeaderTimeout: 10 * time.Second}
+	srv := &http.Server{Handler: s.Handler(), ErrorLog: s.d.ErrLog, ReadHeaderTimeout: 10 * time.Second,
+		WriteTimeout: 10 * time.Second, IdleTimeout: 30 * time.Second}
 	var wg sync.WaitGroup
 	for _, l := range listeners {
 		wg.Add(1)

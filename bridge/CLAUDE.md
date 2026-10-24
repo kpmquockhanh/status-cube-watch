@@ -2,13 +2,15 @@
 
 This file provides guidance to Claude Code (claude.ai/code) when working with code in this repository.
 
+**Upgrading from the Node bridge:** run `./agent.sh install` (or `./agent.sh restart`) once after pulling: an installed LaunchAgent still runs the deleted `server.mjs` and would respawn-loop at the next login (`./agent.sh status` warns). The Mac app keeps its bundled Node copy until `../mac-helper/install.sh install` is run again, which switches it to the binary.
+
 Scope: `bridge/`. The repo-root `CLAUDE.md` already covers the data flow, config precedence and the payload contract. This file covers working inside the bridge: Go ≥ 1.24, one module dependency (`golang.org/x/text`, pinned at v0.34.0 so the module stays on Go 1.24), built to a single binary `cube-bridge`. `go test ./...` is the test suite.
 
 ## Commands
 
 ```sh
 go test ./... && go vet ./...            # the suite; run both before committing
-go build -o cube-bridge ./cmd/cube-bridge && ./cube-bridge   # serves on :8787 (`-config <path>` overrides config.json); CUBE_PORT=8788 if a LaunchAgent already holds 8787 (a busy port exits 1; SIGINT/SIGTERM stop it with exit 0)
+go build -o cube-bridge ./cmd/cube-bridge && ./cube-bridge   # serves on :8787 (`config.json` is read from the working directory, so run from `bridge/` or pass `-config <path>`); CUBE_PORT=8788 if a LaunchAgent already holds 8787 (a busy port exits 1; SIGINT/SIGTERM stop it with exit 0)
 curl -s localhost:8787/api/status        # the payload the cube gets
 curl -s localhost:8787/health            # always 200 while serving; {ok, error, source, lastError, limitsError, lastOk}
 ./agent.sh restart                       # reload the LaunchAgent copy (label com.claude-status-cube.bridge, logs in ~/Library/Logs/claude-status-cube/)

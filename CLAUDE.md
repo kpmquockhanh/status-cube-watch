@@ -21,7 +21,7 @@ CUBE_EXTRA_CARDS=1 ./cube-bridge     # also include the spend/token cards
 go vet ./... && go test ./...        # the bridge's tests (incl. the card-builder golden cases)
 ./agent.sh install|status|logs|restart|uninstall   # macOS LaunchAgent
 ```
-Config: optional `bridge/config.json` (copy `config.example.json`, gitignored); env vars override it (`CUBE_SOURCE`, `CUBE_PORT`, `CUBE_HOST`, `CUBE_REFRESH_MS`, `CUBE_EXTRA_CARDS`, `ANTHROPIC_ADMIN_KEY`, `ANTHROPIC_ADMIN_OAUTH_TOKEN`). Env booleans override both ways (`CUBE_EXTRA_CARDS=0` beats `extraCards: true`); a bad number falls back to the default with a warning; refresh is at least 1 s. `host` unset = every interface (WiFi cubes need it); `127.0.0.1` is fine for BLE-only. The Mac helper always reads `127.0.0.1`, so a `host` pinned to a LAN address gets a second loopback listener (`internal/server`).
+Config: optional `bridge/config.json` (copy `config.example.json`, gitignored; `cube-bridge` reads `config.json` from the working directory, so run it from `bridge/` or pass `-config <path>`); env vars override it (`CUBE_SOURCE`, `CUBE_PORT`, `CUBE_HOST`, `CUBE_REFRESH_MS`, `CUBE_EXTRA_CARDS`, `ANTHROPIC_ADMIN_KEY`, `ANTHROPIC_ADMIN_OAUTH_TOKEN`). Env booleans override both ways (`CUBE_EXTRA_CARDS=0` beats `extraCards: true`); a bad number falls back to the default with a warning; refresh is at least 1 s. `host` unset = every interface (WiFi cubes need it); `127.0.0.1` is fine for BLE-only. The Mac helper always reads `127.0.0.1`, so a `host` pinned to a LAN address gets a second loopback listener (`internal/server`).
 
 Firmware (from `firmware/`):
 ```sh

@@ -142,11 +142,20 @@ listens on `127.0.0.1` for the Mac helper. A bad value in `config.json` or the
 environment is ignored with a warning, and an environment variable wins over
 the file both ways (`CUBE_EXTRA_CARDS=0` turns off `"extraCards": true`).
 
+`cube-bridge` reads `config.json` from its working directory, so run it from `bridge/`
+or pass `-config <path>`.
+
 To keep it running without a terminal open, install it as a LaunchAgent:
+
+> **Upgrading from the Node bridge:** run `./agent.sh install` (or `./agent.sh restart`) once
+> after pulling. An installed LaunchAgent still runs `node .../bridge/server.mjs`, which no
+> longer exists, so launchd would respawn-loop it at the next login and the cube would go dark.
+> `./agent.sh status` warns when the agent is still the old one. The Mac app keeps its bundled
+> Node copy until you run `mac-helper/install.sh install` again, which switches it to the binary.
 
 ```bash
 ./agent.sh install      # builds the binary; starts now, and at every login
-./agent.sh status       # loaded? answering? what's on the cards?
+./agent.sh status       # loaded? answering? prints /health (curl /api/status for the cards)
 ./agent.sh logs         # tail ~/Library/Logs/claude-status-cube/bridge.log
 ./agent.sh restart      # rebuild and reload, after editing the Go code
 ./agent.sh uninstall
@@ -213,8 +222,8 @@ cd mac-helper
 **`install.sh` replaces `bridge/agent.sh`.** BLE users run `mac-helper/install.sh` instead of
 `bridge/agent.sh install`. If the `agent.sh` job is already installed, run
 `bridge/agent.sh uninstall` first; otherwise both LaunchAgents fight for the same port.
-**The bridge ships inside the app.** `build-app.sh` copies the bridge's code (not `config.json`)
-to `ClaudeCubeLink.app/Contents/Resources/bridge`, so the app runs the same way from the
+**The bridge ships inside the app.** `build-app.sh` compiles `cube-bridge` (no `config.json`)
+into `ClaudeCubeLink.app/Contents/Resources/bridge`, so the app runs the same way from the
 LaunchAgent, Finder or `open`, wherever the repo is. A change to `bridge/` reaches the app only
 after `./install.sh install` again.
 

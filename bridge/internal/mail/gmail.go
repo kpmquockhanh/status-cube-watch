@@ -39,7 +39,11 @@ type Reader struct {
 }
 
 // NewReader returns a Reader with the production defaults.
-func NewReader() *Reader {
+// NewReader's logf receives the reader's log lines (nil = the standard logger).
+func NewReader(logf func(string)) *Reader {
+	if logf == nil {
+		logf = func(s string) { log.Println(s) }
+	}
 	return &Reader{
 		Dial: func(ctx context.Context) (net.Conn, error) {
 			d := tls.Dialer{Config: &tls.Config{ServerName: imapHost}}
@@ -47,7 +51,7 @@ func NewReader() *Reader {
 		},
 		Now:     time.Now,
 		Timeout: fetchTimeout,
-		Log:     func(s string) { log.Println(s) },
+		Log:     logf,
 	}
 }
 

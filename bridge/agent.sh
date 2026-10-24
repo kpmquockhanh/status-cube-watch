@@ -108,6 +108,10 @@ uninstall_agent() {
 status_agent() {
   if launchctl print "$TARGET" >/dev/null 2>&1; then
     launchctl print "$TARGET" | awk '/state =|pid =|last exit code/ {$1=$1; print "  " $0}'
+    if [ "$(restart_action "$PLIST" 1)" = install ]; then
+      echo "  Upgrading from the Node bridge: this LaunchAgent does not run $DIR/cube-bridge."
+      echo "  Run ./agent.sh install (or ./agent.sh restart) once to switch it to the Go binary."
+    fi
   else
     echo "  not loaded"
     return

@@ -107,7 +107,7 @@ func Test429Backoff(t *testing.T) {
 	for _, tc := range []struct {
 		retryAfter string
 		wait       time.Duration
-	}{{"60", 5 * time.Minute}, {"7200", 30 * time.Minute}, {"", 5 * time.Minute}, {"600", 10 * time.Minute}} {
+	}{{"60", 5 * time.Minute}, {"7200", 30 * time.Minute}, {"", 5 * time.Minute}, {"600", 10 * time.Minute}, {"99999999999", 30 * time.Minute}, {"1e300", 30 * time.Minute}} {
 		f := newFixture(t)
 		f.h = func(w http.ResponseWriter, _ *http.Request) {
 			if tc.retryAfter != "" {
