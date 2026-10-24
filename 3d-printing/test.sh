@@ -422,8 +422,8 @@ expect_empty "cell clear of the tub (3 mm buffer)"     check_cell_tub -D bat_buf
 expect_solid "control: pad_t=-0.6 puts the cell into the back" check_cell_tub -D pad_t=-0.6
 expect_empty "pilots keep a 1.0 wall"                  check_pilot_wall
 expect_solid "control: pilot_in=0.3 breaks into the pocket" check_pilot_wall -D pilot_in=0.3
-expect_manifold "tub"                  tub --max 40.9 62.4 24.3
-expect_manifold "tub (3 mm buffer)"    tub --max 40.9 60.4 24.3 -D bat_buf=3
+expect_manifold "tub with boss"               tub --max 40.9 62.4 29.3
+expect_manifold "tub with boss (3 mm buffer)" tub --max 40.9 60.4 29.3 -D bat_buf=3
 expect_step "tub clear of the board"   at_tub "--min-gap 0.2"
 expect_step_fail "control: clr=-0.3 puts the glass into the pocket wall" at_tub "" -D clr=-0.3
 
@@ -460,6 +460,18 @@ expect_empty "open plug clear of a plugged-in cable"         check_open_plug_cab
 expect_solid "control: the closed plug is where the cable goes" check_open_plug_cable -D plug_open=false
 expect_manifold "plug" plug --max 18.7 9.6 3.9
 expect_step "plug clear of the board" at_plug "--min-gap 0.2"
+
+# quarter-turn: the boss drops in landscape, turns 90 deg to portrait, the hooks hold it and a detent clicks
+expect_empty "boss drops into the receiver at insert"   check_qt -D qt_a=0  -D qt_lift=0
+expect_empty "boss turns to lock without binding"       check_qt -D qt_a=45 -D qt_lift=0
+expect_empty "boss sits locked"                         check_qt -D qt_a=90 -D qt_lift=0
+expect_solid "locked boss cannot lift out"              check_qt -D qt_a=90 -D qt_lift=0.5
+expect_solid "locked boss cannot lift out (no detent)"  check_qt -D qt_a=90 -D qt_lift=0.5 -D qt_detent=0
+expect_empty "control: unlocked boss lifts out"         check_qt -D qt_a=0  -D qt_lift=5
+expect_solid "detent resists the turn back (70 deg)"    check_qt_detent -D qt_a=70
+expect_empty "detent sits free when locked (90 deg)"    check_qt_detent -D qt_a=90
+expect_manifold "quarter-turn test boss"     qt_test_boss     --max 36.1 36.1 9.1
+expect_manifold "quarter-turn test receiver" qt_test_receiver --max 31.1 31.1 7.1
 fi
 
 exit $fail

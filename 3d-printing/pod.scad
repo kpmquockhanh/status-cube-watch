@@ -61,6 +61,20 @@ plug_gap = 0.2;             // body tip to the relief floor
 strap_w = 2.0;  strap_t = 0.8;
 pin_d = 1.9;                // into the Ø1.6 anchor hole
 plug_open = true;           // check_open_plug_cable: the plug hanging open (false = closed, the control)
+// Quarter-turn (Garmin style). VERIFY every value against a real Garmin mount: no published drawing was
+// found (third-party designs give only the outer disc, 32.5 or 33.5, and the 20 mm hole spacing), so these
+// are starting values. The pod's own receivers use the same values, so the pod fits them either way.
+qt_neck_d = 20.0;           // boss core under the tabs
+qt_tab_r = 13.5;  qt_tab_w = 9.0;  qt_tab_t = 2.4;   // tab outer radius, chord, thickness
+qt_gap = 2.6;               // back face to the tab underside: where the hooks go
+qt_hook_t = 2.2;            // hook thickness
+qt_clr = 0.2;
+qt_base_d = 31;             // receiver outer
+qt_floor = 2.0;             // receiver floor behind the boss
+qt_detent = 0.4;            // bump height into the notches on the boss's top face
+qt_bump_r = 6;  qt_bump_d = 1.6;   // bump position (radius, receiver angle 0) and size
+qt_lock = 90;               // insert with the pod landscape, turn 90 deg to portrait
+qt_a = 90;  qt_lift = 0;    // check_qt: boss turned qt_a from insert, pulled qt_lift out
 ledge = 0;                  // check_ledges: 0 = bottom ledge, 1 = top ledge
 carrier_clr = 0.2;          // carrier outline inside the cavity, per side
 post_d = 3;  preload = 0.2; // posts press this far into the PCB rear
@@ -166,7 +180,8 @@ module cord_ghost() {
 module tub_body() xz_extrude(back_y) rrect(out_x0, out_z0, out_x1 - out_x0, out_z1 - out_z0, edge_r);
 module pilots(d = pilot_d, y1 = pilot_depth) for (p = screw_pts) ycyl(p, d, -1, y1);
 module anchor_hole() translate([out_x1 + 0.01, anchor_pt[0], anchor_pt[1]]) rotate([0, -90, 0]) cylinder(d = anchor_d, h = anchor_l + 0.01);
-module tub() difference() {
+module tub() union() { tub_shell(); qt_on_pod() qt_boss(); }
+module tub_shell() difference() {
   tub_body();
   translate([0, -1, 0]) xz_extrude(bay_y0 + 1) cav2d();
   translate([bay_x0, bay_y0 - 0.01, bay_z0]) cube([bay_w, bay_t + 0.01, bay_l]);
@@ -256,6 +271,50 @@ module plug_seat() plug_place() translate([0, 0, plug_lip + nudge]) linear_extru
   square([usb_plug_w + 2*nudge, usb_plug_h + 2*nudge], center = true);
 }
 
+// ---- quarter-turn ----------------------------------------------------------------------
+// Boss-local frame: the pod's back face at z = 0, the boss up along +z, locked tabs along ±x (across the pod).
+// The receiver uses the same frame with the boss in place, locked; it starts qt_clr above the back face.
+qt_top = qt_gap + qt_tab_t;                    // boss top face
+qt_floor_z = qt_top + qt_clr;                  // receiver floor face
+qt_c = [glass_b/2, (out_z0 + out_z1)/2];       // boss centre on the back (pod x, z)
+module qt_tabs(r = qt_tab_r, w = qt_tab_w, z0 = qt_gap, h = qt_tab_t) translate([0, 0, z0]) intersection() {
+  cylinder(r = r, h = h, $fn = 96);
+  translate([-r - 1, -w/2, -1]) cube([2*r + 2, w, h + 2]);
+}
+module qt_boss() difference() {
+  union() { translate([0, 0, -0.01]) cylinder(d = qt_neck_d, h = qt_top + 0.01, $fn = 96); qt_tabs(); }
+  // the detent notches, both ends, so the pod locks either way up
+  for (sx = [-1, 1]) translate([sx*qt_bump_r - (qt_bump_d + 0.2)/2, -(qt_bump_d + 0.2)/2, qt_top - qt_detent - 0.1])
+    cube([qt_bump_d + 0.2, qt_bump_d + 0.2, 1]);
+}
+// boss-local -> pod, and back
+module qt_on_pod() translate([qt_c[0], back_y, qt_c[1]]) rotate([-90, 0, 0]) children();
+module qt_from_pod() rotate([90, 0, 0]) translate([-qt_c[0], -back_y, -qt_c[1]]) children();
+module qt_bump() translate([qt_bump_r, 0, qt_floor_z - qt_detent]) cylinder(d = qt_bump_d, h = qt_detent + 0.01);
+// the cup and hooks; the bump sits on a finger cut free on three sides and thinned to 0.8, which flexes on the turn
+module qt_receiver() {
+  difference() {
+    translate([0, 0, qt_clr]) cylinder(d = qt_base_d, h = qt_floor_z + qt_floor - qt_clr, $fn = 96);
+    translate([0, 0, -1]) cylinder(r = qt_neck_d/2 + qt_clr, h = qt_floor_z + 1, $fn = 96);                 // through the hooks
+    translate([0, 0, qt_gap - qt_clr]) cylinder(r = qt_tab_r + qt_clr, h = qt_floor_z - qt_gap + qt_clr, $fn = 96);   // above them
+    // entry gaps for the tabs at insert (along ±y)
+    translate([0, 0, -1]) intersection() {
+      cylinder(r = qt_tab_r + qt_clr, h = qt_floor_z + 1, $fn = 96);
+      translate([-(qt_tab_w/2 + qt_clr), -qt_base_d, 0]) cube([qt_tab_w + 2*qt_clr, 2*qt_base_d, qt_floor_z + 1]);
+    }
+    // the finger: 6 long from the bump's far side, 3 wide, slots 0.6, thinned from behind
+    translate([qt_bump_r - 3.6, -2.1, qt_floor_z - 0.01]) difference() {
+      cube([6.6, 4.2, qt_floor + 0.02]);
+      translate([0.6, 0.6, -0.01]) cube([6.1, 3, qt_floor + 0.04]);
+    }
+    translate([qt_bump_r - 3, -1.5, qt_floor_z + 0.8]) cube([6, 3, qt_floor]);
+  }
+  if (qt_detent > 0) qt_bump();
+}
+module qt_receiver_body() difference() { qt_receiver(); qt_bump(); }
+// the boss turned a deg from insert and pulled `lift` back out of the receiver
+module qt_turn(a, lift) translate([0, 0, -lift]) rotate([0, 0, a - qt_lock]) children();
+
 // ---- reference values ------------------------------------------------------------
 module meta() echo(str("POD{\"w\":", out_x1 - out_x0, ",\"l\":", out_z1 - out_z0, ",\"d\":", back_y, "}"));
 
@@ -304,5 +363,10 @@ else if (part == "check_plug_seal") intersection() { plug_place() plug_body(); t
 else if (part == "check_plug_seat") difference() { plug_seat(); tub(); }
 else if (part == "check_plug_board") intersection() { plug_place() tplug(); board_at(); }
 else if (part == "check_open_plug_cable") intersection() { plug_place() if (plug_open) plug_cap_open(); else plug_cap(); cable_ghost(); }
+// the receiver without its bump (a flexing finger), and the bump alone against the boss
+else if (part == "check_qt") intersection() { qt_turn(qt_a, qt_lift) qt_boss(); qt_receiver_body(); }
+else if (part == "check_qt_detent") intersection() { qt_turn(qt_a, 0) qt_boss(); qt_bump(); }
+else if (part == "qt_test_boss") { translate([-18, -18, -4]) cube([36, 36, 4]); qt_boss(); }
+else if (part == "qt_test_receiver") translate([0, 0, qt_floor_z + qt_floor]) rotate([180, 0, 0]) qt_receiver();
 else if (part == "check_antenna_metal") intersection() { metal(); antenna_zone(metal_keep); }
 else assert(false, str("unknown part: ", part));
