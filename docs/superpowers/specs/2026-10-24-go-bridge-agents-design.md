@@ -178,6 +178,9 @@ deserve the most attention in parsing and acceptance tests.
 - A tap on a tile that is not waiting does nothing.
 - Hooks are installed and removed by a bridge subcommand (e.g. `bridge hooks install|uninstall`),
   called by `bridge/agent.sh install|uninstall` and `mac-helper/install.sh install|uninstall`.
+- One Go module dependency is allowed: `golang.org/x/text`, for the NFKD accent stripping that the
+  Node bridge did with `normalize('NFKD')` (Go's standard library has no Unicode normalisation, and
+  folder names can be Vietnamese).
 - The bridge keeps its port (8787), endpoints and LaunchAgent label, so a cube and an installed app
   need no reconfiguration.
 
