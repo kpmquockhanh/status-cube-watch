@@ -288,7 +288,7 @@ expect_empty "battery lead clear (tilt 55)"                  check_cord -D tilt=
 expect_empty "battery lead clear (tilt 75)"                  check_cord -D tilt=75
 expect_empty "battery lead clear (clr 0.5)"                  check_cord -D clr=0.5
 expect_empty "battery lead clear (board 12 mm)"              check_cord -D board_t=12
-expect_solid "control: cord_depth=0.4 drags the lead over the rear parts" check_cord -D cord_depth=0.4
+expect_solid "control: cord_depth=0.4 drags the lead over the rear parts" check_cord -D cord_depth=0.4 -D 'lead_end="top"'
 expect_solid "control: bat_h=5 puts the plug into the plate"             check_cord -D bat_h=5
 expect_solid "control: bat_exit=1 leaves no room to climb out"           check_cord -D bat_exit=1
 expect_manifold "carrier"                carrier --max 40 55 13.7
@@ -389,6 +389,25 @@ expect_empty "cell clear of the antenna"                    check_antenna_metal
 expect_empty "cell clear of the antenna (lead at the top)"  check_antenna_metal -D 'lead_end="top"'
 expect_empty "cell clear of the antenna (3 mm buffer)"      check_antenna_metal -D bat_buf=3
 expect_solid "control: ant_keep=0 puts the cell by the antenna" check_antenna_metal -D ant_keep=0
+
+# carrier: posts press the PCB, pegs locate it, the lead runs plug -> groove -> slot -> bay buffer
+expect_empty "carrier clear of the board (pegs in the notches)" check_carrier_board -D preload=-0.05
+expect_solid "control: 2.6 mm pegs miss the notches"            check_carrier_board -D preload=-0.05 -D peg_d=2.6
+expect_solid "shoulders press on the PCB"                       check_shoulders
+expect_empty "control: preload=-0.05 leaves the PCB loose"      check_shoulders -D preload=-0.05
+expect_empty "pegs sit inside the PCB notches"                  check_pegs
+expect_empty "cell clear of the carrier"                        check_cell_carrier
+expect_solid "control: bcl=-0.1 puts the cell into the carrier" check_cell_carrier -D bcl=-0.1
+expect_empty "battery lead clear, plug to bay"                  check_cord
+expect_empty "battery lead clear (lead at the top)"             check_cord -D 'lead_end="top"'
+expect_empty "battery lead clear (3 mm buffer)"                 check_cord -D bat_buf=3
+expect_solid "control: cord_depth=0.4 drags the lead over the rear parts" check_cord -D cord_depth=0.4 -D 'lead_end="top"'
+expect_empty "lead clear of the antenna (lead at the top)"      check_antenna_metal -D 'lead_end="top"'
+expect_manifold "carrier"                 carrier --max 34.6 54.9 9.3
+expect_manifold "carrier (lead at top)"   carrier --max 34.6 54.9 9.3 -D 'lead_end="top"'
+expect_step "carrier: shoulders press the PCB and nothing else" at_carrier "--touch-pcb --min-gap 0.2"
+expect_step "carrier clear of the board"                       at_carrier "--min-gap 0.2" -D preload=-0.05
+expect_step_fail "control: board_t=10.2 hits the 2-pin header" at_carrier "" -D preload=-0.05 -D board_t=10.2
 fi
 
 exit $fail
