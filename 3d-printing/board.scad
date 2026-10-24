@@ -24,6 +24,7 @@ btn_a = [11.23, 20.14, 29.05];                                  // STEP: RST, BO
 usb_a = 20.3;  usb_w = 9.0;  usb_h = 3.3;                       // STEP: centre 20.31, shell 8.34 wide
 usb_plug_w = 13;  usb_plug_h = 7.5;  usb_plug_x0 = 3;           // VERIFY: Type-C plug overmold relief; x0 = start beyond the PCB edge
 win_margin = 1.0;                                               // window = active area + this per side
+ant_b0 = 7.6;  ant_b1 = 13.6;  ant_a0 = 2.0;  ant_a1 = 4.0;   // VERIFY: probable chip antenna (STEP: 6 x 2 x 1 part on the PCB rear), board x / z
 
 // ---- derived ------------------------------------------------------------------
 pcb_rear = pcb_y0 + pcb_t;

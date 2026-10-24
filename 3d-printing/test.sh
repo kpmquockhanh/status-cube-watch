@@ -1,11 +1,11 @@
 #!/usr/bin/env bash
-# Geometry tests for stand.scad (wedge) and easel.scad. Usage: 3d-printing/test.sh [stand|easel]
+# Geometry tests for stand.scad (wedge), easel.scad and pod.scad. Usage: 3d-printing/test.sh [stand|easel|pod]
 # (set OPENSCAD=... to override). Renders land in build/<scad>-<part>.{stl,log}.
 set -u
 set -f   # -D values such as bat=[65,40,15] must not glob
 cd "$(dirname "$0")"
 only="${1:-}"
-case "$only" in ""|stand|easel) ;; *) echo "usage: $0 [stand|easel]"; exit 2;; esac
+case "$only" in ""|stand|easel|pod) ;; *) echo "usage: $0 [stand|easel|pod]"; exit 2;; esac
 OPENSCAD="${OPENSCAD:-$PWD/tools/openscad}"
 BACKEND=""
 "$OPENSCAD" --help 2>&1 | grep -q -- "--backend" && BACKEND="--backend=manifold"
@@ -47,8 +47,8 @@ expect_manifold() {  # label part [--max X Y Z] [-D ...]   watertight and within
   expect_solid "$label renders" "$part" "${r[@]}" || true
   python3 tools/stlcheck.py "$(out "$part").stl" "${c[@]}" && echo "PASS $label watertight" || { echo "FAIL $label watertight"; fail=1; }
 }
-expect_error() {  # label part   passes when openscad rejects the part
-  render "$2"
+expect_error() {  # label part [-D ...]   passes when openscad rejects the part
+  render "$2" "${@:3}"
   if has_error "$2"; then echo "PASS $1"; else echo "FAIL $1: expected an error"; fail=1; fi
 }
 expect_pass() {  # label cmd...   passes when the command exits 0
@@ -372,6 +372,23 @@ expect_pass "tip force: >= 3.0 N centre, >= 1.3 N top" python3 tools/stability.p
 expect_fail "control: no cell, it tips"                python3 tools/stability.py build/easel --cell-g 0 --min-center 3.0 --min-top 1.3
 expect_solid "assembly renders" assembly
 expect_solid "section renders"  section
+fi
+
+# ==== pod: pod.scad =============================================================================
+if run pod; then
+SCAD=pod.scad
+expect_empty "pod: part=none renders nothing" none
+expect_error "pod: unknown part is rejected" bogus
+expect_error "pod: board_flip is not supported" none -D board_flip=true
+expect_error "pod: bat_buf=6 is rejected" none -D bat_buf=6
+expect_solid "pod: cell ghost in place"  at_cell
+expect_solid "pod: board ghost in place" at_board
+
+# the cell, its buffer, the lead and the screws keep metal_keep off the antenna
+expect_empty "cell clear of the antenna"                    check_antenna_metal
+expect_empty "cell clear of the antenna (lead at the top)"  check_antenna_metal -D 'lead_end="top"'
+expect_empty "cell clear of the antenna (3 mm buffer)"      check_antenna_metal -D bat_buf=3
+expect_solid "control: ant_keep=0 puts the cell by the antenna" check_antenna_metal -D ant_keep=0
 fi
 
 exit $fail
