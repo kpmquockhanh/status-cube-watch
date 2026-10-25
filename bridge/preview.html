@@ -124,19 +124,51 @@
   .stale { color: var(--red); }
   /* A dual card's s2 (the full reason a limits read failed) is not drawn on
      the device; the mock shows it here, outside the panel. */
-  /* The Agents card (a card with `a`): a plain list so the data can be read.
-     Plan 3 replaces this with a mirror of the firmware's tile grid; nothing
-     here follows the real layout. */
-  .agentsview { display: none; position: absolute; top: 40px; left: 18px; right: 18px; font-size: 12px; }
+  /* The Agents card (a card with `a`): the firmware's grid (agents_layout.h:
+     caption at y 44, view 58..254, two columns of 102x84 tiles) and, on a click
+     on an orange tile, its prompt screen, drawn from `q` the way the full
+     variant has it. The browser never answers: the buttons stay grey. Colours
+     and copy mirror ui.cpp; the critter is a plain block. */
+  .agentsview { display: none; position: absolute; inset: 0; }
   .device.agents .agentsview { display: block; }
   .device.agents .ring, .device.agents .mid, .device.agents .mail, .device.agents .rows, .device.agents .read, .device.agents .name { display: none; }
-  .agentsview .head { font-size: 22px; font-weight: 700; }
-  .agentsview .cap { color: var(--dim); margin-bottom: 8px; }
-  .agentsview .tile { display: flex; gap: 8px; padding: 2px 0; }
-  .agentsview .tile .l { margin-left: auto; color: var(--dim); }
-  .agentsview .q { margin-top: 8px; padding-top: 6px; border-top: 1px solid var(--faint); }
-  .agentsview .q b { display: block; margin-bottom: 4px; }
-  .agentsview .q span { display: inline-block; margin: 0 6px 4px 0; padding: 1px 6px; border: 1px solid var(--faint); border-radius: 4px; }
+  .ag-cap { position: absolute; top: 36px; left: 0; width: 240px; text-align: center; font-size: 12px; font-weight: 600; letter-spacing: .12em; text-transform: uppercase; }
+  .ag-view { position: absolute; top: 58px; left: 0; width: 240px; height: 196px; overflow-y: auto; scrollbar-width: none; }
+  .ag-view::-webkit-scrollbar { display: none; }
+  .ag-grid { position: relative; }
+  .tile { position: absolute; width: 102px; height: 84px; box-sizing: border-box; border-radius: 10px; background: #141923; padding: 7px 8px; overflow: hidden; }
+  .tile.wait { background: var(--accent); color: #0b0d12; cursor: pointer; }
+  .tile .n { font-size: 12px; font-weight: 700; white-space: nowrap; overflow: hidden; }
+  .tile .l { position: absolute; left: 8px; bottom: 11px; font-size: 12px; color: var(--dim); white-space: nowrap; }
+  .tile.wait .l { color: #0b0d12; }
+  .tile .u { position: absolute; top: 7px; right: 7px; width: 6px; height: 6px; border-radius: 50%; background: var(--accent); }
+  .tile .bar { position: absolute; left: 8px; right: 8px; bottom: 5px; height: 4px; border-radius: 2px; background: rgba(255,255,255,.12); }
+  .tile .bar i { display: block; height: 100%; border-radius: 2px; background: var(--blue); }
+  .tile.wait .bar { background: rgba(0,0,0,.2); }
+  .tile.wait .bar i { background: #0b0d12; }
+  .crit { position: absolute; left: 32px; top: 27px; width: 36px; height: 24px; border-radius: 4px; background: var(--ink); }
+  .crit::before, .crit::after { content: ""; position: absolute; top: 8px; width: 5px; height: 6px; background: #0b0d12; }
+  .crit::before { left: 8px; }
+  .crit::after { right: 8px; }
+  .tile.wait .crit { background: #0b0d12; }
+  .tile.wait .crit::before, .tile.wait .crit::after { background: var(--accent); }
+  .tile.err .crit { background: var(--red); }
+  .tile.idle .crit, .tile.exit .crit { background: #5a6477; }
+  .prompt { display: none; position: absolute; inset: 0; background: var(--bg); }
+  .device.prompting .prompt { display: block; }
+  .device.prompting .ag-cap, .device.prompting .ag-view { display: none; }
+  .pr-head { position: absolute; top: 34px; left: 14px; right: 14px; font-size: 12px; font-weight: 600; letter-spacing: .12em; text-transform: uppercase; color: var(--accent); }
+  .pr-col { position: absolute; top: 56px; left: 14px; right: 14px; bottom: 6px; overflow-y: auto; scrollbar-width: none; }
+  .pr-col::-webkit-scrollbar { display: none; }
+  .pr-title { font-size: 18px; font-weight: 700; line-height: 22px; margin-bottom: 8px; }
+  .pr-detail { background: #141923; border-radius: 8px; padding: 6px 8px; font-size: 12px; line-height: 15px; word-break: break-word; margin-bottom: 8px; }
+  .pr-ctx, .pr-reason { font-size: 11px; letter-spacing: .1em; text-transform: uppercase; color: var(--dim); margin-bottom: 6px; }
+  .pr-notice { text-align: center; margin-top: 56px; }
+  .pr-notice b { display: block; font-size: 18px; margin-bottom: 8px; }
+  .pr-notice span { color: var(--dim); font-size: 12px; letter-spacing: .1em; text-transform: uppercase; }
+  .btn { display: flex; align-items: center; gap: 8px; height: 34px; margin-bottom: 6px; padding: 0 10px; border-radius: 17px; background: var(--faint); color: #aab3c5; font-size: 12px; box-sizing: border-box; white-space: nowrap; overflow: hidden; }
+  .btn i { flex: none; width: 18px; height: 18px; border-radius: 50%; background: #7c8598; color: var(--faint); font-style: normal; text-align: center; line-height: 18px; font-size: 11px; font-weight: 700; }
+  .btn.back { background: #1b2230; color: var(--ink); justify-content: center; cursor: pointer; }
   .note { color: var(--red); font-size: 12px; margin: 0; min-height: 1.5em; }
 </style>
 </head>
@@ -168,7 +200,7 @@
       <div class="value" id="v">--</div>
       <div class="cap" id="s1">waiting for bridge</div>
     </div>
-    <div class="agentsview" id="agentsview"></div>
+    <div class="agentsview" id="agentsview"><div class="ag-cap" id="agcap"></div><div class="ag-view" id="agview"><div class="ag-grid" id="aggrid"></div></div><div class="prompt" id="prompt"></div></div>
     <div class="mail" id="mail"></div>
     <div class="rows" id="rows"></div>
     <div class="read"><span class="pct" id="pct"></span><span class="label" id="s2"></span></div>
@@ -192,10 +224,67 @@ let online = null; // unknown until the first poll settles
 const WAITING = { t:'', v:'No data yet', s1:'', s2:'Waiting for the bridge', c:'ink' };
 const cards = () => (data.cards.length ? data.cards : [WAITING]);
 
+// ---- the Agents card -------------------------------------------------------
+// Every field may be missing or odd (null tiles, `q.o` not an array): the page
+// keeps drawing whatever the bridge sent.
+const esc = (x) => String(x ?? '').replace(/[&<>"]/g, (ch) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' }[ch]));
+let promptAgent = null; // the tile whose prompt screen is open
+
+function paintAgents(card, color) {
+  const tiles = card.a.filter((t) => t && typeof t === 'object');
+  agcap.textContent = card.s1 || '';
+  agcap.style.color = color;
+  aggrid.style.height = `${tiles.length ? Math.ceil(tiles.length / 2) * 92 - 8 : 0}px`;
+  aggrid.innerHTML = tiles.map((t, i) => {
+    const k = ['run', 'wait', 'idle', 'err', 'exit', 'start'].includes(t.k) ? t.k : 'idle';
+    const x = Math.max(0, Math.min(100, Number(t.x) || 0));
+    return `<div class="tile ${k}" data-id="${esc(t.i)}" style="left:${i & 1 ? 124 : 14}px;top:${Math.floor(i / 2) * 92}px">` +
+      `<div class="n">${esc(t.n)}</div><div class="crit"></div>${t.u ? '<span class="u"></span>' : ''}` +
+      `<div class="l">${esc(t.l)}</div><div class="bar"><i style="width:${x}%"></i></div></div>`;
+  }).join('');
+  const open = promptAgent && tiles.find((t) => t.i === promptAgent && t.k === 'wait');
+  if (promptAgent && !open) promptAgent = null; // gone or no longer waiting: close, as AgentView does
+  if (!open) return;
+  device.classList.add('prompting');
+  // Which screen, as AgentView decides it. A payload without `q` is what the
+  // cube sees over WiFi (or when the budget dropped it, `qc`).
+  const q = card.q && typeof card.q === 'object' ? card.q : null;
+  const head = `<div class="pr-head">${esc(open.n)}</div>`;
+  const notice = (a, b) => `${head}<div class="pr-col"><div class="pr-notice"><b>${a}</b><span>${b}</span></div></div>`;
+  if (!q) {
+    prompt.innerHTML = card.qc ? notice('too long for the cube', 'answer at the terminal') : notice('needs you', 'open on Bluetooth');
+    return;
+  }
+  if (q.i !== open.i) {
+    const other = tiles.find((t) => t.i === q.i);
+    prompt.innerHTML = notice('needs you', `answer ${esc(other ? other.n : 'the other agent')} first`);
+    return;
+  }
+  const opts = q.k === 'input' || !Array.isArray(q.o) ? [] : q.o.filter((o) => o && typeof o === 'object');
+  const reason = q.k === 'input' ? 'answer at the terminal' : q.x === 'tmux' ? 'not in tmux' : 'answer on the cube';
+  const detail = q.cut ? '(detail cut)' : q.d;
+  prompt.innerHTML = `${head}<div class="pr-col"><div class="pr-title">${esc(q.t)}</div>` +
+    (detail ? `<div class="pr-detail" style="${q.cut ? 'color:var(--dim)' : ''}">${esc(detail)}</div>` : '') +
+    (q.c ? `<div class="pr-ctx">${esc(q.c)}</div>` : '') +
+    `<div class="pr-reason">${esc(reason)}</div>` +
+    opts.map((o) => `<div class="btn"><i>${esc(o.k)}</i>${esc(o.l)}</div>`).join('') +
+    '<div class="btn back" id="pback">BACK</div></div>';
+  document.getElementById('pback').onclick = (ev) => { ev.stopPropagation(); promptAgent = null; paint(); };
+}
+
+aggrid.addEventListener('click', (ev) => {
+  const t = ev.target.closest && ev.target.closest('.tile.wait');
+  if (!t) return;
+  ev.stopPropagation();
+  promptAgent = t.dataset.id;
+  paint();
+});
+
 function paint() {
   if (!data) return;
   const deck = cards();
   const card = deck[idx % deck.length];
+  if (!Array.isArray(card.a)) promptAgent = null;
   const color = `var(${COLORS[card.c] || '--ink'})`;
   // A card with `g` is a ring; anything else keeps the big-number layout.
   const gauge = typeof card.g === 'number';
@@ -215,14 +304,8 @@ function paint() {
   s2.textContent = card.s2 || '';
   note.textContent = dual && card.s2 ? `${card.t}: ${card.s2}` : '';
 
-  if (agents) {
-    const e = (x) => String(x ?? '').replace(/[&<>]/g, (ch) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;' }[ch]));
-    const tiles = card.a.map((a) =>
-      `<div class="tile"><span style="color:var(${a.k === 'wait' ? '--accent' : '--ink'})">${e(a.n)}</span><span class="l" style="${a.k === 'wait' ? 'color:var(--accent)' : ''}">${e(a.l)}</span></div>`).join('');
-    // `q` is only in the payload for loopback requests (this page on the bridge's own machine).
-    const q = card.q ? `<div class="q"><b>${e(card.q.t)}</b>${(card.q.o || []).map((o) => `<span>${e(o.l)}</span>`).join('')}</div>` : '';
-    agentsview.innerHTML = `<div class="head" style="color:${color}">${e(card.v)}</div><div class="cap">${e(card.s1)}</div>${tiles}${q}`;
-  }
+  device.classList.remove('prompting');
+  if (agents) paintAgents(card, color);
 
   if (gauge) {
     const pctVal = Math.max(0, Math.min(100, card.g));
@@ -283,7 +366,9 @@ async function poll() {
   }
 }
 
-device.onclick = () => { if (data) { idx = (idx + 1) % cards().length; paint(); } };
+device.onclick = (ev) => {
+  if (ev.target.closest && ev.target.closest('.ag-view,.prompt')) return;
+  if (data) { idx = (idx + 1) % cards().length; paint(); } };
 addEventListener('keydown', (e) => {
   if (!data) return;
   const n = cards().length;
@@ -292,7 +377,7 @@ addEventListener('keydown', (e) => {
   else return;
   paint();
 });
-setInterval(() => { if (data) { idx = (idx + 1) % cards().length; paint(); } }, 6000);
+setInterval(() => { if (data && !promptAgent) { idx = (idx + 1) % cards().length; paint(); } }, 6000);
 setInterval(tick, 1000);
 poll();
 setInterval(poll, 5000);

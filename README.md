@@ -188,7 +188,7 @@ CUBE_SOURCE=admin ./cube-bridge
 ### Claude agents (optional, off by default)
 
 The bridge can also follow your running Claude Code sessions (which are working, which wait for you)
-and put an AGENTS card in the payload. It is off until the firmware that draws it ships, and nothing
+and put an AGENTS card in the payload. It is off by default (`CUBE_AGENTS=1` or `"agents": true` turns it on), and nothing
 changes on the cube while it is off. To try the data:
 
 ```sh
@@ -433,6 +433,20 @@ docs/                 BLE protocol, hardware checklists, board reference
 3d-printing/          OpenSCAD desk stands + STLs
 ```
 
+#### What the cube shows
+
+With agents on, the deck gets an AGENTS card: a grid of up to eight tiles (swipe up and down to scroll
+when there are more than four), one per Claude Code session, each with a little critter for what it is
+doing, its status line and how full its context is. A session that waits for you is orange. Tap it to
+read the question and its answer buttons; BACK or a swipe right returns to the grid. When an agent starts
+waiting, the cube wakes, jumps to the card, opens the question and beeps once (set the level with SOUND).
+
+Reading the question and answering it need Bluetooth: over WiFi the cube only learns that an agent
+needs you, because the bridge never sends prompt text over the LAN. Answering also needs the Mac app
+(a later release of `mac-helper`) to pass the tap on to the agent's tmux pane; until then the buttons
+are shown and a tap sends nothing the Mac acts on. Input prompts, agents outside tmux and a locked Mac
+get greyed buttons with the reason underneath. `docs/agents-acceptance.md` is the hardware checklist.
+
 ## Testing without the board
 
 Two ways, in increasing fidelity.
@@ -440,7 +454,7 @@ Two ways, in increasing fidelity.
 **Browser mock.** Start the bridge and open its address. `preview.html` renders
 the same 240×280 layout and polls the same endpoint the device will. Good for
 iterating on `internal/cards` — edit, rebuild, reload, see it. It is a JavaScript
-reimplementation of the layout, so it tells you whether the *data* reads well,
+reimplementation of the layout (it also draws the Agents grid, and the prompt screen when you click an orange tile; its buttons never answer), so it tells you whether the *data* reads well,
 not whether the firmware draws it correctly.
 
 **Desktop simulator.** `firmware/sim/` compiles the actual firmware sources —
