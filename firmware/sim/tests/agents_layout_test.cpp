@@ -2,58 +2,32 @@
 #include "agents_layout.h"
 
 int main() {
-  // Four or more: two columns of 108 x 96, rows 102 px apart.
-  LayoutRect r = agentsTileRect(0, 4, 0);
+  // Tiles: two columns, rows 102 px apart.
+  LayoutRect r = agentsTileRect(0, 0);
   CHECK(r.x == 9 && r.y == 54 && r.w == 108 && r.h == 96);
-  r = agentsTileRect(1, 4, 0);
+  r = agentsTileRect(1, 0);
   CHECK(r.x == 123 && r.y == 54 && r.w == 108 && r.h == 96);
-  r = agentsTileRect(2, 4, 0);
+  r = agentsTileRect(2, 0);
   CHECK(r.x == 9 && r.y == 156);
-  r = agentsTileRect(3, 4, 0);
+  r = agentsTileRect(3, 0);
   CHECK(r.x == 123 && r.y == 156);
-  CHECK(agentsTileRect(2, 4, 60).y == 96);
+  CHECK(agentsTileRect(2, 60).y == 96);
   // Two rows fill the view, so four tiles never scroll, and it ends clear of
   // the page dots.
   CHECK(agentsContentH(4) <= AGENTS_VIEW_H);
   CHECK(AGENTS_VIEW_Y + AGENTS_VIEW_H <= 254);
 
-  // One agent fills the view.
-  r = agentsTileRect(0, 1, 0);
-  CHECK(r.x == 9 && r.y == 54 && r.w == 222 && r.h == AGENTS_VIEW_H);
-  // Two share it side by side, full height.
-  r = agentsTileRect(0, 2, 0);
-  CHECK(r.x == 9 && r.y == 54 && r.w == 108 && r.h == AGENTS_VIEW_H);
-  r = agentsTileRect(1, 2, 0);
-  CHECK(r.x == 123 && r.y == 54 && r.w == 108 && r.h == AGENTS_VIEW_H);
-  // An odd last one spans both columns.
-  r = agentsTileRect(2, 3, 0);
-  CHECK(r.x == 9 && r.y == 156 && r.w == 222 && r.h == 96);
-  CHECK(agentsTileRect(1, 3, 0).w == 108);
-  r = agentsTileRect(4, 5, 0);
-  CHECK(r.x == 9 && r.y == 258 && r.w == 222);
-  CHECK(agentsTileRect(4, 6, 0).w == 108);
-  // Every layout stays inside the view's width.
-  for (uint8_t n = 1; n <= 8; n++)
-    for (uint8_t i = 0; i < n; i++) {
-      r = agentsTileRect(i, n, 0);
-      CHECK(r.x >= 9 && r.x + r.w <= 231);
-    }
-
   CHECK(agentsContentH(0) == 0);
-  CHECK(agentsContentH(1) == AGENTS_VIEW_H);
-  CHECK(agentsContentH(2) == AGENTS_VIEW_H);
+  CHECK(agentsContentH(1) == 96);
+  CHECK(agentsContentH(2) == 96);
   CHECK(agentsContentH(3) == 198);
   CHECK(agentsContentH(5) == 300);
 
-  CHECK(agentsTileAt(200, 200, 1, 0) == 0);   // the lone tile, anywhere in the view
-  CHECK(agentsTileAt(60, 240, 2, 0) == 0);    // full height
-  CHECK(agentsTileAt(200, 240, 2, 0) == 1);
-  CHECK(agentsTileAt(200, 200, 3, 0) == 2);   // the spanning tile's right half
   CHECK(agentsTileAt(170, 200, 4, 0) == 3);
   CHECK(agentsTileAt(60, 100, 4, 0) == 0);
   CHECK(agentsTileAt(119, 100, 4, 0) == -1);  // the column gap
   CHECK(agentsTileAt(60, 152, 4, 0) == -1);   // the row gap
-  CHECK(agentsTileAt(170, 200, 0, 0) == -1);  // no tiles
+  CHECK(agentsTileAt(170, 200, 3, 0) == -1);  // no tile 3
   CHECK(agentsTileAt(60, 50, 4, 60) == -1);   // above the view
   CHECK(agentsTileAt(60, 254, 6, 0) == -1);   // below the view
   CHECK(agentsTileAt(60, 100, 4, 60) == 2);   // scrolled: row 2 now sits at y 96

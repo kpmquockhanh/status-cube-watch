@@ -127,9 +127,7 @@
   /* A dual card's s2 (the full reason a limits read failed) is not drawn on
      the device; the mock shows it here, outside the panel. */
   /* The Agents card (a card with `a`): the firmware's grid (agents_layout.h:
-     caption at y 44, view 54..254, tiles sized by count: one fills the view, two
-     share it at full height, more go two to a row of 108x96 with an odd last one
-     spanning both columns) and, on a click
+     caption at y 44, view 54..254, two columns of 108x96 tiles) and, on a click
      on an orange tile, its prompt screen, drawn from `q` the way the full
      variant has it. The browser never answers: the buttons stay grey. Colours
      and copy mirror ui.cpp; the critter is a plain block. */
@@ -140,16 +138,16 @@
   .ag-view { position: absolute; top: 54px; left: 0; width: 240px; height: 200px; overflow-y: auto; scrollbar-width: none; }
   .ag-view::-webkit-scrollbar { display: none; }
   .ag-grid { position: relative; }
-  /* Tiles are placed by tileRect (agentsTileRect in agents_layout.h), square, with the
+  /* Tiles are 108 x 96 (TILE_W/TILE_H in agents_layout.h), square, with the
      context gauge round the edge (drawRing in ui.cpp, agents-deck's makeRing):
      a 2 px track, `x` % of it filled clockwise from the top centre. The
      critter is a plain block and its hat a band in the hat's colour (`h` & 7,
      HAT_COLORS below); `s` puts a mini critter and its text top left. */
-  .tile { position: absolute; box-sizing: border-box; background: var(--panel); overflow: hidden; text-align: center; }
+  .tile { position: absolute; width: 108px; height: 96px; box-sizing: border-box; background: var(--panel); overflow: hidden; text-align: center; }
   .tile.wait { background: var(--accent); color: var(--bg); cursor: pointer; }
   .tile.exit { background: var(--empty); }
   .tile.hungry { background: repeating-linear-gradient(135deg, var(--panel) 0 6px, #3a1a0a 6px 8px); }
-  .tile .gauge { position: absolute; inset: 0; width: 100%; height: 100%; }
+  .tile .gauge { position: absolute; inset: 0; width: 108px; height: 96px; }
   .tile .gauge path { fill: none; stroke-width: 2; stroke-linejoin: miter; }
   .tile .gauge .rt { stroke: #2a2925; }
   .tile .gauge .rf { stroke: var(--accent); }
@@ -160,15 +158,13 @@
   .tile .subs { position: absolute; left: 6px; top: 6px; display: flex; align-items: flex-end; gap: 2px; font-size: 11px; line-height: 10px; color: var(--dim); }
   .tile .subs i { width: 14px; height: 7px; background: var(--dim); }
   .tile .n, .tile .l { position: absolute; left: 4px; right: 4px; font-family: "Share Tech Mono", ui-monospace, Menlo, monospace; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
-  .tile .n { font-size: 13px; line-height: 16px; }
-  .tile .l { font-size: 11px; line-height: 14px; color: var(--dim); }
-  .tile.big .n { font-family: "Roboto Mono", ui-monospace, Menlo, monospace; font-weight: 700; font-size: 18px; line-height: 22px; }
-  .tile.big .l { font-size: 13px; line-height: 16px; }
+  .tile .n { top: 60px; font-size: 13px; line-height: 16px; }
+  .tile .l { top: 77px; font-size: 11px; line-height: 14px; color: var(--dim); }
   .tile.idle .n, .tile.exit .n, .tile.start .n { color: var(--dim); }
   .tile.hungry .n { color: var(--ink); }
   .tile.hungry .l, .tile.err .l, .tile.hungry .subs, .tile.err .subs { color: var(--accent); }
   .tile.wait .l, .tile.wait .subs { color: var(--bg); }
-  .crit { position: absolute; width: 42px; height: 18px; background: var(--dim); transform-origin: 0 0; }
+  .crit { position: absolute; left: 33px; top: 27px; width: 42px; height: 18px; background: var(--dim); }
   .crit::before, .crit::after { content: ""; position: absolute; top: 4px; width: 3px; height: 6px; background: var(--panel); }
   .crit::before { left: 12px; }
   .crit::after { right: 12px; }
@@ -259,26 +255,13 @@ const cards = () => (data.cards.length ? data.cards : [WAITING]);
 // keeps drawing whatever the bridge sent.
 const esc = (x) => String(x ?? '').replace(/[&<>"]/g, (ch) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' }[ch]));
 let promptAgent = null; // the tile whose prompt screen is open
-// Where tile i of n sits in the grid (agentsTileRect in agents_layout.h).
-function tileRect(i, n) {
-  const rowH = n <= 2 ? 200 : 96;
-  const spans = n % 2 === 1 && i === n - 1;
-  return { x: spans || !(i & 1) ? 9 : 123, y: Math.floor(i / 2) * (rowH + 6), w: spans ? 222 : 108, h: rowH };
-}
-// How a tile of this size sets its critter and text (tileLook in ui.cpp):
-// px a cell, then body bottom -> name centre -> meta centre -> its bottom.
-function tileLook(r) {
-  if (r.h < 150) return { c: 3, big: false, gaps: [5, 16, 8], nh: 16, lh: 14 };
-  if (r.w < 150) return { c: 5, big: false, gaps: [10, 18, 8], nh: 16, lh: 14 };
-  return { c: 6, big: true, gaps: [16, 24, 9], nh: 22, lh: 16 };
-}
+const RING_D = 'M54 1H107V95H1V1Z'; // the gauge's path: from the top centre, clockwise
 
 function paintAgents(card, color) {
   const tiles = card.a.filter((t) => t && typeof t === 'object');
   agcap.textContent = card.s1 || '';
   agcap.style.color = color;
-  const n = tiles.length;
-  aggrid.style.height = `${n ? Math.ceil(n / 2) * ((n <= 2 ? 200 : 96) + 6) - 6 : 0}px`;
+  aggrid.style.height = `${tiles.length ? Math.ceil(tiles.length / 2) * 102 - 6 : 0}px`;
   aggrid.innerHTML = tiles.map((t, i) => {
     const k = ['run', 'wait', 'idle', 'err', 'exit', 'start'].includes(t.k) ? t.k : 'idle';
     const x = Math.max(0, Math.min(100, Number(t.x) || 0));
@@ -286,18 +269,11 @@ function paintAgents(card, color) {
     const hungry = k === 'idle' && (t.u || t.p === 'hungry');
     const hat = Number.isInteger(t.h) && t.h >= 0 && t.h < 104
       ? `<span class="hat" style="background:${HAT_COLORS[t.h % 8]}"></span>` : '';
-    const r = tileRect(i, n), lk = tileLook(r), c = lk.c;
-    // The critter, name and meta line as one block, centred in the tile.
-    const critY = Math.round((r.h - (19.5 * c + lk.gaps[0] + lk.gaps[1] + lk.gaps[2])) / 2 + 6.5 * c);
-    const nameY = critY + 13 * c + lk.gaps[0], metaY = nameY + lk.gaps[1];
-    const ring = `M${r.w / 2} 1H${r.w - 1}V${r.h - 1}H1V1Z`; // the gauge: from the top centre, clockwise
-    return `<div class="tile ${k}${hungry ? ' hungry' : ''}${lk.big ? ' big' : ''}" data-id="${esc(t.i)}" style="left:${r.x}px;top:${r.y}px;width:${r.w}px;height:${r.h}px">` +
+    return `<div class="tile ${k}${hungry ? ' hungry' : ''}" data-id="${esc(t.i)}" style="left:${i & 1 ? 123 : 9}px;top:${Math.floor(i / 2) * 102}px">` +
       `<span class="chip"></span>${typeof t.s === 'string' ? `<span class="subs"><i></i>${esc(t.s)}</span>` : ''}` +
-      `<div class="n" style="top:${nameY - lk.nh / 2}px">${esc(t.n)}</div>` +
-      `<div class="crit" style="left:${r.w / 2 - 7 * c}px;top:${critY + c}px;transform:scale(${c / 3})">${hat}</div>` +
-      `<div class="l" style="top:${metaY - lk.lh / 2}px">${esc(t.l)}</div>` +
-      `<svg class="gauge" viewBox="0 0 ${r.w} ${r.h}"><path class="rt" d="${ring}"/>` +
-      `<path class="rf" d="${ring}" pathLength="100" stroke-dasharray="${x} 100"/></svg></div>`;
+      `<div class="n">${esc(t.n)}</div><div class="crit">${hat}</div><div class="l">${esc(t.l)}</div>` +
+      `<svg class="gauge" viewBox="0 0 108 96"><path class="rt" d="${RING_D}"/>` +
+      `<path class="rf" d="${RING_D}" pathLength="100" stroke-dasharray="${x} 100"/></svg></div>`;
   }).join('');
   const open = promptAgent && tiles.find((t) => String(t.i) === promptAgent && t.k === 'wait');
   if (promptAgent && !open) promptAgent = null; // gone or no longer waiting: close, as AgentView does

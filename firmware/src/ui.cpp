@@ -1011,9 +1011,11 @@ constexpr uint32_t CHIP_RGB = 0xC98B6B;     // the Claude chip (agents-deck's ch
 constexpr uint32_t RING_TRACK_RGB = 0x2A2925;  // the gauge's track (app.css --ring-track)
 constexpr uint8_t WAIT_TRACK_ALPHA = 64;    // on orange: black at 25%
 constexpr int RING_W = 2;                   // the gauge's stroke
+constexpr int TILE_CELL = 3;                // px per critter cell on a tile: the body is 42 px, ~40% of the tile
 constexpr int TILE_CRIT_X = 7;              // the body (cells 0..14) is centred: cell 0 at mid - 7 cells
-constexpr float TILE_HAT_CELLS = 6.5f;      // hats reach this far above cell 0
-constexpr int TILE_BODY_CELLS = 13;         // cell 0 to the body's bottom
+constexpr int TILE_CRIT_Y = 24;             // cell 0 this far below the tile's top (hats reach -6.5)
+constexpr int TILE_NAME_Y = 68;             // centres of the name, the meta line
+constexpr int TILE_META_Y = 84;
 constexpr int TILE_TEXT_PAD = 4;           // 100 px: the bridge's 16-character line at 6 px a letter
 constexpr int CHIP = 6, CHIP_INSET = 6;
 constexpr int SUBS_X = 6, SUBS_Y = 7;       // the mini critter's cell (0, 0), 1 px a cell
@@ -1226,23 +1228,7 @@ void drawSubs(LovyanGFX *g, const AgentTile &t, const LayoutRect &r, uint32_t no
   g->drawString(t.subs, ox + SUBS_W + 2, oy + SUBS_BOTTOM + 1);
 }
 
-// How a tile of this size sets its critter and text (agents_layout.h sizes the
-// tiles by agent count). A 108 x 96 tile: 3 px a cell, the body 42 px, ~40% of
-// it. A full-height tile grows the critter; the lone full-view one also sets
-// the name in Roboto Mono and the meta line a size up.
-struct TileLook {
-  int cell;                       // px per critter cell
-  Vlw *nameFont, *metaFont;
-  int nameGap, metaGap, metaHalf;  // body bottom -> name centre -> meta centre -> its bottom
-};
-TileLook tileLook(const LayoutRect &r) {
-  if (r.h < 150) return TileLook{3, &V_RM13, &V_RM11, 5, 16, 8};
-  if (r.w < 150) return TileLook{5, &V_RM13, &V_RM11, 10, 18, 8};
-  return TileLook{6, &V_RB18, &V_RM13, 16, 24, 9};
-}
-
 void drawTile(LovyanGFX *g, const AgentTile &t, const LayoutRect &r, uint32_t now) {
-  const TileLook look = tileLook(r);
   const bool wait = t.kind == AgentKind::Wait, hungry = tileHungry(t);
   const bool quiet = (t.kind == AgentKind::Idle && !hungry) || t.kind == AgentKind::Exit || t.kind == AgentKind::Start;
   const uint32_t bgRgb = wait ? ACCENT_RGB : t.kind == AgentKind::Exit ? EMPTY_RGB : PANEL_RGB;
@@ -1258,25 +1244,26 @@ void drawTile(LovyanGFX *g, const AgentTile &t, const LayoutRect &r, uint32_t no
                         : t.kind == AgentKind::Run || hungry          ? ACCENT_RGB
                         : t.kind == AgentKind::Err                    ? INK_RGB
                                                                       : DIM_RGB;
-  // The critter, hat, name and meta line as one block, centred in the tile.
-  const int c = look.cell;
-  const float block = (TILE_HAT_CELLS + TILE_BODY_CELLS) * c + look.nameGap + look.metaGap + look.metaHalf;
-  const int critY = (int)lroundf(r.y + (r.h - block) / 2 + TILE_HAT_CELLS * c);
-  const int nameY = critY + TILE_BODY_CELLS * c + look.nameGap, metaY = nameY + look.metaGap;
-  drawCritter(g, poseFromName(t.pose), hatFromCode(t.hat), now, r.x + r.w / 2 - TILE_CRIT_X * c, critY, c,
-              CritterInks{body, bgRgb});
+  drawCritter(g, poseFromName(t.pose), hatFromCode(t.hat), now, r.x + r.w / 2 - TILE_CRIT_X * TILE_CELL,
+              r.y + TILE_CRIT_Y, TILE_CELL, CritterInks{body, bgRgb});
 
   // The name and the meta line in Share Tech Mono, as the web board sets
   // them, each cut with "..." to the tile.
   const uint16_t ink = wait ? BG : quiet ? DIM : INK;
   const uint16_t meta = wait ? BG : hungry || t.kind == AgentKind::Err ? ACCENT : DIM;
   const int textW = r.w - 2 * TILE_TEXT_PAD, cx = r.x + r.w / 2;
-  drawLine(g, *look.nameFont, t.name, cx, nameY, textW, ink, bg, middle_center);
-  drawLine(g, *look.metaFont, t.line, cx, metaY, textW, meta, bg, middle_center);
+  drawLine(g, V_RM13, t.name, cx, r.y + TILE_NAME_Y, textW, ink, bg, middle_center);
+  drawLine(g, V_RM11, t.line, cx, r.y + TILE_META_Y, textW, meta, bg, middle_center);
   if (t.hasSubs) drawSubs(g, t, r, now, body, bgRgb, meta);
 
   drawRing(g, r, t.ctx, wait ? blend565(BG_RGB, ACCENT_RGB, WAIT_TRACK_ALPHA) : to565(RING_TRACK_RGB),
            wait ? BG : ACCENT);
+}
+
+// A slot with no agent, so the grid always shows whole rows and a screenful.
+void drawEmptySlot(LovyanGFX *g, const LayoutRect &r) {
+  g->fillRect(r.x, r.y, r.w, r.h, EMPTY);
+  g->drawRect(r.x, r.y, r.w, r.h, PANEL);
 }
 
 constexpr int AGENTS_CAPTION_Y = 44;
@@ -1289,11 +1276,17 @@ void drawAgentsCard(LovyanGFX *g, const Card &card, const AgentsData &a, int16_t
   // Animation time is the clock: main.cpp decides when frames happen, and each
   // one shows the critters and stripes as they are now.
   const uint32_t now = millis();
+  // Whole rows, at least a screenful (two rows): empty slots fill the rest.
+  const uint8_t slots = a.nTiles < 4 ? 4 : (uint8_t)((a.nTiles + 1) & ~1);
   g->setClipRect(0, AGENTS_VIEW_Y, LCD_WIDTH, AGENTS_VIEW_H);
-  for (uint8_t i = 0; i < a.nTiles; i++) {
-    const LayoutRect r = agentsTileRect(i, a.nTiles, scroll);
+  for (uint8_t i = 0; i < slots; i++) {
+    const LayoutRect r = agentsTileRect(i, scroll);
     if (r.y + r.h <= AGENTS_VIEW_Y || r.y >= AGENTS_VIEW_Y + AGENTS_VIEW_H) continue;
-    drawTile(g, a.tiles[i], r, now);
+    if (i < a.nTiles) {
+      drawTile(g, a.tiles[i], r, now);
+    } else {
+      drawEmptySlot(g, r);
+    }
   }
   g->clearClipRect();
   drawScrollBar(g, TILE_COL1_X + TILE_W + 2, AGENTS_VIEW_Y, AGENTS_VIEW_H, agentsContentH(a.nTiles), scroll, DIM);
