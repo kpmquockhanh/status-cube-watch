@@ -1007,9 +1007,14 @@ struct CritterInks {
 // The critter for `pose` at `ms` with its cell (0, 0) at (ox, oy), `cell` px a
 // cell. Edges are rounded to whole pixels, and every shape keeps at least one.
 void drawCritter(LovyanGFX *g, Pose pose, uint32_t ms, float ox, float oy, int cell, const CritterInks &k) {
-  static CritterRect r[CRITTER_MAX_RECTS];  // 1.3 KB: off the loop's stack
-  const size_t n = critterShapes(pose, ms, r, CRITTER_MAX_RECTS);
+  static CritterRect r[CRITTER_MAX_RECTS];  // 2.5 KB: off the loop's stack
+  // No hats yet, and every shape at full ink: hats and alpha blending come
+  // with the tile restyle.
+  const size_t n = critterShapes(pose, HatId{-1, -1}, ms, r, CRITTER_MAX_RECTS);
   for (size_t i = 0; i < n; i++) {
+    if (r[i].ink != CritterInk::Body && r[i].ink != CritterInk::Cut && r[i].ink != CritterInk::Flag &&
+        r[i].ink != CritterInk::Accent)
+      continue;
     const int x0 = (int)lroundf(ox + r[i].x * cell), y0 = (int)lroundf(oy + r[i].y * cell);
     int x1 = (int)lroundf(ox + (r[i].x + r[i].w) * cell), y1 = (int)lroundf(oy + (r[i].y + r[i].h) * cell);
     if (x1 <= x0) x1 = x0 + 1;

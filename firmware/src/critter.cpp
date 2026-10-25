@@ -1,11 +1,15 @@
 // Adapted from agents-deck (github.com/brushknight/agents-deck) @ 699bba8, firmware/devices/ws169-panel/src/critter.c.
-// Only Claude's flat block is kept (no onigiri, hats, celebrate pose or LVGL).
-// Where the original draws with opacity (the "?" blink, the fading dots and
-// z's) every shape is drawn at full ink: a CritterRect has no alpha. Stroked
-// eyes and the font "z" become short runs of small squares in Cut/Body ink.
+// Claude's flat block only (no onigiri, no LVGL); poses, hats (hat_art.cpp),
+// the celebrate pose and every opacity of the original are kept, an opacity as
+// the shape's alpha. The bubble beside the critter is always drawn (the
+// original's `bubble` flag is on for every tile here). Stroked eyes and the
+// font "z" become short runs of small squares in Cut/Body ink; a hat row's run
+// of one colour is one rectangle (the same pixels as the original's cells).
 #include "critter.h"
 
 #include <string.h>
+
+#include "hat_art.h"
 
 namespace {
 
@@ -13,6 +17,7 @@ namespace {
 // critter move or scale everything drawn through it.
 struct Pen {
   float sx, sy, tx, ty;
+  uint8_t opa;  // the shapes' alpha, as the original's pen opacity
 };
 
 struct Out {
@@ -22,13 +27,19 @@ struct Out {
 };
 
 void put(Out &o, const Pen &p, float x, float y, float w, float h, CritterInk ink) {
-  if (o.n >= o.cap) return;
+  if (o.n >= o.cap || p.opa == 0) return;
   CritterRect &r = o.r[o.n++];
   r.x = p.tx + p.sx * x;
   r.y = p.ty + p.sy * y;
   r.w = p.sx * w;
   r.h = p.sy * h;
   r.ink = ink;
+  r.alpha = p.opa;
+}
+
+Pen withOpa(Pen p, uint8_t opa) {
+  p.opa = opa;
+  return p;
 }
 
 Pen moved(Pen p, float dx, float dy) {
@@ -38,7 +49,7 @@ Pen moved(Pen p, float dx, float dy) {
 }
 
 // Where we are in a cycle of `period` ms, 0..1.
-float phase(const Out &o, uint32_t period) { return (float)(o.ms % period) / (float)period; }
+float phase(const Out &o, uint32_t period, uint32_t delay = 0) { return (float)((o.ms + delay) % period) / (float)period; }
 
 bool laOn(const Out &o, uint32_t period) { return phase(o, period) < 0.5f; }
 
@@ -78,7 +89,9 @@ void pixels(Out &o, const Pen &p, const char *const *rows, int n, float x0, floa
       if (rows[r][c] == '#') put(o, p, x0 + c * w, y0 + r * h, w, h, k);
 }
 
-void dots(Out &o, const Pen &p) {
+void dots(Out &o, const Pen &p0) {
+  static const uint8_t steps[3] = {51, 153, 255};  // .2 -> 1, in three steps
+  const Pen p = withOpa(p0, (uint8_t)(p0.opa * steps[(int)(phase(o, 1200) * 3)] / 255));
   put(o, p, 14.6f, -2.6f, 0.9f, 0.9f, CritterInk::Body);
   put(o, p, 15.9f, -2.6f, 0.9f, 0.9f, CritterInk::Body);
   put(o, p, 17.2f, -2.6f, 0.8f, 0.9f, CritterInk::Body);
@@ -110,7 +123,73 @@ void zed(Out &o, const Pen &p, float x, float y, float s) {
   put(o, p, x, y + s - t, s, t, CritterInk::Body);
 }
 
-enum class Face : uint8_t { Open2, Open1, Glance, Scan, Web, Hungry, Err, Compact, Exit, Shut };
+enum class Face : uint8_t { Open2, Open1, Glance, Scan, Web, Hungry, Celebrate, Err, Compact, Exit, Shut };
+
+// ---- hats -------------------------------------------------------------------
+
+const struct {
+  uint32_t main, shade;
+} HAT_COLORS[8] = {{0x4FB3A6, 0x2F7F75}, {0x6F8FD8, 0x4A63A3}, {0xE8B94A, 0xB08429}, {0x6DBE6A, 0x468A44},
+                   {0xA68BD8, 0x7660A6}, {0xE58BB0, 0xB05E80}, {0x5EC4D6, 0x3A8E9C}, {0xE8E4DC, 0xA8A39A}};
+
+bool hatInk(char k, CritterInk *ink) {
+  switch (k) {
+    case 'a': *ink = CritterInk::HatMain; return true;
+    case 'b': *ink = CritterInk::HatShade; return true;
+    case 'c': *ink = CritterInk::HatHighlight; return true;
+    case 'd': *ink = CritterInk::HatDark; return true;
+    default: return false;
+  }
+}
+
+void hatFrame(Out &o, const Pen &p, const HatFrame &f) {
+  for (int r = 0; r < f.nrows; r++) {
+    const char *row = f.rows[r];
+    for (int c = 0; row[c];) {
+      CritterInk ink;
+      if (!hatInk(row[c], &ink)) {
+        c++;
+        continue;
+      }
+      int e = c + 1;
+      while (row[e] == row[c]) e++;
+      put(o, p, f.x + c, f.top + r, (float)(e - c), 1, ink);
+      c = e;
+    }
+  }
+  for (int i = 0; i < f.nextras; i++) {
+    CritterInk ink;
+    if (!hatInk(f.extras[i].key, &ink)) ink = CritterInk::HatDark;  // as the original: anything else is near-black
+    put(o, p, f.extras[i].x, f.extras[i].y, 1, 1, ink);
+  }
+}
+
+void hat(Out &o, const Pen &p, HatId id, bool faded, bool animate) {
+  if (id.shape < 0 || id.shape >= HAT_ART_COUNT) return;
+  const HatArt &art = HAT_ART[id.shape];
+  const Pen q = faded ? withOpa(p, (uint8_t)(p.opa * 45 / 100)) : p;
+  const HatFrame &f = animate ? art.frames[(o.ms / art.ms) % art.nframes] : art.still;
+  hatFrame(o, q, f);
+  if (strcmp(art.name, "headphones") == 0) {
+    put(o, q, 0, 0, 1, 2, CritterInk::HatShade);
+    put(o, q, 13, 0, 1, 2, CritterInk::HatShade);
+  }
+}
+
+bool working(Pose pose) {
+  switch (pose) {
+    case Pose::Run:
+    case Pose::Think:
+    case Pose::Read:
+    case Pose::Write:
+    case Pose::Bash:
+    case Pose::Web:
+    case Pose::Plan:
+    case Pose::Delegate:
+    case Pose::Compact: return true;
+    default: return false;
+  }
+}
 
 }  // namespace
 
@@ -121,16 +200,28 @@ Pose poseFromName(const char *p) {
   } NAMES[] = {{"idle", Pose::Idle},   {"start", Pose::Start},       {"run", Pose::Run},         {"think", Pose::Think},
                {"read", Pose::Read},   {"write", Pose::Write},       {"bash", Pose::Bash},       {"web", Pose::Web},
                {"plan", Pose::Plan},   {"delegate", Pose::Delegate}, {"compact", Pose::Compact}, {"wait", Pose::Wait},
-               {"err", Pose::Err},     {"exit", Pose::Exit},         {"hungry", Pose::Hungry}};
+               {"err", Pose::Err},     {"exit", Pose::Exit},         {"hungry", Pose::Hungry},
+               {"celebrate", Pose::Celebrate}};
   if (!p) return Pose::Idle;
   for (size_t i = 0; i < sizeof NAMES / sizeof NAMES[0]; i++)
     if (strcmp(p, NAMES[i].name) == 0) return NAMES[i].pose;
   return Pose::Idle;
 }
 
-size_t critterShapes(Pose pose, uint32_t ms, CritterRect *out, size_t cap) {
+HatId hatFromCode(int code) {
+  if (code < 0 || code >= HAT_ART_COUNT * 8) return HatId{-1, -1};
+  return HatId{(int8_t)(code / 8), (int8_t)(code % 8)};
+}
+
+uint32_t hatMainRgb(int8_t color) { return HAT_COLORS[color >= 0 && color < 8 ? color : 7].main; }
+uint32_t hatShadeRgb(int8_t color) { return HAT_COLORS[color >= 0 && color < 8 ? color : 7].shade; }
+uint32_t hatHighlightRgb() { return 0xF7F4EC; }
+uint32_t hatDarkRgb() { return 0x0A0A0A; }
+
+size_t critterShapes(Pose pose, HatId hatId, uint32_t ms, CritterRect *out, size_t cap) {
   Out o = {out, cap, 0, ms};
-  const Pen root = {1, 1, 0, 0};
+  const Pen root = {1, 1, 0, 0, 255};
+  const bool animateHat = working(pose);
   if (pose == Pose::Write) pose = Pose::Bash;  // writing looks like bash, as in the original
 
   Pen g = root;           // the body group: bob and squash move it
@@ -158,6 +249,12 @@ size_t critterShapes(Pose pose, uint32_t ms, CritterRect *out, size_t cap) {
       if (!laOn(o, 500)) g = moved(g, 0, -0.5f);
       break;
     case Pose::Hungry: face = Face::Hungry; break;
+    case Pose::Celebrate:
+      face = Face::Celebrate;
+      al = 0;
+      ar = 0;
+      if (!laOn(o, 400)) g = moved(g, 0, -1.5f);
+      break;
     case Pose::Wait: face = Face::Open1; break;
     case Pose::Err: face = Face::Err; al = 0; ar = 0; break;
     case Pose::Start: face = Face::Open2; break;
@@ -208,6 +305,13 @@ size_t critterShapes(Pose pose, uint32_t ms, CritterRect *out, size_t cap) {
       put(o, f, 6.2f, open ? 4.2f : 4.8f, 2.2f, open ? 1.6f : 0.5f, CritterInk::Cut);
       break;
     }
+    case Face::Celebrate:  // "^ ^"
+      for (int i = 0; i < 2; i++) {
+        float ex = i ? 9.5f : 4.5f;
+        line(o, f, ex - 1, 3.3f, ex, 2.2f, 3);
+        line(o, f, ex, 2.2f, ex + 1, 3.3f, 3);
+      }
+      break;
     case Face::Err:  // two crossed strokes per eye, an "x"
       for (int i = 0; i < 2; i++) {
         float ex = i ? 8.8f : 3.8f;
@@ -231,8 +335,16 @@ size_t critterShapes(Pose pose, uint32_t ms, CritterRect *out, size_t cap) {
       break;
   }
 
-  // Feet, outside the body group (the bob does not move them).
-  if (!noFeet) legs(o, root, step == 0 || laOn(o, step) ? LEGS_A : LEGS_B);
+  hat(o, g, hatId, pose == Pose::Exit, animateHat);
+  if (pose == Pose::Celebrate) {  // the finish flag in the raised hand, waving
+    put(o, g, 14, -4, 1, 6, CritterInk::Flag);
+    int ph = laOn(o, 500) ? 0 : 1;
+    for (int cx = 0; cx < 3; cx++)
+      for (int cy = 0; cy < 2; cy++) put(o, g, 15 + cx, -4 + cy, 1, 1, (cx + cy + ph) % 2 ? CritterInk::Cut : CritterInk::Flag);
+  }
+
+  // Feet, outside the body group (the bob does not move them; the hop does).
+  if (!noFeet) legs(o, pose == Pose::Celebrate ? g : root, step == 0 || laOn(o, step) ? LEGS_A : LEGS_B);
 
   // The prop beside it says what it is doing.
   const Pen b = root;
@@ -277,13 +389,19 @@ size_t critterShapes(Pose pose, uint32_t ms, CritterRect *out, size_t cap) {
       pixels(o, laOn(o, 600) ? b : moved(b, 0, 0.6f), r, 5, 14.3f, 0.75f, 0.75f, -4.2f, CritterInk::Body);
       break;
     }
+    case Pose::Celebrate:  // two twinkles
+      for (int i = 0; i < 2; i++) {
+        const Pen s = phase(o, 600, i ? 400 : 0) >= 0.34f ? withOpa(b, 115) : b;
+        float sx = i ? 18.2f : 16.4f, sy = i ? -4.4f : -6.2f;
+        put(o, s, sx - 0.5f, sy, 1.5f, 0.5f, CritterInk::Body);
+        put(o, s, sx, sy - 0.5f, 0.5f, 1.5f, CritterInk::Body);
+      }
+      break;
     case Pose::Run:
     case Pose::Start: dots(o, b); break;
-    case Pose::Wait: {
+    case Pose::Wait: {  // a blinking "?"
       static const char *const r[] = {"###", "..#", ".#.", "...", ".#."};
-      // The original blinks this "?" from full to 15% opacity; here it stays
-      // on, so a waiting tile is still.
-      pixels(o, b, r, 5, 14.5f, 1.1f, 0.9f, -4, CritterInk::Body);
+      pixels(o, phase(o, 1000) >= 0.6f ? withOpa(b, 38) : b, r, 5, 14.5f, 1.1f, 0.9f, -4, CritterInk::Body);
       break;
     }
     case Pose::Err: {
@@ -302,7 +420,9 @@ size_t critterShapes(Pose pose, uint32_t ms, CritterRect *out, size_t cap) {
     case Pose::Exit: break;
     default: {  // asleep: two z's drifting up
       static const float dy[4] = {0, -0.3f, -0.6f, -0.3f};
-      Pen z = moved(b, 0, dy[(int)(phase(o, 2400) * 4)]);
+      static const uint8_t op[4] = {230, 166, 102, 166};
+      const int k = (int)(phase(o, 2400) * 4);
+      const Pen z = withOpa(moved(b, 0, dy[k]), op[k]);
       zed(o, z, 14.8f, -1.8f, 1.6f);
       zed(o, z, 16.6f, -3.4f, 1.2f);
     }
