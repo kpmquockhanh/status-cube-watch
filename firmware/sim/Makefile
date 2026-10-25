@@ -21,13 +21,13 @@ LDFLAGS  := $(shell pkg-config --libs sdl2) -lpthread
 
 # The firmware sources under test, plus the desktop stand-ins for the two
 # layers that touch hardware (WiFi and I2C).
-SRCS := ../src/main.cpp ../src/ui.cpp ../src/payload.cpp ../src/gesture.cpp ../src/editor_layout.cpp ../src/dev_editor.cpp ../src/settings_json.cpp \
+SRCS := ../src/main.cpp ../src/ui.cpp ../src/payload.cpp ../src/gesture.cpp ../src/editor_layout.cpp ../src/dev_editor.cpp ../src/settings_json.cpp ../src/critter.cpp \
         net_sim.cpp touch_sim.cpp settings_sim.cpp portal_sim.cpp ota_sim.cpp battery_sim.cpp ble_sim.cpp imu_sim.cpp buzzer_sim.cpp sdl_main.cpp
 
 # The headless frame grab shares ui.cpp and payload.cpp but brings its own
 # entry point, and needs no network or touch.
 SHOT     := build/cube-shot
-SHOT_OBJ := build/shot.o build/ui.o build/payload.o build/editor_layout.o build/dev_editor.o build/settings_sim.o
+SHOT_OBJ := build/shot.o build/ui.o build/payload.o build/editor_layout.o build/dev_editor.o build/critter.o build/settings_sim.o
 LGFX_CPP := $(wildcard $(LGFX)/lgfx/v1/*.cpp)
 LGFX_C   := $(wildcard $(LGFX)/lgfx/Fonts/efont/*.c) \
             $(wildcard $(LGFX)/lgfx/Fonts/IPA/*.c) \
@@ -86,7 +86,7 @@ shot: $(SHOT)
 # Arduino.h and display.h.
 BENCH      := build/cube-bench
 BENCH_SRCS := ../src/main.cpp ../src/ui.cpp ../src/payload.cpp ../src/gesture.cpp \
-              ../src/editor_layout.cpp ../src/dev_editor.cpp ../src/settings_json.cpp \
+              ../src/editor_layout.cpp ../src/dev_editor.cpp ../src/settings_json.cpp ../src/critter.cpp \
               settings_sim.cpp portal_sim.cpp ota_sim.cpp bench.cpp
 BENCH_OBJ  := $(addprefix build/bench/,$(notdir $(BENCH_SRCS:.cpp=.o)))
 BENCH_RUNS ?= desk linked browse editor sleep volume nav ride
@@ -116,9 +116,10 @@ TESTS := build/portal_util_test build/gesture_test build/deck_test \
          build/ble_bonds_test build/age_label_test build/cpu_policy_test build/readings_key_test \
          build/ble_conn_test build/touch_gate_test build/melody_test \
          build/volume_frame_test build/volume_slider_test build/unlock_prompt_test \
-         build/nav_frame_test build/nav_session_test build/nav_pan_test build/utf8_fit_test build/payload_test
+         build/nav_frame_test build/nav_session_test build/nav_pan_test build/utf8_fit_test build/payload_test build/critter_test
 
 build/payload_test: ../src/payload.cpp
+build/critter_test: ../src/critter.cpp
 build/gesture_test: ../src/gesture.cpp
 build/editor_layout_test: ../src/editor_layout.cpp
 build/dev_editor_test: ../src/dev_editor.cpp ../src/editor_layout.cpp
