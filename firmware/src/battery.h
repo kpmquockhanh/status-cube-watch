@@ -11,6 +11,8 @@ void batteryBegin();
 void batteryHoldPower();
 void batteryUpdate(uint32_t nowMs);
 BatteryView batteryView();
+// Guess: running from a charger rather than the cell (PowerGuess, battery_util.h).
+bool batteryOnExternal();
 // Last sample's median and the smoothed estimate, in mV (hardware only: the
 // runtime log in battery_log.cpp reads them; the simulator has neither).
 uint32_t batteryRawMv();

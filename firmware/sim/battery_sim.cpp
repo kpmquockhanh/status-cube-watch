@@ -7,3 +7,4 @@ void batteryBegin() {}
 void batteryHoldPower() {}
 void batteryUpdate(uint32_t) {}
 BatteryView batteryView() { return batteryViewFromEnv(); }
+bool batteryOnExternal() { return powerExternalFromEnv(); }

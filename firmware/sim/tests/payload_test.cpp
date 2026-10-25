@@ -141,9 +141,23 @@ void testNoAgents() {
   CHECK(!g_p.agents.present && !g_p.cards[0].agents);
 }
 
+void testHatParsed() {
+  CHECK(parse(deckWith("\"a\":[{\"i\":\"a\",\"k\":\"run\",\"h\":27},{\"i\":\"b\",\"k\":\"run\"},"
+                       "{\"i\":\"c\",\"k\":\"run\",\"h\":200},{\"i\":\"d\",\"k\":\"run\",\"h\":-3},"
+                       "{\"i\":\"e\",\"k\":\"run\",\"h\":\"x\"},{\"i\":\"f\",\"k\":\"run\",\"h\":103}]")));
+  const AgentTile *t = g_p.agents.tiles;
+  CHECK(t[0].hat == 27);
+  CHECK(t[1].hat == -1);
+  CHECK(t[2].hat == -1);
+  CHECK(t[3].hat == -1);
+  CHECK(t[4].hat == -1);
+  CHECK(t[5].hat == 103);
+}
+
 }  // namespace
 
 int main() {
+  testHatParsed();
   testParsesTilesAndPrompt();
   testLanHasNoPrompt();
   testFlags();

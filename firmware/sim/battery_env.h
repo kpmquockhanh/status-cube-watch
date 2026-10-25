@@ -23,6 +23,13 @@ inline BatteryView batteryViewFromEnv() {
   return v;
 }
 
+// CUBE_POWER=usb|battery decides batteryOnExternal() in the simulator and the
+// bench (default usb).
+inline bool powerExternalFromEnv() {
+  const char *e = std::getenv("CUBE_POWER");
+  return !(e && std::strcmp(e, "battery") == 0);
+}
+
 // CUBE_LINK=ble|wifi|none picks the transport marker in screenshots (default ble).
 #include "../src/ui.h"
 inline UiLink linkFromEnv() {

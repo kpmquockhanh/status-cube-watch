@@ -5,11 +5,12 @@
 #include "board_pins.h"
 
 namespace {
-constexpr uint32_t SAMPLE_EVERY_MS = 5000;
+constexpr uint32_t SAMPLE_EVERY_MS = BAT_SAMPLE_MS;
 constexpr int SAMPLES = 16;
 constexpr int DIVIDER = 3;  // R3 200K over R7 100K: VBAT = VADC x 3
 
 BatteryFilter g_filter;
+PowerGuess g_power;
 uint32_t g_lastSample = 0;
 uint32_t g_rawMv = 0;
 
@@ -30,6 +31,7 @@ void sample() {
   const uint32_t mv = (v[SAMPLES / 2 - 1] + v[SAMPLES / 2]) / 2 * DIVIDER;
   g_rawMv = mv;
   g_filter.update(mv);
+  g_power.sample(millis(), (uint16_t)g_filter.mv(), !g_filter.view().onUsb);
   // Handy when checking a new board: what the divider really reads.
   Serial.printf("[bat] raw %lu..%lu mV x3, shown %lu mV -> %u%%%s\n", (unsigned long)v[0] * DIVIDER,
                 (unsigned long)v[SAMPLES - 1] * DIVIDER, (unsigned long)g_filter.mv(), g_filter.view().pct,
@@ -54,5 +56,6 @@ void batteryUpdate(uint32_t nowMs) {
 }
 
 BatteryView batteryView() { return g_filter.view(); }
+bool batteryOnExternal() { return g_power.external(); }
 uint32_t batteryRawMv() { return g_rawMv; }
 uint32_t batteryMv() { return g_filter.mv(); }

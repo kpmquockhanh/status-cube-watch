@@ -94,9 +94,70 @@ void testEndsSnap() {
   CHECK(f.view().pct == 0);
 }
 
+// Feeds `mv` every BAT_SAMPLE_MS for `n` samples, starting at `t`.
+void feed(PowerGuess &g, uint32_t &t, int n, uint16_t mv) {
+  for (int i = 0; i < n; i++) {
+    g.sample(t, mv, true);
+    t += BAT_SAMPLE_MS;
+  }
+}
+
+void powerSourceNoCell() {
+  PowerGuess g;
+  CHECK(!g.external());  // nothing known yet
+  g.sample(0, 0, false);
+  CHECK(g.external());
+}
+
+void powerSourceFull() {
+  PowerGuess g;
+  g.sample(0, 4160, true);
+  CHECK(g.external());
+}
+
+void powerSourceUnplugged() {
+  PowerGuess g;
+  uint32_t t = 0;
+  feed(g, t, 6, 4160);
+  CHECK(g.external());
+  feed(g, t, 1, 4149);  // under 4150 and no rise: battery
+  CHECK(!g.external());
+  feed(g, t, 59, 4100);  // the rest of 5 min
+  CHECK(!g.external());
+}
+
+void powerSourceChargingRises() {
+  PowerGuess g;
+  uint32_t t = 0;
+  feed(g, t, 30, 3800);
+  CHECK(!g.external());
+  feed(g, t, 1, 3825);
+  CHECK(g.external());
+  // The rise is measured from the window minimum, so it fades once 3825 holds for 120 s.
+  feed(g, t, 40, 3825);
+  CHECK(!g.external());
+}
+
+void powerSourceSteady() {
+  PowerGuess g;
+  uint32_t t = 0;
+  feed(g, t, 100, 3900);
+  CHECK(!g.external());
+  for (int i = 0; i < 100; i++) {  // +-5 mV of noise is not a rise
+    g.sample(t, (uint16_t)(3900 + (i % 2 ? 5 : -5)), true);
+    t += BAT_SAMPLE_MS;
+  }
+  CHECK(!g.external());
+}
+
 }  // namespace
 
 int main() {
+  powerSourceNoCell();
+  powerSourceFull();
+  powerSourceUnplugged();
+  powerSourceChargingRises();
+  powerSourceSteady();
   testHysteresis();
   testEndsSnap();
   testPercentTable();

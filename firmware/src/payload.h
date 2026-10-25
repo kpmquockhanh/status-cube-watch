@@ -58,6 +58,7 @@ struct AgentTile {
   AgentKind kind;
   uint8_t ctx;   // context used, 0-100
   bool unseen;   // finished a turn nobody looked at
+  int16_t hat;   // shape * 8 + colour, 0-103; -1 = no hat
 };
 
 struct PromptOpt {

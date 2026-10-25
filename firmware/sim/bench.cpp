@@ -589,6 +589,7 @@ void batteryUpdate(uint32_t now) {
   busyFixed(16 * (25.0 + 200.0));  // 16 ADC reads, delayMicroseconds(200) between them
 }
 BatteryView batteryView() { return batteryViewFromEnv(); }
+bool batteryOnExternal() { return powerExternalFromEnv(); }
 
 // --- stand-in: buzzer --------------------------------------------------------------
 // Silent. A tone is LEDC hardware time, not CPU, so the model charges nothing for it.

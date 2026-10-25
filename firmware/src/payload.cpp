@@ -65,6 +65,12 @@ void parseAgents(JsonObjectConst c, uint8_t cardIndex, AgentsData &a) {
     const int x = t["x"] | 0;
     tile.ctx = x < 0 ? 0 : (x > 100 ? 100 : (uint8_t)x);
     tile.unseen = (t["u"] | 0) != 0;
+    // Only an integer 0..103 counts; anything else (absent, string, float, out of range) is no hat.
+    tile.hat = -1;
+    if (t["h"].is<int>()) {
+      const int h = t["h"].as<int>();
+      if (h >= 0 && h <= 103) tile.hat = (int16_t)h;
+    }
   }
   if (c["q"].is<JsonObjectConst>()) a.hasPrompt = parsePrompt(c["q"], a.prompt);
   a.promptDropped = !a.hasPrompt && (c["qc"] | 0) != 0;
