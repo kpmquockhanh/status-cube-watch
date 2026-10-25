@@ -112,6 +112,22 @@ void resettleRestartsSettle() {
   CHECK(!v.tap(1, 6500 + PROMPT_SETTLE_MS));
 }
 
+// An answer that timed out and then reappears (covered and uncovered)
+// settles for PROMPT_SETTLE_MS before its buttons come back.
+void noAnswerSettlesOnReappear() {
+  base();
+  AgentView v;
+  openAt(v, 0);
+  CHECK(v.tap(0, 1000));
+  uint32_t t = 1000 + ANSWER_WAIT_MS;
+  CHECK(v.buttonsOff(t) == ButtonsOff::NoAnswer);
+  v.resettle(t);
+  CHECK(v.buttonsOff(t + 500) == ButtonsOff::Settling);
+  CHECK(!v.tap(0, t + 500));
+  CHECK(v.buttonsOff(t + PROMPT_SETTLE_MS) == ButtonsOff::NoAnswer);
+  CHECK(v.tap(0, t + PROMPT_SETTLE_MS));
+}
+
 // The Mac unlocks: the buttons that were off come on only after a settle.
 void unlockRestartsSettle() {
   base();
@@ -261,8 +277,9 @@ void closeThenLongWaitIsNoAnswer() {
   CHECK(!v.isOpen());
   CHECK(v.sentButton() == -1);
   openAt(v, 20000);  // the wait is long over: the answer may be asked again
-  CHECK(v.buttonsOff(20000) == ButtonsOff::NoAnswer);
-  CHECK(v.tap(0, 20000));
+  CHECK(v.buttonsOff(20000) == ButtonsOff::Settling);
+  CHECK(v.buttonsOff(20000 + PROMPT_SETTLE_MS) == ButtonsOff::NoAnswer);
+  CHECK(v.tap(0, 20000 + PROMPT_SETTLE_MS));
 }
 
 void sentSurvivesScreenRoundTrip() {
@@ -347,6 +364,7 @@ int main() {
   droppedAndNoText();
   settleBlocksEarlyTap();
   resettleRestartsSettle();
+  noAnswerSettlesOnReappear();
   unlockRestartsSettle();
   newIdResettles();
   oneTapOneSend();

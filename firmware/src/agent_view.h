@@ -107,7 +107,9 @@ class AgentView {
     if (notInTmux_) return ButtonsOff::NotTmux;
     if (macLocked_) return ButtonsOff::Locked;
     if (answeredShown()) {
-      return !failed_ && (uint32_t)(now - sentAt_) < ANSWER_WAIT_MS ? ButtonsOff::Sent : ButtonsOff::NoAnswer;
+      if (!failed_ && (uint32_t)(now - sentAt_) < ANSWER_WAIT_MS) return ButtonsOff::Sent;
+      // A timed-out prompt that reappears settles like any other.
+      return (uint32_t)(now - shownAt_) < PROMPT_SETTLE_MS ? ButtonsOff::Settling : ButtonsOff::NoAnswer;
     }
     if ((uint32_t)(now - shownAt_) < PROMPT_SETTLE_MS) return ButtonsOff::Settling;
     return ButtonsOff::No;

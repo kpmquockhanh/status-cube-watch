@@ -185,14 +185,14 @@ CUBE_SOURCE=admin ./cube-bridge
 
 (or copy `config.example.json` to `config.json` and set it there).
 
-### Claude agents (optional, off by default)
+### Claude agents (on by default)
 
 The bridge can also follow your running Claude Code sessions (which are working, which wait for you)
-and put an AGENTS card in the payload. It is off by default (`CUBE_AGENTS=1` or `"agents": true` turns it on), and nothing
+and put an AGENTS card in the payload. It is on by default (`CUBE_AGENTS=0` or `"agents": false` turns it off), and nothing
 changes on the cube while it is off. To try the data:
 
 ```sh
-CUBE_AGENTS=1 ./cube-bridge          # or "agents": true in config.json
+CUBE_AGENTS=0 ./cube-bridge          # off; or "agents": false in config.json
 ```
 
 The bridge learns about sessions from hooks. `./agent.sh install` and `mac-helper/install.sh install`
@@ -208,8 +208,8 @@ discovered with `claude agents --json` and tmux, and a prompt can be answered on
 pane. The prompt text is served only to requests from the Mac itself; the cube and anything else on the
 LAN get the agent names and states. The preview page opened at `http://127.0.0.1:8787/` counts as the
 Mac (its request is same-origin) and shows the prompt; open it through the Mac's LAN address to see
-what the cube gets. When the Mac app runs the bridge, its Bridge settings do not have
-this switch yet. The agent tracking code is adapted from
+what the cube gets. When the Mac app runs the bridge, the switch is "Track Claude Code agents"
+in Bridge settings. The agent tracking code is adapted from
 [agents-deck](https://github.com/brushknight/agents-deck); see `bridge/internal/agents/NOTICE.md`.
 
 ### 2. Firmware
@@ -442,10 +442,11 @@ read the question and its answer buttons; BACK or a swipe right returns to the g
 waiting, the cube wakes, jumps to the card, opens the question and beeps once (set the level with SOUND).
 
 Reading the question and answering it need Bluetooth: over WiFi the cube only learns that an agent
-needs you, because the bridge never sends prompt text over the LAN. Answering also needs the Mac app
-(a later release of `mac-helper`) to pass the tap on to the agent's tmux pane; until then the buttons
-are shown and a tap sends nothing the Mac acts on. Input prompts, agents outside tmux and a locked Mac
-get greyed buttons with the reason underneath. `docs/agents-acceptance.md` is the hardware checklist.
+needs you, because the bridge never sends prompt text over the LAN. A tap on a button goes to the Mac
+app over Bluetooth, which hands it to the bridge, which types the key into the agent's tmux pane. So
+answering works for an agent running in tmux, with the Mac app running and the Mac unlocked. Input
+prompts, agents outside tmux and a locked Mac get greyed buttons with the reason underneath, and a
+tap while the Mac is locked does nothing. `docs/agents-acceptance.md` is the hardware checklist.
 
 ## Testing without the board
 

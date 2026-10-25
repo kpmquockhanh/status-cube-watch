@@ -2,9 +2,8 @@
 
 The grid, the prompt screen, `AgentView`, the alert and Control `09` are host-tested and
 benched, and the simulator draws every screen. Nothing here has run on a real cube yet.
-Work through this after flashing. You need the bridge with `CUBE_AGENTS=1`, a Mac bonded
-over Bluetooth, and a few Claude Code sessions (some in tmux). Answering from the cube
-needs a Mac app that reads Control `09`; the items marked (Mac app) wait for it.
+Work through this after flashing. You need the bridge with agents on (the default), a Mac bonded
+over Bluetooth with the Mac app running, and a few Claude Code sessions (some in tmux).
 
 ## Grid
 
@@ -24,11 +23,15 @@ needs a Mac app that reads Control `09`; the items marked (Mac app) wait for it.
 - [ ] An input prompt, an agent outside tmux and a locked Mac each show their reason line and no live buttons.
 - [ ] Over WiFi only (Bluetooth off) the screen says "needs you / open on Bluetooth".
 
-## Answering (Mac app)
+## Answering
 
 - [ ] A tap on an option answers in the agent's tmux pane, the button lights and the line reads "sending...".
 - [ ] The prompt closes or changes within a few seconds of the answer.
 - [ ] Without the Mac app running, the line reads "no answer from Mac" after 8 s and a tap works again.
+- [ ] A real answer from the cube is typed into the agent's tmux pane and Claude continues (check one permission prompt and one question).
+- [ ] With the Mac locked, a tap does nothing: no key reaches the pane, and the app's log says the answer was ignored.
+- [ ] A timed-out prompt that is shown again keeps its buttons grey for about a second before a tap works.
+- [ ] Unticking "Track Claude Code agents" in Bridge settings and applying removes the AGENTS card; ticking it brings it back.
 - [ ] A second tap on the same prompt never sends a second answer.
 - [ ] A tap just as a newer prompt replaces the first never answers the newer one.
 
