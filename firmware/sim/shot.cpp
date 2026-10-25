@@ -195,16 +195,65 @@ bool loadPayload(const char *file, Payload &out) {
   return true;
 }
 
-// The Agents card: fixtures/agents-full.json at the top, or ("scroll")
-// fixtures/agents-many.json's eight tiles scrolled to the end.
+// The Agents card: fixtures/agents-full.json at the top, ("scroll")
+// fixtures/agents-many.json's eight tiles scrolled to the end, or ("long")
+// fixtures/agents-long.json's 16-character names and lines.
 bool agentsShot(Display &lcd, const char *state) {
   static Payload p;
-  const bool scroll = !strcmp(state, "scroll");
-  if (!scroll && state[0]) return false;
-  if (!loadPayload(scroll ? "fixtures/agents-many.json" : "fixtures/agents-full.json", p)) return false;
+  const bool scroll = !strcmp(state, "scroll"), longer = !strcmp(state, "long");
+  if (!scroll && !longer && state[0]) return false;
+  const char *file = scroll ? "fixtures/agents-many.json" : longer ? "fixtures/agents-long.json" : "fixtures/agents-full.json";
+  if (!loadPayload(file, p)) return false;
   const int16_t end = (int16_t)(agentsContentH(p.agents.nTiles) - AGENTS_VIEW_H);
   const AgentsUi ui{scroll && end > 0 ? end : (int16_t)0};
   uiRender(lcd, p, p.agents.card, true, 4000, batteryViewFromEnv(), linkFromEnv(), nullptr, &ui);
+  return true;
+}
+
+// Every hat shape on a tile, in two PNGs (<prefix>-agents-hats-1.png: shapes
+// 0-7, -2.png: 8-12). Each is the grid at the top with the rest of its rows,
+// scrolled to the end, stacked under it (240 x 480): the view band only.
+bool hatsShot(Display &lcd) {
+  static Payload p;
+  static const char *const NAMES[13] = {"hard hat", "cap",   "beanie",    "helmet",    "wizard",  "beret",  "chef",
+                                        "crown",    "headphones", "propeller", "top hat", "cowboy", "bandana"};
+  static const char *const POSES[4] = {"think", "idle", "bash", "celebrate"};
+  static const AgentKind KINDS[4] = {AgentKind::Run, AgentKind::Idle, AgentKind::Run, AgentKind::Idle};
+  if (!loadPayload("fixtures/agents-many.json", p)) return false;
+  static std::vector<uint8_t> out((size_t)LCD_WIDTH * (LCD_HEIGHT + AGENTS_VIEW_H) * 3);
+  for (int part = 0; part < 2; part++) {
+    const int first = part * 8, n = part == 0 ? 8 : 5;
+    AgentsData &a = p.agents;
+    a.nTiles = (uint8_t)n;
+    for (int i = 0; i < n; i++) {
+      AgentTile &t = a.tiles[i];
+      const int shape = first + i;
+      snprintf(t.id, sizeof(t.id), "h%02d", shape);
+      snprintf(t.name, sizeof(t.name), "%s", NAMES[shape]);
+      snprintf(t.line, sizeof(t.line), "hat %d . colour %d", shape, shape % 8);
+      snprintf(t.pose, sizeof(t.pose), "%s", POSES[i % 4]);
+      t.kind = KINDS[i % 4];
+      t.ctx = (uint8_t)(10 + shape * 7);
+      t.unseen = false;
+      t.hat = (int16_t)(shape * 8 + shape % 8);
+    }
+    const int16_t end = (int16_t)(agentsContentH(a.nTiles) - AGENTS_VIEW_H);
+    for (int pass = 0; pass < 2; pass++) {
+      const AgentsUi ui{pass ? end : (int16_t)0};
+      uiRender(lcd, p, a.card, true, 4000, batteryViewFromEnv(), linkFromEnv(), nullptr, &ui);
+      char path[512];
+      snprintf(path, sizeof(path), "%s-agents-hats-%d.png", g_prefix, part + 1);
+      if (!grab(lcd, path)) return false;  // fills g_rgb; overwritten below
+      const size_t row = (size_t)LCD_WIDTH * 3;
+      if (pass == 0) {
+        memcpy(out.data(), g_rgb.data(), row * LCD_HEIGHT);
+      } else {
+        memcpy(out.data() + row * LCD_HEIGHT, g_rgb.data() + row * AGENTS_VIEW_Y, row * AGENTS_VIEW_H);
+        if (!writePng(path, out.data(), LCD_WIDTH, LCD_HEIGHT + AGENTS_VIEW_H)) return false;
+        printf("%s\n", path);
+      }
+    }
+  }
   return true;
 }
 
@@ -288,6 +337,12 @@ bool renderSpecial(Display &lcd, const char *name) {
     if (!navShot(lcd, name + 4)) return false;
   } else if (!strncmp(name, "vol-", 4)) {
     if (!volumeShot(lcd, name + 4)) return false;
+  } else if (!strcmp(name, "agents-hats")) {
+    if (!hatsShot(lcd)) {
+      fprintf(stderr, "could not write the hats shots\n");
+      g_rc = 1;
+    }
+    return true;
   } else if (!strcmp(name, "agents") || !strncmp(name, "agents-", 7)) {
     if (!agentsShot(lcd, name[6] ? name + 7 : "")) return false;
   } else if (!strcmp(name, "prompt") || !strncmp(name, "prompt-", 7)) {

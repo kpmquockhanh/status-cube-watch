@@ -200,7 +200,7 @@ bool setupHoldRequested() {
   // rather than only at the instant of boot. It costs a normal boot 3 s, which the hint on screen explains.
   const uint32_t w0 = millis();
   bool touched = false;
-  uiMessage(lcd, "STARTING", "HOLD SCREEN FOR SETUP");
+  uiMessage(lcd, "STARTING", "hold screen for setup");
   while (millis() - w0 < SETUP_WINDOW_MS && !touched) {
     touched = touch.read(x, y);
     if (!touched) delay(20);
@@ -208,7 +208,7 @@ bool setupHoldRequested() {
   Serial.printf("[boot] setup-touch window: touched=%d\n", (int)touched);
   if (!touched) return false;
   Serial.println("[boot] touch at boot: keep holding for WiFi setup");
-  uiMessage(lcd, "KEEP HOLDING", "FOR SETUP");
+  uiMessage(lcd, "KEEP HOLDING", "for setup");
   const uint32_t t0 = millis();
   uint8_t misses = 0;
   while (millis() - t0 < SETUP_HOLD_MS) {
@@ -686,10 +686,10 @@ void setup() {
       otaUp = true;
     }
   } else if (bleMacBonded() && !settingsHaveWifi()) {
-    uiMessage(lcd, "NO MAC", "WAITING FOR LINK");
+    uiMessage(lcd, "NO MAC", "waiting for link");
   }
 
-  if (blePairingOpen()) uiMessage(lcd, "PAIRING OPEN", "PAIR FROM THE APP OR MAC");
+  if (blePairingOpen()) uiMessage(lcd, "PAIRING OPEN", "pair from the app or mac");
   idle.begin(millis());
   policy.begin(millis());
   cpuPolicy.begin(millis());
@@ -940,7 +940,7 @@ void loop() {
       uiNav(lcd, navScene, navPhoneLost, bv, navPan.x(), navPan.y());
       logNavCompose(now, millis() - t0);
     }
-    else if (pairingMsgUp()) uiMessage(lcd, "PAIRING OPEN", "PAIR FROM THE APP OR MAC");
+    else if (pairingMsgUp()) uiMessage(lcd, "PAIRING OPEN", "pair from the app or mac");
     else if (waiting) uiBlePair(lcd, 0);
     else if (editorUp) uiDeviceEditor(lcd, editDevice);
     else if (us != UnlockScreen::Hidden) uiUnlock(lcd, us == UnlockScreen::Waiting);

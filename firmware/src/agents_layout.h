@@ -15,13 +15,13 @@ struct LayoutRect {
 
 // The grid sits under the card's caption (y 44): two columns of tiles in a
 // view that scrolls.
-constexpr int16_t AGENTS_VIEW_Y = 58;
-constexpr int16_t AGENTS_VIEW_H = 196;
-constexpr int16_t TILE_W = 102;
-constexpr int16_t TILE_H = 84;
-constexpr int16_t TILE_GAP = 8;
-constexpr int16_t TILE_COL0_X = 14;
-constexpr int16_t TILE_COL1_X = 124;
+constexpr int16_t AGENTS_VIEW_Y = 54;
+constexpr int16_t AGENTS_VIEW_H = 200;  // holds two rows of tiles (2 x 96 + 6)
+constexpr int16_t TILE_W = 108;
+constexpr int16_t TILE_H = 96;  // the 72 x 52 critter (4 px a cell), its hat, name, meta line, bar
+constexpr int16_t TILE_GAP = 6;
+constexpr int16_t TILE_COL0_X = 9;
+constexpr int16_t TILE_COL1_X = 123;
 
 // Tile `i` (row-major, two per row) on screen at this scroll.
 inline LayoutRect agentsTileRect(uint8_t i, int16_t scroll) {

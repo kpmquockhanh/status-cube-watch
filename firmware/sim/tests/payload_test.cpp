@@ -43,6 +43,7 @@ void testParsesTilesAndPrompt() {
   CHECK(!strcmp(a.tiles[0].id, "l00001") && !strcmp(a.tiles[0].name, "infra-network"));
   CHECK(!strcmp(a.tiles[1].pose, "write") && a.tiles[1].ctx == 41 && a.tiles[1].unseen);
   CHECK(!a.tiles[0].unseen);
+  CHECK(a.tiles[0].hat == 10 && a.tiles[4].hat == 84);
   CHECK(a.hasPrompt && !a.promptDropped);
   CHECK(a.prompt.kind == PromptKind::Permission);
   CHECK(!strcmp(a.prompt.agent, "l00001") && !strcmp(a.prompt.id, "p1abc-1"));
@@ -58,6 +59,14 @@ void testParsesTilesAndPrompt() {
 void testLanHasNoPrompt() {
   CHECK(parse(slurp("fixtures/agents-lan.json")));
   CHECK(g_p.agents.present && !g_p.agents.hasPrompt && !g_p.agents.promptDropped);
+}
+
+// The longest pose name, "celebrate" (9 letters), arrives whole.
+void testLongestPose() {
+  CHECK(parse(slurp("fixtures/agents-many.json")));
+  const AgentTile *t = agentsTile(g_p.agents, "l00007");
+  CHECK(t && !strcmp(t->pose, "celebrate"));
+  CHECK(t && !strcmp(t->line, "done . 4s ago"));
 }
 
 void testFlags() {
@@ -160,6 +169,7 @@ int main() {
   testHatParsed();
   testParsesTilesAndPrompt();
   testLanHasNoPrompt();
+  testLongestPose();
   testFlags();
   testBadKeysDropped();
   testUnknownKinds();

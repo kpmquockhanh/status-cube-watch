@@ -2,32 +2,36 @@
 #include "agents_layout.h"
 
 int main() {
-  // Tiles: two columns, rows 92 px apart.
+  // Tiles: two columns, rows 102 px apart.
   LayoutRect r = agentsTileRect(0, 0);
-  CHECK(r.x == 14 && r.y == 58 && r.w == 102 && r.h == 84);
+  CHECK(r.x == 9 && r.y == 54 && r.w == 108 && r.h == 96);
   r = agentsTileRect(1, 0);
-  CHECK(r.x == 124 && r.y == 58 && r.w == 102 && r.h == 84);
+  CHECK(r.x == 123 && r.y == 54 && r.w == 108 && r.h == 96);
   r = agentsTileRect(2, 0);
-  CHECK(r.x == 14 && r.y == 150);
+  CHECK(r.x == 9 && r.y == 156);
   r = agentsTileRect(3, 0);
-  CHECK(r.x == 124 && r.y == 150);
-  CHECK(agentsTileRect(2, 60).y == 90);
+  CHECK(r.x == 123 && r.y == 156);
+  CHECK(agentsTileRect(2, 60).y == 96);
+  // Two rows fill the view, so four tiles never scroll, and it ends clear of
+  // the page dots.
+  CHECK(agentsContentH(4) <= AGENTS_VIEW_H);
+  CHECK(AGENTS_VIEW_Y + AGENTS_VIEW_H <= 254);
 
   CHECK(agentsContentH(0) == 0);
-  CHECK(agentsContentH(1) == 84);
-  CHECK(agentsContentH(2) == 84);
-  CHECK(agentsContentH(3) == 176);
-  CHECK(agentsContentH(5) == 268);
+  CHECK(agentsContentH(1) == 96);
+  CHECK(agentsContentH(2) == 96);
+  CHECK(agentsContentH(3) == 198);
+  CHECK(agentsContentH(5) == 300);
 
   CHECK(agentsTileAt(170, 200, 4, 0) == 3);
   CHECK(agentsTileAt(60, 100, 4, 0) == 0);
   CHECK(agentsTileAt(119, 100, 4, 0) == -1);  // the column gap
-  CHECK(agentsTileAt(60, 146, 4, 0) == -1);   // the row gap
+  CHECK(agentsTileAt(60, 152, 4, 0) == -1);   // the row gap
   CHECK(agentsTileAt(170, 200, 3, 0) == -1);  // no tile 3
   CHECK(agentsTileAt(60, 50, 4, 60) == -1);   // above the view
   CHECK(agentsTileAt(60, 254, 6, 0) == -1);   // below the view
-  CHECK(agentsTileAt(60, 100, 4, 60) == 2);   // scrolled: row 2 now sits at y 90
-  CHECK(agentsTileAt(60, 59, 4, 60) == 0);    // tile 0 is still partly in view at y 59
+  CHECK(agentsTileAt(60, 100, 4, 60) == 2);   // scrolled: row 2 now sits at y 96
+  CHECK(agentsTileAt(60, 55, 4, 60) == 0);    // tile 0 is still partly in view at y 55
 
   // Scroll: 268 in a 196 view leaves 72.
   ScrollY s;

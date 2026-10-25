@@ -54,7 +54,7 @@ struct AgentTile {
   char id[16];
   char name[17];
   char line[17];
-  char pose[9];
+  char pose[10];  // the longest is "celebrate"
   AgentKind kind;
   uint8_t ctx;   // context used, 0-100
   bool unseen;   // finished a turn nobody looked at

@@ -42,9 +42,8 @@ constexpr uint32_t EMPTY_RGB = 0x0B0B0B;  // an empty slot
 
 uint16_t g_palette[7];
 uint16_t BG, PANEL, INK, DIM, LINE, ACCENT, EMPTY;
-// FAINT is LINE under its older name (the Agents card and prompt still use it
-// until they are restyled); MUTED a disabled glyph; ACC_DEV the panel's accent.
-uint16_t FAINT, MUTED, ACC_DEV;
+// MUTED a disabled glyph; ACC_DEV the panel's accent.
+uint16_t MUTED, ACC_DEV;
 
 LGFX_Sprite g_canvas;
 bool g_sprite = false;
@@ -145,10 +144,13 @@ bool g_rowsKnown = false;  // false: what the panel shows is unknown, so send it
 uint8_t g_rowsRot = 0;     // the rotation those rows were sent under
 uint32_t g_lastFull = 0;
 
-// FNV-1a over 32-bit words: two pixels per step.
+// FNV-1a over 32-bit words (two pixels per step), each step folded down with
+// a shift: a multiply only carries a difference upward, so without the fold
+// changes in the high bits of two words could cancel (the agents critters
+// did: make bench caught rows left stale).
 uint32_t rowHash(const uint32_t *w, int n) {
   uint32_t h = 2166136261u;
-  for (int i = 0; i < n; i++) h = (h ^ w[i]) * 16777619u;
+  for (int i = 0; i < n; i++) { h = (h ^ w[i]) * 16777619u; h ^= h >> 15; }
   return h;
 }
 
@@ -200,9 +202,8 @@ struct Vlw {
 // The theme: Share Tech Mono (RM) for labels, Roboto Mono Bold (RB) for names,
 // titles and values.
 Vlw V_RM11, V_RM13, V_RB14, V_RB18, V_RB24, V_RB30, V_RB40;
-// Inter: the navigation screens, and the Agents card and prompt until they
-// are restyled.
-Vlw V_B30, V_B24, V_B18, V_S12;
+// Inter: the navigation screens.
+Vlw V_B30, V_B24, V_S12;
 // Navigation strings can carry Vietnamese letters: separate fonts so the shared
 // ones stay pixel-identical (accented glyphs raise a font's line height).
 Vlw V_B18V, V_S12V;
@@ -259,28 +260,35 @@ void drawFitted(LovyanGFX *g, const char *text, int cx, int cy, int maxW, int ma
   drawIn(g, fitFont(g, text, maxW, maxH), text, cx, cy, color);
 }
 
-// The design sets its small labels in uppercase. No tracking, but the
-// uppercasing is most of the effect and costs a stack buffer.
-// `bg` is what the text sits on (BG unless on a panel).
-void drawCaps(LovyanGFX *g, const char *text, int x, int y, uint16_t color,
-              textdatum_t datum, uint16_t bg) {
-  char buf[48];
+// The small labels, lower-case like agents-deck's: the bridge's captions
+// ("1 NEEDS YOU", "5H") and the firmware's own copy alike are case-mapped
+// here, so every label reads the same. `bg` is what the text sits on (BG
+// unless on a panel).
+void lowerCopy(const char *src, char *dst, size_t cap) {
   size_t i = 0;
-  for (; text[i] && i < sizeof(buf) - 1; i++) buf[i] = toupper((unsigned char)text[i]);
-  buf[i] = '\0';
+  for (; src[i] && i < cap - 1; i++) dst[i] = (char)tolower((unsigned char)src[i]);
+  dst[i] = '\0';
+}
+
+void drawLabel(LovyanGFX *g, const char *text, int x, int y, uint16_t color,
+               textdatum_t datum, uint16_t bg) {
+  char buf[48];
+  lowerCopy(text, buf, sizeof(buf));
   g->setFont(&V_RM13.font);
   g->setTextDatum(datum);
   g->setTextColor(color, bg);
   g->drawString(buf, x, y);
 }
 
-void drawCaps(LovyanGFX *g, const char *text, int x, int y, uint16_t color, textdatum_t datum) {
-  drawCaps(g, text, x, y, color, datum, BG);
+void drawLabel(LovyanGFX *g, const char *text, int x, int y, uint16_t color, textdatum_t datum) {
+  drawLabel(g, text, x, y, color, datum, BG);
 }
 
-int capsWidth(LovyanGFX *g, const char *text) {
+int labelWidth(LovyanGFX *g, const char *text) {
+  char buf[48];
+  lowerCopy(text, buf, sizeof(buf));
   g->setFont(&V_RM13.font);
-  return g->textWidth(text);
+  return g->textWidth(buf);
 }
 
 // --- chrome --------------------------------------------------------------
@@ -301,13 +309,16 @@ UiLink g_link = UiLink::None;
 // Battery glyph + "NN%", top-left. Fixed in position: the glyph sits at `leftX`
 // and the number starts at a constant offset from it, so neither moves when the
 // percentage changes width.
-void drawBattery(LovyanGFX *g, int leftX, int y, const BatteryView &bat) {
-  const uint16_t col = bat.pct >= 40   ? g_palette[ACC_GREEN]
+// `onAccent`: drawn on the orange prompt screen, everything in black.
+void drawBattery(LovyanGFX *g, int leftX, int y, const BatteryView &bat, bool onAccent) {
+  const uint16_t col = onAccent         ? BG
+                       : bat.pct >= 40 ? g_palette[ACC_GREEN]
                        : bat.pct >= 15 ? g_palette[ACC_AMBER]
                                        : ACCENT;
+  const uint16_t frame = onAccent ? BG : DIM;
   constexpr int BODY_W = 14, BODY_H = 8, NUB_W = 2, GAP = 4;
-  g->drawRect(leftX, y - BODY_H / 2, BODY_W, BODY_H, DIM);
-  g->fillRect(leftX + BODY_W, y - 2, NUB_W, 5, DIM);
+  g->drawRect(leftX, y - BODY_H / 2, BODY_W, BODY_H, frame);
+  g->fillRect(leftX + BODY_W, y - 2, NUB_W, 5, frame);
   const int inner = BODY_W - 4;
   int fill = (inner * bat.pct + 50) / 100;
   if (bat.pct > 0 && fill < 1) fill = 1;
@@ -317,17 +328,18 @@ void drawBattery(LovyanGFX *g, int leftX, int y, const BatteryView &bat) {
   snprintf(txt, sizeof(txt), "%u%%", (unsigned)bat.pct);
   g->setFont(&V_RM13.font);
   g->setTextDatum(middle_left);
-  g->setTextColor(col, BG);
+  g->setTextColor(col, onAccent ? ACCENT : BG);
   const int textX = leftX + BODY_W + NUB_W + GAP;
   g->drawString(txt, textX, y);
 }
 
 // Battery top-left; freshness, and the transport marker beside it, top-right.
-void drawTopBar(LovyanGFX *g, bool online, uint32_t ageMs, const BatteryView &bat) {
+// `onAccent`: the orange prompt screen, all in black, the battery at `batX`.
+void drawTopBar(LovyanGFX *g, bool online, uint32_t ageMs, const BatteryView &bat, bool onAccent = false,
+                int batX = 36) {
   // The panel has rounded corners (~35px radius), so the bar is inset from the
   // edges; at the old 12px margin the text and status dot were clipped.
   constexpr int Y = 24;
-  constexpr int LEFT_X = 36;
 
   // Freshness beats a clock here: the board has no NTP sync in this sketch,
   // and what matters is whether the number on screen is current (age_label.h).
@@ -336,14 +348,15 @@ void drawTopBar(LovyanGFX *g, bool online, uint32_t ageMs, const BatteryView &ba
   ageLabel(right, sizeof(right), online, s);
 
   // Fresh: ink; stale or offline: the accent.
-  const uint16_t col = online && s < 30 ? INK : ACCENT;
+  const uint16_t bg = onAccent ? ACCENT : BG;
+  const uint16_t col = onAccent ? BG : online && s < 30 ? INK : ACCENT;
   g->setFont(&V_RM13.font);
   g->setTextDatum(middle_right);
-  g->setTextColor(col, BG);
+  g->setTextColor(col, bg);
   g->drawString(right, LCD_WIDTH - 46, Y);
   g->fillRect(LCD_WIDTH - 39, Y - 3, 6, 6, col);
 
-  drawBattery(g, LEFT_X, Y, bat);
+  drawBattery(g, batX, Y, bat, onAccent);
 
   // Transport marker just left of the age readout, at a fixed place: the slot
   // is sized for the widest readout age_label.h can produce.
@@ -354,7 +367,7 @@ void drawTopBar(LovyanGFX *g, bool online, uint32_t ageMs, const BatteryView &ba
   if (online && g_link != UiLink::None) {
     g->setFont(&V_RM13.font);
     g->setTextDatum(middle_right);
-    g->setTextColor(DIM, BG);
+    g->setTextColor(onAccent ? BG : DIM, bg);
     g->drawString(g_link == UiLink::Ble ? "BLE" : "WIFI", linkRight, Y);
   }
 }
@@ -529,7 +542,7 @@ void drawGaugeCard(LovyanGFX *g, const Card &card, uint32_t rgb,
 
   // Inside the ring, in the size the whole deck agreed on.
   drawIn(g, valueFont, card.value, RING_CX, VALUE_CY, hasReading ? INK : MUTED);
-  if (card.sub1[0]) drawCaps(g, card.sub1, RING_CX, CAPTION_Y, DIM, top_center);
+  if (card.sub1[0]) drawLabel(g, card.sub1, RING_CX, CAPTION_Y, DIM, top_center);
 
   // In the gap at the bottom: "14%  OF 5H LIMIT", laid out as one centred run
   // so the two type sizes stay optically joined.
@@ -538,7 +551,7 @@ void drawGaugeCard(LovyanGFX *g, const Card &card, uint32_t rgb,
     snprintf(pct, sizeof(pct), "%d%%", (int)lroundf(a.shown));
     g->setFont(&V_RB18.font);
     const int wPct = g->textWidth(pct);
-    const int wLab = card.sub2[0] ? capsWidth(g, card.sub2) : 0;
+    const int wLab = card.sub2[0] ? labelWidth(g, card.sub2) : 0;
     const int gap = wLab ? 6 : 0;
     const int x0 = RING_CX - (wPct + gap + wLab) / 2;
 
@@ -546,12 +559,12 @@ void drawGaugeCard(LovyanGFX *g, const Card &card, uint32_t rgb,
     g->setTextDatum(middle_left);
     g->setTextColor(to565(shownRgb), BG);
     g->drawString(pct, x0, PCT_Y);
-    if (wLab) drawCaps(g, card.sub2, x0 + wPct + gap, PCT_Y, DIM, middle_left);
+    if (wLab) drawLabel(g, card.sub2, x0 + wPct + gap, PCT_Y, DIM, middle_left);
   } else if (card.sub2[0]) {
-    drawCaps(g, card.sub2, RING_CX, PCT_Y - 5, DIM, top_center);
+    drawLabel(g, card.sub2, RING_CX, PCT_Y - 5, DIM, top_center);
   }
 
-  drawCaps(g, card.title, RING_CX, NAME_Y, DIM, middle_center);
+  drawLabel(g, card.title, RING_CX, NAME_Y, DIM, middle_center);
 }
 
 // The combined usage card: both rate-limit windows as concentric rings (outer =
@@ -576,12 +589,12 @@ void drawEnvelope(LovyanGFX *g, int x, int y, uint16_t col) {
 
 void drawLegendRow(LovyanGFX *g, const LegendRow &row, int y, uint32_t swatch) {
   g->fillRect(ROW_LEFT, y - 3, 7, 7, to565(swatch));
-  drawCaps(g, row.key, ROW_LEFT + 13, y, DIM, middle_left);
+  drawLabel(g, row.key, ROW_LEFT + 13, y, DIM, middle_left);
   g->setFont(&V_RB18.font);
   g->setTextDatum(middle_left);
   g->setTextColor(INK, BG);
   g->drawString(row.pct, ROW_LEFT + 38, y);
-  if (row.reset[0]) drawCaps(g, row.reset, ROW_RIGHT, y, DIM, middle_right);
+  if (row.reset[0]) drawLabel(g, row.reset, ROW_RIGHT, y, DIM, middle_right);
 }
 
 void drawDualCard(LovyanGFX *g, const Card &card, GaugeAnim &outer, GaugeAnim &inner,
@@ -598,7 +611,7 @@ void drawDualCard(LovyanGFX *g, const Card &card, GaugeAnim &outer, GaugeAnim &i
 
   const ValueFont vf = fitFont(g, card.value, DUAL_VALUE_MAX_W, DUAL_VALUE_MAX_H);
   drawIn(g, vf, card.value, RING_CX, DUAL_VALUE_CY, has1 ? INK : MUTED);
-  if (card.sub1[0]) drawCaps(g, card.sub1, RING_CX, DUAL_CAPTION_Y, DIM, top_center);
+  if (card.sub1[0]) drawLabel(g, card.sub1, RING_CX, DUAL_CAPTION_Y, DIM, top_center);
 
   if (card.mail[0]) {
     const uint16_t col = to565(RGB888[card.mailColor % 7]);
@@ -622,7 +635,7 @@ void drawTextCard(LovyanGFX *g, const Payload &p, const Card &card, uint16_t col
   (void)p;
   drawTopBar(g, online, ageMs, bat);
 
-  drawCaps(g, card.title, LCD_WIDTH / 2, 60, DIM, top_center);
+  drawLabel(g, card.title, LCD_WIDTH / 2, 60, DIM, top_center);
   drawFitted(g, card.value, LCD_WIDTH / 2, 145, LCD_WIDTH - 20, 96, color);
 
   g->setFont(&V_RB14.font);
@@ -630,7 +643,7 @@ void drawTextCard(LovyanGFX *g, const Payload &p, const Card &card, uint16_t col
   g->setTextColor(INK, BG);
   g->drawString(card.sub1, LCD_WIDTH / 2, 202);
 
-  drawCaps(g, card.sub2, LCD_WIDTH / 2, 230, DIM, top_center);
+  drawLabel(g, card.sub2, LCD_WIDTH / 2, 230, DIM, top_center);
 }
 
 // --- the waiting card -------------------------------------------------------
@@ -641,8 +654,8 @@ void drawWaitingCard(LovyanGFX *g, bool online, uint32_t ageMs, const BatteryVie
   g->setFont(&V_RB24.font);
   g->setTextDatum(middle_center);
   g->setTextColor(INK, BG);
-  g->drawString("No data yet", LCD_WIDTH / 2, LCD_HEIGHT / 2 - 10);
-  drawCaps(g, "Waiting for the bridge", LCD_WIDTH / 2, LCD_HEIGHT / 2 + 22, DIM, middle_center);
+  g->drawString("no data yet", LCD_WIDTH / 2, LCD_HEIGHT / 2 - 10);
+  drawLabel(g, "waiting for the bridge", LCD_WIDTH / 2, LCD_HEIGHT / 2 + 22, DIM, middle_center);
 }
 
 // --- the Volume card ---------------------------------------------------------
@@ -676,15 +689,15 @@ void volumeFit(LovyanGFX *g, char *text, size_t cap) {
 }
 
 // The name is printable ASCII: volumeParse (volume_frame.h) rejects anything else.
-// The caption: the output's name in capitals ("MAC VOLUME" when there is
+// The caption: the output's name in lower case ("mac volume" when there is
 // none), on one line or wrapped at a space onto two, the second cut with "..."
 // if it still does not fit beside the bar.
 void volumeLabel(LovyanGFX *g, const char *name, char *l1, char *l2, size_t cap) {
   size_t n = 0;
-  for (const char *c = name; *c && n + 1 < cap; c++) l1[n++] = (*c >= 'a' && *c <= 'z') ? (char)(*c - 32) : *c;
+  for (const char *c = name; *c && n + 1 < cap; c++) l1[n++] = (char)tolower((unsigned char)*c);
   l1[n] = '\0';
   l2[0] = '\0';
-  if (!n) snprintf(l1, cap, "MAC VOLUME");
+  if (!n) snprintf(l1, cap, "mac volume");
   g->setFont(&V_RM13.font);
   if (g->textWidth(l1) <= VOL_TEXT_MAX_W) return;
   // The last space whose prefix fits ends the first line.
@@ -802,7 +815,7 @@ void drawVolumeCard(LovyanGFX *g, const VolumeView &v, bool online, uint32_t age
                      : fixed                         ? "FIXED"
                      : v.muted                       ? "MUTED"
                                                      : "";
-  if (*word) drawCaps(g, word, VOL_COL_X, VOL_WORD_Y, DIM, baseline_left);
+  if (*word) drawLabel(g, word, VOL_COL_X, VOL_WORD_Y, DIM, baseline_left);
 
   drawVolumeRow(g, v);
   drawTopBar(g, online, ageMs, bat);
@@ -873,7 +886,7 @@ void drawSheetRow(LovyanGFX *g, int r, const SheetRow &row, uint16_t accent, int
   const int top = box.y + yOff;
   const int cy = top + box.h / 2;
   if (r > 0) g->drawFastHLine(ROW_PAD, top, LCD_WIDTH - 2 * ROW_PAD, LINE);
-  drawCaps(g, row.label, ROW_PAD, cy - 5, DIM, baseline_left, PANEL);
+  drawLabel(g, row.label, ROW_PAD, cy - 5, DIM, baseline_left, PANEL);
   const bool on = row.sw != 0;
   drawSheetValue(g, row.value, ROW_PAD, cy + 14, on ? INK : DIM);
   if (row.meterPct >= 0) {
@@ -929,15 +942,13 @@ void drawSheetTitle(LovyanGFX *g, const char *title, uint16_t accent, int yOff) 
   g->setTextDatum(middle_left);
   g->setTextColor(accent, PANEL);
   char buf[16];
-  size_t i = 0;
-  for (; title[i] && i < sizeof(buf) - 1; i++) buf[i] = toupper((unsigned char)title[i]);
-  buf[i] = '\0';
+  lowerCopy(title, buf, sizeof(buf));
   g->drawString(buf, IX + 16, cy);
 }
 
 void drawDevicePanel(LovyanGFX *g, const DeviceSettings &s, int yOff) {
   drawSheetFrame(g, yOff);
-  drawSheetTitle(g, "Display", ACC_DEV, yOff + 4);
+  drawSheetTitle(g, "display", ACC_DEV, yOff + 4);
   for (int r = 0; r < DEV_EDIT_ROWS; r++) {
     char buf[12];
     devEditorValue(r, s, buf, sizeof(buf));
@@ -983,47 +994,63 @@ float editorSlidePos(uint32_t now) {
 }
 
 // --- the Agents card -----------------------------------------------------------
-// A two-column grid of tiles that scrolls under the card's caption, one per
-// agent: its folder name, a pixel critter whose pose follows what it is doing
-// (critter.h), the bridge's status line and a context bar. A waiting tile is
-// solid orange, so it reads across the desk. agents_layout.h owns the geometry,
-// which main.cpp hit-tests with too.
-constexpr uint32_t TILE_BG = 0x121722;
-constexpr uint32_t TILE_WAIT = 0xFF8A5B;    // the accent
-constexpr uint32_t NEAR_BLACK = 0x0A0A0A;   // text and ink on orange
-constexpr uint32_t WAIT_TRACK = 0xDE7850;   // the context bar's track on orange: black at ~13%
-constexpr uint32_t BTN_BG = 0x1E2533;
-constexpr uint32_t CRIT_FLAG = 0xE8E4DC, CRIT_ACCENT = 0xFF4D00;
-constexpr int TILE_R = 12, TILE_PAD = 8;
-constexpr int CRIT_CELL = 3;        // px per critter cell on a tile
-constexpr int NOTICE_CELL = 5;      // and on a prompt screen with no prompt to show
-constexpr float CRIT_CENTRE_X = 9;  // the middle of the 0..18 sprite box, in cells
+// agents-deck's board (docs/images/panel-board-v2.png): a two-column grid of
+// square panels that scrolls under the card's caption, one per agent: the
+// Claude chip, a pixel critter whose pose follows what it is doing (critter.h)
+// in its folder's hat, the folder name, the bridge's meta line and a context
+// bar. A waiting tile is solid orange, so it reads across the desk; a hungry
+// one (a finished turn nobody looked at) slides orange stripes. agents_layout.h
+// owns the geometry, which main.cpp hit-tests with too.
+constexpr uint32_t ACCENT_RGB = 0xFF4D00;
+constexpr uint32_t INK_RGB = 0xE8E4DC;
+constexpr uint32_t CHIP_RGB = 0xC98B6B;     // the Claude chip (agents-deck's chip_color)
+constexpr uint32_t WAIT_TRACK = 0xB23600;   // the context bar's track on orange
+constexpr int TILE_CELL = 4;                // px per critter cell on a tile: 18 x 13 cells = 72 x 52
+constexpr int TILE_CRIT_X = 7;              // the body (cells 0..14) is centred: cell 0 at mid - 7 cells
+constexpr int TILE_CRIT_Y = 28;             // cell 0 this far below the tile's top (hats reach -6.5)
+constexpr int TILE_NAME_Y = 60;             // tops of the name, the meta line
+constexpr int TILE_META_Y = 77;
+constexpr int TILE_TEXT_PAD = 5;
+constexpr int TILE_BAR_INSET = 7, TILE_BAR_H = 3, TILE_BAR_BOTTOM = 4;
+constexpr int CHIP = 6, CHIP_INSET = 5;
+constexpr int STRIPE_PITCH = 16, STRIPE_W = 7;  // 5 px across the diagonal, as agents-deck draws them
 constexpr int SCROLL_BAR_W = 3;
 
+// `fg` at `alpha` (0..255) over `bg`, both 0xRRGGBB, as 565.
+uint16_t blend565(uint32_t fg, uint32_t bg, uint8_t alpha) {
+  return to565(lerpRgb(bg, fg, alpha * (1.0f / 255.0f)));
+}
+
+// The critter's colours, as agents-deck's critter_of picks them.
 struct CritterInks {
-  uint16_t body, cut;
+  uint32_t body, cut;  // cut: the background behind it
 };
 
-// The critter for `pose` at `ms` with its cell (0, 0) at (ox, oy), `cell` px a
-// cell. Edges are rounded to whole pixels, and every shape keeps at least one.
-void drawCritter(LovyanGFX *g, Pose pose, uint32_t ms, float ox, float oy, int cell, const CritterInks &k) {
+// The critter for `pose` in `hat` at `ms` with its cell (0, 0) at (ox, oy),
+// `cell` px a cell. Every shape is blended at its alpha over the background
+// (not over the shapes under it: the sprite has no overlapping fades). Edges
+// are rounded to whole pixels, and every shape keeps at least one.
+void drawCritter(LovyanGFX *g, Pose pose, HatId hat, uint32_t ms, float ox, float oy, int cell,
+                 const CritterInks &k) {
   static CritterRect r[CRITTER_MAX_RECTS];  // 2.5 KB: off the loop's stack
-  // No hats yet, and every shape at full ink: hats and alpha blending come
-  // with the tile restyle.
-  const size_t n = critterShapes(pose, HatId{-1, -1}, ms, r, CRITTER_MAX_RECTS);
+  const size_t n = critterShapes(pose, hat, ms, r, CRITTER_MAX_RECTS);
   for (size_t i = 0; i < n; i++) {
-    if (r[i].ink != CritterInk::Body && r[i].ink != CritterInk::Cut && r[i].ink != CritterInk::Flag &&
-        r[i].ink != CritterInk::Accent)
-      continue;
+    uint32_t rgb;
+    switch (r[i].ink) {
+      case CritterInk::Body: rgb = k.body; break;
+      case CritterInk::Cut: rgb = k.cut; break;
+      case CritterInk::Flag: rgb = INK_RGB; break;
+      case CritterInk::Accent: rgb = ACCENT_RGB; break;
+      case CritterInk::HatMain: rgb = hatMainRgb(hat.color); break;
+      case CritterInk::HatShade: rgb = hatShadeRgb(hat.color); break;
+      case CritterInk::HatHighlight: rgb = hatHighlightRgb(); break;
+      default: rgb = hatDarkRgb(); break;
+    }
     const int x0 = (int)lroundf(ox + r[i].x * cell), y0 = (int)lroundf(oy + r[i].y * cell);
     int x1 = (int)lroundf(ox + (r[i].x + r[i].w) * cell), y1 = (int)lroundf(oy + (r[i].y + r[i].h) * cell);
     if (x1 <= x0) x1 = x0 + 1;
     if (y1 <= y0) y1 = y0 + 1;
-    const uint16_t c = r[i].ink == CritterInk::Body   ? k.body
-                       : r[i].ink == CritterInk::Cut  ? k.cut
-                       : r[i].ink == CritterInk::Flag ? to565(CRIT_FLAG)
-                                                      : to565(CRIT_ACCENT);
-    g->fillRect(x0, y0, x1 - x0, y1 - y0, c);
+    g->fillRect(x0, y0, x1 - x0, y1 - y0, r[i].alpha == 255 ? to565(rgb) : blend565(rgb, k.cut, r[i].alpha));
   }
 }
 
@@ -1089,13 +1116,6 @@ uint8_t wrapText(LovyanGFX *g, const char *text, int maxW, uint8_t maxLines, cha
   return n;
 }
 
-// The caps labels are measured as they are drawn: upper case.
-void upper(const char *src, char *dst, size_t cap) {
-  size_t i = 0;
-  for (; src[i] && i < cap - 1; i++) dst[i] = (char)toupper((unsigned char)src[i]);
-  dst[i] = '\0';
-}
-
 // One line of `text` in `font`, cut with "..." to `maxW`, drawn at (x, y).
 void drawLine(LovyanGFX *g, Vlw &font, const char *text, int x, int y, int maxW, uint16_t fg, uint16_t bg,
               textdatum_t datum) {
@@ -1108,44 +1128,90 @@ void drawLine(LovyanGFX *g, Vlw &font, const char *text, int x, int y, int maxW,
 }
 
 // A thin thumb at the right edge when the content is taller than its view.
-void drawScrollBar(LovyanGFX *g, int x, int viewY, int viewH, int contentH, int scroll) {
+void drawScrollBar(LovyanGFX *g, int x, int viewY, int viewH, int contentH, int scroll, uint16_t color) {
   if (contentH <= viewH) return;
   const int maxOff = contentH - viewH;
   int h = viewH * viewH / contentH;
   if (h < 16) h = 16;
   const int off = scroll < 0 ? 0 : scroll > maxOff ? maxOff : scroll;
-  g->fillSmoothRoundRect(x, viewY + (viewH - h) * off / maxOff, SCROLL_BAR_W, h, 1, MUTED);
+  g->fillRect(x, viewY + (viewH - h) * off / maxOff, SCROLL_BAR_W, h, color);
 }
 
 // --- the grid --------------------------------------------------------------------
+// Sliding diagonal stripes (agents-deck's draw_stripes_event): 5 px accent
+// lines at 20% from bottom-left to top-right every 16 px, moving one pixel
+// every 60 ms. Drawn as runs along each row, inside the tile's outline.
+void drawStripes(LovyanGFX *g, const LayoutRect &r, uint32_t now) {
+  const uint16_t c = blend565(ACCENT_RGB, PANEL_RGB, 51);
+  const int shift = (int)((now / 60) % STRIPE_PITCH);
+  const int y2 = r.y + r.h - 1;
+  for (int y = r.y + 1; y < y2; y++) {
+    // A pixel is on a line where (x - x1) + (y - y2) - shift, mod the pitch,
+    // falls in the line's width: the runs start every pitch along the row.
+    int start = shift - (y - y2);  // x - x1 where the phase is 0
+    start = ((start % STRIPE_PITCH) + STRIPE_PITCH) % STRIPE_PITCH - STRIPE_PITCH;
+    for (int x = start; x < r.w - 1; x += STRIPE_PITCH) {
+      int a = x, b = x + STRIPE_W;
+      if (a < 1) a = 1;
+      if (b > r.w - 1) b = r.w - 1;
+      if (b > a) g->drawFastHLine(r.x + a, y, b - a, c);
+    }
+  }
+}
+
+bool tileHungry(const AgentTile &t) {
+  return t.kind == AgentKind::Idle && (t.unseen || poseFromName(t.pose) == Pose::Hungry);
+}
+
 void drawTile(LovyanGFX *g, const AgentTile &t, const LayoutRect &r, uint32_t now) {
-  const bool wait = t.kind == AgentKind::Wait, gone = t.kind == AgentKind::Exit;
-  const uint16_t bg = to565(wait ? TILE_WAIT : TILE_BG);
-  const uint16_t dark = to565(NEAR_BLACK);
-  g->fillSmoothRoundRect(r.x, r.y, r.w, r.h, TILE_R, bg);
+  const bool wait = t.kind == AgentKind::Wait, hungry = tileHungry(t);
+  const bool quiet = (t.kind == AgentKind::Idle && !hungry) || t.kind == AgentKind::Exit || t.kind == AgentKind::Start;
+  const uint32_t bgRgb = wait ? ACCENT_RGB : PANEL_RGB;
+  const uint16_t bg = to565(bgRgb);
+  g->fillRect(r.x, r.y, r.w, r.h, bg);
+  g->drawRect(r.x, r.y, r.w, r.h, wait || hungry ? ACCENT : LINE);
+  if (hungry) drawStripes(g, r, now);
 
-  // The name, clear of the unseen dot; it may come closer to the right edge
-  // than the rest, as the name is what tells tiles apart.
-  const int nameW = r.w - TILE_PAD - (t.unseen ? 14 : 4);
-  drawLine(g, V_S12, t.name, r.x + TILE_PAD, r.y + 6, nameW, wait ? dark : gone ? DIM : INK, bg, top_left);
-  if (t.unseen) g->fillSmoothCircle(r.x + r.w - TILE_PAD - 2, r.y + 13, 2, wait ? dark : g_palette[ACC_ACCENT]);
+  g->fillRect(r.x + r.w - CHIP_INSET - CHIP, r.y + CHIP_INSET, CHIP, CHIP, wait ? BG : to565(CHIP_RGB));
 
-  // The critter, its sprite box centred. An errored agent's body is red.
-  const uint16_t body = wait                       ? BG
-                        : gone                     ? DIM
-                        : t.kind == AgentKind::Err ? g_palette[ACC_RED]
-                                                   : INK;
-  drawCritter(g, poseFromName(t.pose), now, r.x + r.w / 2 - CRIT_CENTRE_X * CRIT_CELL, r.y + 36, CRIT_CELL,
-              CritterInks{body, bg});
+  // The critter: black on orange, orange while working or hungry, ink on an
+  // error, dim when idle, starting or gone.
+  const uint32_t body = wait                                          ? BG_RGB
+                        : t.kind == AgentKind::Run || hungry          ? ACCENT_RGB
+                        : t.kind == AgentKind::Err                    ? INK_RGB
+                                                                      : DIM_RGB;
+  drawCritter(g, poseFromName(t.pose), hatFromCode(t.hat), now, r.x + r.w / 2 - TILE_CRIT_X * TILE_CELL,
+              r.y + TILE_CRIT_Y, TILE_CELL, CritterInks{body, bgRgb});
 
-  drawLine(g, V_S12, t.line, r.x + TILE_PAD, r.y + 58, r.w - 2 * TILE_PAD, wait ? dark : DIM, bg, top_left);
+  // The name in bold (12 letters fit); a longer one steps down to the label
+  // faces, whose 11 px holds the bridge's 16, as the name is what tells
+  // tiles apart. Its line is centred on the bold one's.
+  const uint16_t ink = wait ? BG : quiet ? DIM : INK;
+  const int textW = r.w - 2 * TILE_TEXT_PAD, cx = r.x + r.w / 2;
+  Vlw *nameFont = &V_RM11;
+  for (Vlw *f : {&V_RB14, &V_RM13}) {
+    g->setFont(&f->font);
+    if (g->textWidth(t.name) <= textW) {
+      nameFont = f;
+      break;
+    }
+  }
+  drawLine(g, *nameFont, t.name, cx, r.y + TILE_NAME_Y + 8, textW, ink, bg, middle_center);
+  const uint16_t meta = wait ? BG : hungry || t.kind == AgentKind::Err ? ACCENT : DIM;
+  drawLine(g, V_RM11, t.line, cx, r.y + TILE_META_Y, textW, meta, bg, top_center);
 
   // Context used, along the bottom.
-  const int bx = r.x + TILE_PAD, bw = r.w - 2 * TILE_PAD, by = r.y + r.h - 9;
-  g->fillSmoothRoundRect(bx, by, bw, 4, 2, to565(wait ? WAIT_TRACK : RING_TRACK));
-  int fill = bw * (t.ctx > 100 ? 100 : t.ctx) / 100;
-  if (t.ctx > 0 && fill < 4) fill = 4;
-  if (fill > 0) g->fillSmoothRoundRect(bx, by, fill, 4, 2, wait ? dark : gone ? MUTED : g_palette[ACC_BLUE]);
+  const int bx = r.x + TILE_BAR_INSET, bw = r.w - 2 * TILE_BAR_INSET;
+  const int by = r.y + r.h - TILE_BAR_BOTTOM - TILE_BAR_H;
+  g->fillRect(bx, by, bw, TILE_BAR_H, wait ? to565(WAIT_TRACK) : LINE);
+  const int fill = bw * (t.ctx > 100 ? 100 : t.ctx) / 100;
+  if (fill > 0) g->fillRect(bx, by, fill, TILE_BAR_H, ink);
+}
+
+// A slot with no agent, so the grid always shows whole rows and a screenful.
+void drawEmptySlot(LovyanGFX *g, const LayoutRect &r) {
+  g->fillRect(r.x, r.y, r.w, r.h, EMPTY);
+  g->drawRect(r.x, r.y, r.w, r.h, PANEL);
 }
 
 constexpr int AGENTS_CAPTION_Y = 44;
@@ -1153,28 +1219,44 @@ constexpr int AGENTS_CAPTION_Y = 44;
 void drawAgentsCard(LovyanGFX *g, const Card &card, const AgentsData &a, int16_t scroll, bool online,
                     uint32_t ageMs, const BatteryView &bat) {
   drawTopBar(g, online, ageMs, bat);
-  if (card.sub1[0]) drawCaps(g, card.sub1, LCD_WIDTH / 2, AGENTS_CAPTION_Y, g_palette[card.color % 7], middle_center);
+  if (card.sub1[0]) drawLabel(g, card.sub1, LCD_WIDTH / 2, AGENTS_CAPTION_Y, g_palette[card.color % 7], middle_center);
 
-  // Animation time is the clock: main.cpp redraws once a second, so a critter
-  // steps then instead of holding the CPU at 60 fps (cpu_policy.h).
+  // Animation time is the clock: main.cpp decides when frames happen, and each
+  // one shows the critters and stripes as they are now.
   const uint32_t now = millis();
+  // Whole rows, at least a screenful (two rows): empty slots fill the rest.
+  const uint8_t slots = a.nTiles < 4 ? 4 : (uint8_t)((a.nTiles + 1) & ~1);
   g->setClipRect(0, AGENTS_VIEW_Y, LCD_WIDTH, AGENTS_VIEW_H);
-  for (uint8_t i = 0; i < a.nTiles; i++) {
+  for (uint8_t i = 0; i < slots; i++) {
     const LayoutRect r = agentsTileRect(i, scroll);
     if (r.y + r.h <= AGENTS_VIEW_Y || r.y >= AGENTS_VIEW_Y + AGENTS_VIEW_H) continue;
-    drawTile(g, a.tiles[i], r, now);
+    if (i < a.nTiles) {
+      drawTile(g, a.tiles[i], r, now);
+    } else {
+      drawEmptySlot(g, r);
+    }
   }
   g->clearClipRect();
-  drawScrollBar(g, TILE_COL1_X + TILE_W + 4, AGENTS_VIEW_Y, AGENTS_VIEW_H, agentsContentH(a.nTiles), scroll);
+  drawScrollBar(g, TILE_COL1_X + TILE_W + 2, AGENTS_VIEW_Y, AGENTS_VIEW_H, agentsContentH(a.nTiles), scroll, DIM);
 }
 
 // --- the prompt screen -------------------------------------------------------------
+// agents-deck's permission screen (docs/images/panel-permission-v2.png): the
+// whole screen orange, everything on it black. The agent's critter and name at
+// the top, the question, the detail in a black box, the context, then the
+// answers: the first solid black, the rest outlined.
 constexpr int PROMPT_X = PROMPT_COL_X, PROMPT_W = PROMPT_COL_W;  // agents_layout.h: hit-tested there too
-constexpr int PROMPT_HEADER_Y = 44;
+constexpr int PROMPT_HEADER_Y = 43;
+constexpr int PROMPT_CRIT_X = 28, PROMPT_CRIT_Y = 16, PROMPT_CELL = 2;  // the small critter, top-left
+constexpr int PROMPT_BATTERY_X = 76;  // the battery moves right of it
 constexpr int DETAIL_PAD_X = 8;
-constexpr int BTN_R = 12, KEY_R = 9;
-constexpr int KEY_CX = PROMPT_X + 17, LABEL_X = PROMPT_X + 34;
+constexpr int BTN_R = 3, BTN_LINE = 2;
+constexpr int KEY_X = PROMPT_X + 12, LABEL_X = PROMPT_X + 28;
+constexpr int NOTICE_CELL = 5;  // the critter on a prompt screen with no prompt to show
 constexpr uint8_t TITLE_MAX_LINES = 2, DETAIL_MAX_LINES = 3;
+
+// Black at 40% on the orange: what is off.
+uint16_t promptOff() { return blend565(BG_RGB, ACCENT_RGB, 102); }
 
 // The prompt's strings as they will be drawn, already wrapped.
 struct PromptText {
@@ -1186,18 +1268,17 @@ struct PromptText {
 };
 
 void promptText(LovyanGFX *g, const AgentPrompt &q, PromptText &t) {
-  g->setFont(&V_B18.font);
+  g->setFont(&V_RB18.font);
   t.nTitle = wrapText(g, q.title, PROMPT_W, TITLE_MAX_LINES, t.title);
-  g->setFont(&V_S12.font);
+  g->setFont(&V_RM13.font);
   if (q.cut) {
     snprintf(t.detail[0], LINE_CAP, "(detail cut)");
     t.nDetail = 1;
   } else {
     t.nDetail = wrapText(g, q.detail, PROMPT_W - 2 * DETAIL_PAD_X, DETAIL_MAX_LINES, t.detail);
   }
-  char caps[48];
-  upper(q.context, caps, sizeof(caps));
-  t.hasContext = wrapText(g, caps, PROMPT_W, 1, t.context) > 0;
+  g->setFont(&V_RM11.font);
+  t.hasContext = wrapText(g, q.context, PROMPT_W, 1, t.context) > 0;
 }
 
 // The states whose buttons say why they are off, on a line of their own.
@@ -1205,9 +1286,9 @@ const char *offReason(ButtonsOff off) {
   switch (off) {
     case ButtonsOff::Input: return "answer at the terminal";
     case ButtonsOff::NotTmux: return "not in tmux";
-    case ButtonsOff::Locked: return "unlock Mac first";
+    case ButtonsOff::Locked: return "unlock mac first";
     case ButtonsOff::Sent: return "sending...";
-    case ButtonsOff::NoAnswer: return "no answer from Mac";
+    case ButtonsOff::NoAnswer: return "no answer from mac";
     default: return nullptr;
   }
 }
@@ -1224,37 +1305,38 @@ PromptMetrics metricsOf(const PromptText &t, bool reason) {
   return m;
 }
 
-// One answer: the key in a small circle, then the label. Off: greyed, with the
-// key in MUTED and the label one step lighter (MUTED on FAINT is too faint to
-// read the choices by). `lit`: the answer that was sent, outlined.
-void drawOption(LovyanGFX *g, int y, const PromptOpt &o, bool first, bool enabled, bool lit) {
-  const uint16_t acc = g_palette[ACC_ACCENT];
-  const uint16_t bg = !enabled ? FAINT : first ? acc : to565(BTN_BG);
-  const uint16_t fg = !enabled ? MUTED : first ? to565(NEAR_BLACK) : INK;
-  const uint16_t text = enabled ? fg : DIM;
-  g->fillSmoothRoundRect(PROMPT_X, y, PROMPT_W, PROMPT_BTN_H, BTN_R, bg);
-  if (lit) {
-    const uint16_t ring = bg == acc ? INK : acc;
-    g->drawRoundRect(PROMPT_X, y, PROMPT_W, PROMPT_BTN_H, BTN_R, ring);
-    g->drawRoundRect(PROMPT_X + 1, y + 1, PROMPT_W - 2, PROMPT_BTN_H - 2, BTN_R - 1, ring);
+// A button: solid (black, orange text) or a 2 px outline in `ink`.
+void drawPromptButton(LovyanGFX *g, int y, bool solid, uint16_t ink) {
+  if (solid) {
+    g->fillRoundRect(PROMPT_X, y, PROMPT_W, PROMPT_BTN_H, BTN_R, ink);
+  } else {
+    for (int k = 0; k < BTN_LINE; k++)
+      g->drawRoundRect(PROMPT_X + k, y + k, PROMPT_W - 2 * k, PROMPT_BTN_H - 2 * k, BTN_R, ink);
   }
+}
+
+// One answer: the key digit, then the label. The first is solid black, the
+// rest outlined; `lit` (the answer that was sent) is solid instead of the
+// first. Off: black at 40%.
+void drawOption(LovyanGFX *g, int y, const PromptOpt &o, bool solid, bool enabled) {
+  const uint16_t ink = enabled ? BG : promptOff();
+  drawPromptButton(g, y, solid, ink);
+  const uint16_t fg = solid ? ACCENT : ink, bg = solid ? ink : ACCENT;
   const int cy = y + PROMPT_BTN_H / 2;
-  g->fillSmoothCircle(KEY_CX, cy, KEY_R, fg);
   const char key[2] = {o.key, '\0'};
-  g->setFont(&V_S12.font);
-  g->setTextDatum(middle_center);
-  g->setTextColor(enabled ? bg : INK, fg);
-  g->drawString(key, KEY_CX, cy);
-  drawLine(g, V_S12, o.label, LABEL_X, cy, PROMPT_X + PROMPT_W - 10 - LABEL_X, text, bg, middle_left);
+  g->setFont(&V_RM13.font);
+  g->setTextDatum(middle_left);
+  g->setTextColor(fg, bg);
+  g->drawString(key, KEY_X, cy);
+  drawLine(g, V_RM13, o.label, LABEL_X, cy, PROMPT_X + PROMPT_W - 8 - LABEL_X, fg, bg, middle_left);
 }
 
 void drawBackButton(LovyanGFX *g, int y) {
-  const uint16_t bg = to565(BTN_BG);
-  g->fillSmoothRoundRect(PROMPT_X, y, PROMPT_W, PROMPT_BTN_H, BTN_R, bg);
-  g->setFont(&V_S12.font);
+  drawPromptButton(g, y, false, BG);
+  g->setFont(&V_RM13.font);
   g->setTextDatum(middle_center);
-  g->setTextColor(INK, bg);
-  g->drawString("BACK", LCD_WIDTH / 2, y + PROMPT_BTN_H / 2);
+  g->setTextColor(BG, ACCENT);
+  g->drawString("back", LCD_WIDTH / 2, y + PROMPT_BTN_H / 2);
 }
 
 // The column under the header, in PromptLayout's blocks, `scroll` px up.
@@ -1267,59 +1349,62 @@ void drawPromptColumn(LovyanGFX *g, const AgentPrompt &q, const PromptUi &v) {
   const int y0 = PROMPT_VIEW_Y - v.scroll;
 
   g->setClipRect(0, PROMPT_VIEW_Y, LCD_WIDTH, PROMPT_VIEW_H);
-  g->setFont(&V_B18.font);
+  g->setFont(&V_RB18.font);
   g->setTextDatum(top_left);
-  g->setTextColor(INK, BG);
+  g->setTextColor(BG, ACCENT);
   for (uint8_t i = 0; i < t.nTitle; i++) g->drawString(t.title[i], PROMPT_X, y0 + i * PROMPT_TITLE_LINE_H);
   int y = y0 + t.nTitle * PROMPT_TITLE_LINE_H;
 
   if (t.nDetail) {
     y += PROMPT_BLOCK_GAP;
     const int h = t.nDetail * PROMPT_DETAIL_LINE_H + PROMPT_DETAIL_PAD;
-    const uint16_t bg = to565(TILE_BG);
-    g->fillSmoothRoundRect(PROMPT_X, y, PROMPT_W, h, 8, bg);
-    g->setFont(&V_S12.font);
+    g->fillRoundRect(PROMPT_X, y, PROMPT_W, h, BTN_R, BG);
+    g->setFont(&V_RM13.font);
     g->setTextDatum(top_left);
-    g->setTextColor(q.cut ? DIM : INK, bg);
+    g->setTextColor(q.cut ? DIM : INK, BG);
     for (uint8_t i = 0; i < t.nDetail; i++)
       g->drawString(t.detail[i], PROMPT_X + DETAIL_PAD_X, y + PROMPT_DETAIL_PAD / 2 + i * PROMPT_DETAIL_LINE_H);
     y += h;
   }
   if (t.hasContext) {
     y += PROMPT_BLOCK_GAP;
-    g->setFont(&V_S12.font);
+    g->setFont(&V_RM11.font);
     g->setTextDatum(middle_left);
-    g->setTextColor(DIM, BG);
+    g->setTextColor(BG, ACCENT);
     g->drawString(t.context[0], PROMPT_X, y + PROMPT_CONTEXT_H / 2);
   }
 
   // NoAnswer lets a tap through again, so its buttons look live.
   const bool enabled = v.off == ButtonsOff::No || v.off == ButtonsOff::NoAnswer;
-  for (uint8_t i = 0; i < promptButtons(q); i++)
-    drawOption(g, y0 + L.buttonY(i), q.opts[i], i == 0, enabled, i == v.lit);
-  if (reason) drawCaps(g, reason, LCD_WIDTH / 2, y0 + L.reasonY() + PROMPT_REASON_H / 2, DIM, middle_center);
+  for (uint8_t i = 0; i < promptButtons(q); i++) {
+    const bool solid = v.lit >= 0 ? i == v.lit : i == 0;
+    drawOption(g, y0 + L.buttonY(i), q.opts[i], solid, enabled || i == v.lit);
+  }
+  if (reason) drawLine(g, V_RM11, reason, LCD_WIDTH / 2, y0 + L.reasonY() + PROMPT_REASON_H / 2, PROMPT_W, BG,
+                       ACCENT, middle_center);
   drawBackButton(g, y0 + L.backY());
   g->clearClipRect();
-  drawScrollBar(g, PROMPT_X + PROMPT_W + 6, PROMPT_VIEW_Y, PROMPT_VIEW_H, L.contentH(), v.scroll);
+  drawScrollBar(g, PROMPT_X + PROMPT_W + 6, PROMPT_VIEW_Y, PROMPT_VIEW_H, L.contentH(), v.scroll, promptOff());
 }
 
-// No prompt to answer here: the waiting critter, large, over two lines of copy.
-void drawPromptNotice(LovyanGFX *g, const char *big, const char *small, uint32_t now) {
-  drawCritter(g, Pose::Wait, now, LCD_WIDTH / 2 - CRIT_CENTRE_X * NOTICE_CELL, 106, NOTICE_CELL,
-              CritterInks{g_palette[ACC_ACCENT], BG});
-  g->setFont(&V_B24.font);
-  if (g->textWidth(big) > PROMPT_W) g->setFont(&V_B18.font);
+// No prompt to answer here: the agent's critter, large, over two lines of copy.
+void drawPromptNotice(LovyanGFX *g, const AgentTile &tile, const char *big, const char *small, uint32_t now) {
+  drawCritter(g, Pose::Wait, hatFromCode(tile.hat), now, LCD_WIDTH / 2 - TILE_CRIT_X * NOTICE_CELL, 112,
+              NOTICE_CELL, CritterInks{BG_RGB, ACCENT_RGB});
+  for (Vlw *f : {&V_RB24, &V_RB18, &V_RB14}) {  // the largest that fits
+    g->setFont(&f->font);
+    if (g->textWidth(big) <= PROMPT_W) break;
+  }
   g->setTextDatum(middle_center);
-  g->setTextColor(INK, BG);
-  g->drawString(big, LCD_WIDTH / 2, 178);
+  g->setTextColor(BG, ACCENT);
+  g->drawString(big, LCD_WIDTH / 2, 180);
   // A long agent name in "answer <name> first" takes a second line.
-  char caps[48], lines[2][LINE_CAP];
-  upper(small, caps, sizeof(caps));
-  g->setFont(&V_S12.font);
-  const uint8_t n = wrapText(g, caps, PROMPT_W, 2, lines);
+  char lines[2][LINE_CAP];
+  g->setFont(&V_RM13.font);
+  const uint8_t n = wrapText(g, small, PROMPT_W, 2, lines);
   g->setTextDatum(middle_center);
-  g->setTextColor(DIM, BG);
-  for (uint8_t i = 0; i < n; i++) g->drawString(lines[i], LCD_WIDTH / 2, 208 + i * 18);
+  g->setTextColor(BG, ACCENT);
+  for (uint8_t i = 0; i < n; i++) g->drawString(lines[i], LCD_WIDTH / 2, 210 + i * 18);
 }
 
 }  // namespace
@@ -1333,7 +1418,6 @@ void uiBegin(Display &) {
   LINE = to565(LINE_RGB);
   ACCENT = g_palette[ACC_ACCENT];
   EMPTY = to565(EMPTY_RGB);
-  FAINT = LINE;
   MUTED = to565(MUTED_RGB);
   ACC_DEV = ACCENT;
 
@@ -1349,7 +1433,6 @@ void uiBegin(Display &) {
   loadVlw(V_RB40, font_rb40, sizeof(font_rb40));
   loadVlw(V_B30, font_b30, sizeof(font_b30));
   loadVlw(V_B24, font_b24, sizeof(font_b24));
-  loadVlw(V_B18, font_b18, sizeof(font_b18));
   loadVlw(V_S12, font_s12, sizeof(font_s12));
   loadVlw(V_B18V, font_b18v, sizeof(font_b18v));
   loadVlw(V_S12V, font_s12v, sizeof(font_s12v));
@@ -1455,7 +1538,9 @@ void uiMessage(Display &lcd, const char *title, const char *body) {
   g->setTextDatum(middle_center);
   g->setFont(&V_RB24.font);
   g->setTextColor(ACCENT, BG);
-  g->drawString(title, LCD_WIDTH / 2, LCD_HEIGHT / 2 - 16);
+  char low[32];
+  lowerCopy(title, low, sizeof(low));  // lower-case like every label; the body may be an SSID, kept as is
+  g->drawString(low, LCD_WIDTH / 2, LCD_HEIGHT / 2 - 16);
   g->setFont(&V_RM13.font);
   g->setTextColor(DIM, BG);
   g->drawString(body, LCD_WIDTH / 2, LCD_HEIGHT / 2 + 12);
@@ -1466,7 +1551,7 @@ void uiPortal(Display &lcd, const char *apName, const char *apIp, const char *la
   LovyanGFX *g = target(lcd);
   g->fillScreen(BG);
 
-  drawCaps(g, "WiFi setup", LCD_WIDTH / 2, 30, ACCENT, middle_center);
+  drawLabel(g, "wifi setup", LCD_WIDTH / 2, 30, ACCENT, middle_center);
 
   // A WiFi QR: phones offer to join the (open) network when it is scanned.
   // Version 3 is 29 modules, so 116px is a whole 4px per module. The white
@@ -1484,13 +1569,13 @@ void uiPortal(Display &lcd, const char *apName, const char *apIp, const char *la
   g->setTextColor(INK, BG);
   g->drawString(apName, LCD_WIDTH / 2, 190);
 
-  drawCaps(g, "Join, then open", LCD_WIDTH / 2, 214, DIM, middle_center);
+  drawLabel(g, "join, then open", LCD_WIDTH / 2, 214, DIM, middle_center);
   g->setFont(&V_RM13.font);
   g->setTextColor(DIM, BG);
   g->drawString(apIp, LCD_WIDTH / 2, 234);
   if (lanIp && lanIp[0]) {
     char lan[40];
-    snprintf(lan, sizeof(lan), "or on WiFi %s", lanIp);
+    snprintf(lan, sizeof(lan), "or on wifi %s", lanIp);
     g->drawString(lan, LCD_WIDTH / 2, 252);
   }
 
@@ -1501,7 +1586,7 @@ void uiBlePair(Display &lcd, uint32_t passkey) {
   g_animating = false;  // a static screen: a sweep cut short must not keep main.cpp drawing
   LovyanGFX *g = target(lcd);
   g->fillScreen(BG);
-  drawCaps(g, "Pair with Mac", LCD_WIDTH / 2, 40, ACCENT, middle_center);
+  drawLabel(g, "pair with mac", LCD_WIDTH / 2, 40, ACCENT, middle_center);
 
   g->setTextDatum(middle_center);
   if (passkey) {
@@ -1510,18 +1595,18 @@ void uiBlePair(Display &lcd, uint32_t passkey) {
     g->setFont(&V_RB30.font);
     g->setTextColor(INK, BG);
     g->drawString(code, LCD_WIDTH / 2, 118);
-    drawCaps(g, "Type this on your Mac", LCD_WIDTH / 2, 156, DIM, middle_center);
+    drawLabel(g, "type this on your mac", LCD_WIDTH / 2, 156, DIM, middle_center);
   } else {
     g->setFont(&V_RB18.font);
     g->setTextColor(INK, BG);
-    g->drawString("Waiting for a Mac", LCD_WIDTH / 2, 112);
-    drawCaps(g, "Open Claude Cube Link", LCD_WIDTH / 2, 150, DIM, middle_center);
+    g->drawString("waiting for a mac", LCD_WIDTH / 2, 112);
+    drawLabel(g, "open claude cube link", LCD_WIDTH / 2, 150, DIM, middle_center);
   }
 
   g->setFont(&V_RM13.font);
   g->setTextColor(DIM, BG);
-  g->drawString("Stuck? Forget Claude Cube", LCD_WIDTH / 2, 226);
-  g->drawString("in Mac Bluetooth settings", LCD_WIDTH / 2, 244);
+  g->drawString("stuck? forget claude cube", LCD_WIDTH / 2, 226);
+  g->drawString("in mac bluetooth settings", LCD_WIDTH / 2, 244);
 
   present(lcd);
 }
@@ -1548,10 +1633,10 @@ void uiUnlock(Display &lcd, bool waiting) {
   g->setTextDatum(middle_center);
   g->setFont(&V_RB24.font);
   g->setTextColor(INK, BG);
-  g->drawString(waiting ? "Unlocking" : "Tap to unlock", CX, 186);
-  drawCaps(g, waiting ? "Check your Mac" : "Your Mac is locked", CX, 214, DIM, middle_center);
+  g->drawString(waiting ? "unlocking" : "tap to unlock", CX, 186);
+  drawLabel(g, waiting ? "Check your Mac" : "Your Mac is locked", CX, 214, DIM, middle_center);
 
-  drawCaps(g, "Swipe for the cards", CX, 256, MUTED, middle_center);
+  drawLabel(g, "swipe for the cards", CX, 256, MUTED, middle_center);
   present(lcd);
 }
 
@@ -1560,26 +1645,30 @@ void uiAgentPrompt(Display &lcd, const AgentsData &a, const AgentTile &tile, con
   g_animating = false;
   g_link = link;
   LovyanGFX *g = target(lcd);
-  g->fillScreen(BG);
-  drawTopBar(g, online, ageMs, bat);
-  char name[24];
-  upper(tile.name, name, sizeof(name));
-  drawLine(g, V_S12, name, PROMPT_X, PROMPT_HEADER_Y, PROMPT_W, g_palette[ACC_ACCENT], BG, middle_left);
+  g->fillScreen(ACCENT);
+  const uint32_t now = millis();
+  const bool prompt = v.screen == PromptScreen::Prompt && a.hasPrompt;
+  // The prompt carries the agent's small critter top-left (the battery moves
+  // over for it); the notices draw it large instead.
+  if (prompt)
+    drawCritter(g, poseFromName(tile.pose), hatFromCode(tile.hat), now, PROMPT_CRIT_X, PROMPT_CRIT_Y, PROMPT_CELL,
+                CritterInks{BG_RGB, ACCENT_RGB});
+  drawTopBar(g, online, ageMs, bat, true, prompt ? PROMPT_BATTERY_X : 36);
+  drawLine(g, V_RB18, tile.name, PROMPT_X, PROMPT_HEADER_Y, PROMPT_W, BG, ACCENT, middle_left);
 
   // The fixed copy of each screen (agent_view.h decides which).
-  const uint32_t now = millis();
   char queued[48];
-  if (v.screen == PromptScreen::Prompt && a.hasPrompt) {
+  if (prompt) {
     drawPromptColumn(g, a.prompt, v);
   } else if (v.screen == PromptScreen::OverWifi) {
-    drawPromptNotice(g, "needs you", "open on Bluetooth", now);
+    drawPromptNotice(g, tile, "needs you", "open on bluetooth", now);
   } else if (v.screen == PromptScreen::Queued && v.queuedName && v.queuedName[0]) {
     snprintf(queued, sizeof(queued), "answer %s first", v.queuedName);
-    drawPromptNotice(g, "needs you", queued, now);
+    drawPromptNotice(g, tile, "needs you", queued, now);
   } else if (v.screen == PromptScreen::Dropped) {
-    drawPromptNotice(g, "too long for the cube", "answer at the terminal", now);
+    drawPromptNotice(g, tile, "too long for the cube", "answer at the terminal", now);
   } else {
-    drawPromptNotice(g, "needs you", "answer at the terminal", now);
+    drawPromptNotice(g, tile, "needs you", "answer at the terminal", now);
   }
   present(lcd);
 }
@@ -1889,7 +1978,7 @@ void uiOta(Display &lcd, uint8_t percent) {
   g->fillScreen(BG);
 
   constexpr int W = 160, H = 8, X = (LCD_WIDTH - W) / 2, Y = 150;
-  drawCaps(g, "Updating", LCD_WIDTH / 2, 100, ACCENT, middle_center);
+  drawLabel(g, "updating", LCD_WIDTH / 2, 100, ACCENT, middle_center);
 
   g->fillRect(X, Y, W, H, LINE);
   const int pct = percent > 100 ? 100 : percent;
@@ -1903,6 +1992,6 @@ void uiOta(Display &lcd, uint8_t percent) {
   g->setTextColor(INK, BG);
   g->drawString(buf, LCD_WIDTH / 2, 190);
 
-  drawCaps(g, "Do not unplug", LCD_WIDTH / 2, 230, DIM, middle_center);
+  drawLabel(g, "do not unplug", LCD_WIDTH / 2, 230, DIM, middle_center);
   present(lcd);
 }
