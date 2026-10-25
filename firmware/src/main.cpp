@@ -10,6 +10,7 @@
 #include "agent_alert.h"
 #include "agent_view.h"
 #include "agents_layout.h"
+#include "anim_pacer.h"
 #include "battery.h"
 #ifdef BATTERY_LOG
 #include "battery_log.h"
@@ -701,6 +702,28 @@ void setup() {
   dirty = true;
 }
 
+// The one screen a frame draws, in priority order. The draw path and the
+// animation pacer both ask this, so they agree on what is on the glass.
+enum class Shown : uint8_t { Passkey, Nav, PairingMsg, Waiting, Editor, Unlock, Prompt, Deck };
+Shown shownScreen(uint32_t now, const AgentTile **promptTile) {
+  // The open prompt's agent (update() closed the view if its tile went).
+  *promptTile = agentView.isOpen() ? agentsTile(payload.agents, agentView.agent()) : nullptr;
+  if (bleState() == BleState::Pairing) return Shown::Passkey;  // the code must be seen
+  if (navSession.active()) return Shown::Nav;
+  if (pairingMsgUp()) return Shown::PairingMsg;
+  if (!pairWaitDismissed && waitingToPair()) return Shown::Waiting;
+  if (editing && !uiEditorSliding()) return Shown::Editor;
+  if (!editing && unlock.screen(now) != UnlockScreen::Hidden) return Shown::Unlock;
+  if (*promptTile) return Shown::Prompt;
+  return Shown::Deck;
+}
+
+// The critters move on the Agents card and the prompt screen (anim_pacer.h).
+AnimPacer animPacer;
+#ifdef SIM_BENCH
+bool g_benchAnimOff = false;  // the bench's still run: the same card, never animated
+#endif
+
 void loop() {
   if (otaUp) otaHandle();
   const uint32_t now = millis();
@@ -913,38 +936,44 @@ void loop() {
     }
   }
   if (!screenOn) {
+    animPacer.due(now, false, false);  // nothing moves on a dark panel
     delay(50);  // touch is still polled, so a tap wakes it at once
     return;
   }
   applyRotation();
-  setCpu(cpuPolicy.update(now, touchDown || uiAnimating() || navSession.active()));
 
-  // Redraw on change, every frame while a ring is still moving, and once a
-  // second otherwise so the freshness counter ticks.
+  // The critters' next frame. Never activity (idle is not told), and on battery
+  // it does not raise the clock: only touch and the ring/slide animations do.
+  const AgentTile *promptTile = nullptr;
+  const Shown shown = shownScreen(now, &promptTile);
+  bool animOn = shown == Shown::Prompt || (shown == Shown::Deck && onAgentsCard());
+#ifdef SIM_BENCH
+  if (g_benchAnimOff) animOn = false;
+#endif
+  const bool external = batteryOnExternal();
+  const bool animFrame = animPacer.due(now, animOn, external);
+  if (animFrame) dirty = true;
+  setCpu(cpuPolicy.update(now, touchDown || uiAnimating() || navSession.active() || (animFrame && external)));
+
+  // Redraw on change (a critter frame is one), every frame while a ring is
+  // still moving, and once a second otherwise so the freshness counter ticks.
   if (dirty || uiAnimating() || now - lastDraw >= 1000) {
     const uint32_t age = lastGood ? now - lastGood : now;
-    const bool pairing = bleState() == BleState::Pairing;
-    const bool waiting = !pairWaitDismissed && waitingToPair();
-    const bool editorUp = editing && !uiEditorSliding();
-    const bool navOn = navSession.active();
-    const UnlockScreen us = editing ? UnlockScreen::Hidden : unlock.screen(now);
     const bool online = td.bleLive || netOnline();
     const UiLink link = td.bleLive ? UiLink::Ble : (wifiUp && netOnline() ? UiLink::Wifi : UiLink::None);
-    // The open prompt's agent (update() closed the view if its tile went).
-    const AgentTile *promptTile = agentView.isOpen() ? agentsTile(payload.agents, agentView.agent()) : nullptr;
     const bool promptWasShown = drawnPrompt.shown;
     drawnPrompt.shown = false;
-    if (pairing) uiBlePair(lcd, blePasskey());  // the code must be seen
-    else if (navOn) {
+    if (shown == Shown::Passkey) uiBlePair(lcd, blePasskey());
+    else if (shown == Shown::Nav) {
       const uint32_t t0 = millis();
       uiNav(lcd, navScene, navPhoneLost, bv, navPan.x(), navPan.y());
       logNavCompose(now, millis() - t0);
     }
-    else if (pairingMsgUp()) uiMessage(lcd, "PAIRING OPEN", "pair from the app or mac");
-    else if (waiting) uiBlePair(lcd, 0);
-    else if (editorUp) uiDeviceEditor(lcd, editDevice);
-    else if (us != UnlockScreen::Hidden) uiUnlock(lcd, us == UnlockScreen::Waiting);
-    else if (promptTile) {
+    else if (shown == Shown::PairingMsg) uiMessage(lcd, "PAIRING OPEN", "pair from the app or mac");
+    else if (shown == Shown::Waiting) uiBlePair(lcd, 0);
+    else if (shown == Shown::Editor) uiDeviceEditor(lcd, editDevice);
+    else if (shown == Shown::Unlock) uiUnlock(lcd, unlock.screen(now) == UnlockScreen::Waiting);
+    else if (shown == Shown::Prompt) {
       const AgentsData &a = payload.agents;
       const AgentTile *first = a.hasPrompt ? agentsTile(a, a.prompt.agent) : nullptr;
       // The prompt comes back from under another screen (unlock, a ride, the

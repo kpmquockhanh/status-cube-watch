@@ -16,10 +16,16 @@
 // backlight LEDs are not in that figure; the backlight is reported on its own
 // as a duty cycle.
 //
-//   ./build/cube-bench <desk|linked|browse|editor|sleep|volume|nav|ride|agents|alert|handover|render> [slowdown]
+//   ./build/cube-bench <desk|linked|browse|editor|sleep|volume|nav|ride|agents|alert|handover|
+//                       agents-usb|agents-battery|agents-battery-still|render> [slowdown]
+//
+// `agents-battery` first runs `agents-battery-still` in a child process (so the
+// firmware's globals start fresh) and fails if the critters' frames cost more
+// than ANIM_BUDGET x the same card drawn still.
 
 #include <ArduinoJson.h>
 
+#include <sys/wait.h>
 #include <unistd.h>
 
 #include <algorithm>
@@ -54,6 +60,7 @@ uint8_t benchCardIndex();  // main.cpp
 bool benchNavActive();     // main.cpp
 bool benchPromptOpen();    // main.cpp
 bool benchPayloadViaBle(); // main.cpp
+extern bool g_benchAnimOff;  // main.cpp: the still run never animates the critters
 
 namespace {
 
@@ -140,8 +147,14 @@ struct Scenario {
   uint16_t rotateSec;  // auto-advance, 0 = off
   // The Agents card after the usage card: AGENTS_RUNNING is four working
   // agents; AGENTS_ALERT the same until ALERT_AT_MS, then one waits on a prompt;
-  // AGENTS_HANDOVER has it waiting from the start.
-  enum : uint8_t { AGENTS_NONE, AGENTS_RUNNING, AGENTS_ALERT, AGENTS_HANDOVER } agents;
+  // AGENTS_HANDOVER has it waiting from the start. AGENTS_DECK is a payload that
+  // never changes, the Agents card first (the card boot lands on): two at work,
+  // a hungry one, an idle one, nobody waiting (so no alert).
+  enum : uint8_t { AGENTS_NONE, AGENTS_RUNNING, AGENTS_ALERT, AGENTS_HANDOVER, AGENTS_DECK } agents;
+  // CUBE_POWER=battery for the run (batteryOnExternal() false; usb otherwise),
+  // and the still variant: the critter pacer forced off.
+  bool battery;
+  bool animOff;
   // BLE payloads start this long into the run (0 = at once); until then WiFi
   // delivers, and for `handover` its fetches answer with the LAN variant.
   uint32_t bleFromMs;
@@ -232,6 +245,19 @@ Scenario makeScenario(const std::string &name) {
     s.seconds = 120;
     s.agents = Scenario::AGENTS_HANDOVER;
     s.bleFromMs = 40000;
+  } else if (name == "agents-usb") {
+    s.what = "Agents card on screen, external power: critters at 10 frames/s";
+    s.seconds = 120;
+    s.agents = Scenario::AGENTS_DECK;
+  } else if (name == "agents-battery" || name == "agents-battery-still") {
+    s.animOff = name == "agents-battery-still";
+    s.what = s.animOff ? "as agents-battery, the critters never move (the budget's baseline)"
+                       : "Agents card on screen, on battery: critters at 2 frames/s, dark after 2 min";
+    s.seconds = 130;  // the first payload lands at once: ~120 s on screen, then the screen sleeps
+    s.sleepMin = 2;
+    s.mustSleep = true;
+    s.battery = true;
+    s.agents = Scenario::AGENTS_DECK;
   } else if (name == "sleep") {
     s.what = "Mac gone: WiFi fetches fail, screen sleeps after the timeout (2 min)";
     s.seconds = 600;
@@ -247,6 +273,7 @@ Scenario makeScenario(const std::string &name) {
 }
 
 constexpr uint32_t ALERT_AT_MS = 300000;
+constexpr double ANIM_BUDGET = 1.2;  // agents-battery's MCU mA over agents-battery-still's, at most
 
 // The scenario's Agents card (none for most): four agents at work, whose lines,
 // poses and context move every 5 s as the bridge's would; for `alert`, from
@@ -254,6 +281,13 @@ constexpr uint32_t ALERT_AT_MS = 300000;
 // `lan`: the variant WiFi gets, without the prompt.
 std::string agentsJson(uint32_t sinceStartMs, bool lan) {
   if (S.agents == Scenario::AGENTS_NONE) return "";
+  if (S.agents == Scenario::AGENTS_DECK) {  // still: no comma in front, payloadJson puts it first
+    return "{\"t\":\"AGENTS\",\"v\":\"4\",\"s1\":\"2 WORKING\",\"s2\":\"\",\"c\":\"ink\",\"a\":["
+           "{\"i\":\"l00001\",\"n\":\"infra-network\",\"l\":\"bash . 12% ctx\",\"k\":\"run\",\"p\":\"bash\",\"x\":12,\"h\":10},"
+           "{\"i\":\"l00002\",\"n\":\"checkout-api\",\"l\":\"edit . 41% ctx\",\"k\":\"run\",\"p\":\"write\",\"x\":41,\"h\":17},"
+           "{\"i\":\"l00003\",\"n\":\"docs-site\",\"l\":\"hungry . feed me\",\"k\":\"idle\",\"p\":\"hungry\",\"x\":3,\"u\":1,\"h\":63},"
+           "{\"i\":\"l00004\",\"n\":\"claude-status...\",\"l\":\"idle\",\"k\":\"idle\",\"p\":\"idle\",\"x\":8,\"h\":30}]}";
+  }
   static const char *const names[4] = {"infra-network", "checkout-api", "docs-site", "claude-status..."};
   static const char *const poses[5] = {"bash", "read", "write", "think", "web"};
   const bool waiting = S.agents == Scenario::AGENTS_HANDOVER ||
@@ -285,26 +319,30 @@ std::string agentsJson(uint32_t sinceStartMs, bool lan) {
 // The usage card from fixtures/usage.json, with the countdown running down a
 // minute at a time and the 5h percentage creeping up, as the bridge sends it,
 // then the scenario's Agents card.
+// For AGENTS_DECK the Agents card comes first, so the deck starts on it.
 std::string payloadJson(uint32_t nowMs, bool lan = false) {
   const std::string agents = agentsJson(g_running ? nowMs - g_start : 0, lan);
-  static std::string cache;
+  static std::string usage;
   static int cachedMin = -1;
   const int min = (int)(nowMs / 60000);
-  if (min == cachedMin) return cache + agents + "]}";
-  cachedMin = min;
-  const int left = 249 - min > 0 ? 249 - min : 0;
-  const int g = 14 + min / 3;
-  char reset[16];
-  snprintf(reset, sizeof(reset), "%dh %02dm", left / 60, left % 60);
-  char buf[512];
-  snprintf(buf, sizeof(buf),
-           "{\"v\":1,\"ts\":0,\"src\":\"oauth\",\"cards\":[{\"t\":\"CLAUDE\",\"v\":\"%s\","
-           "\"s1\":\"to reset\",\"s2\":\"\",\"c\":\"green\",\"g\":%d,\"c2\":\"green\",\"g2\":53,"
-           "\"rows\":[{\"k\":\"5H\",\"p\":\"%d%%\",\"r\":\"%s\"},{\"k\":\"7D\",\"p\":\"53%%\",\"r\":\"1d 1h\"}],"
-           "\"m\":\"12\",\"mc\":\"amber\"}",
-           reset, g, g, reset);
-  cache = buf;
-  return cache + agents + "]}";
+  if (min != cachedMin) {
+    cachedMin = min;
+    const int left = 249 - min > 0 ? 249 - min : 0;
+    const int g = 14 + min / 3;
+    char reset[16];
+    snprintf(reset, sizeof(reset), "%dh %02dm", left / 60, left % 60);
+    char buf[512];
+    snprintf(buf, sizeof(buf),
+             "{\"t\":\"CLAUDE\",\"v\":\"%s\","
+             "\"s1\":\"to reset\",\"s2\":\"\",\"c\":\"green\",\"g\":%d,\"c2\":\"green\",\"g2\":53,"
+             "\"rows\":[{\"k\":\"5H\",\"p\":\"%d%%\",\"r\":\"%s\"},{\"k\":\"7D\",\"p\":\"53%%\",\"r\":\"1d 1h\"}],"
+             "\"m\":\"12\",\"mc\":\"amber\"}",
+             reset, g, g, reset);
+    usage = buf;
+  }
+  const std::string head = "{\"v\":1,\"ts\":0,\"src\":\"oauth\",\"cards\":[";
+  if (S.agents == Scenario::AGENTS_DECK) return head + agents + "," + usage + "]}";
+  return head + usage + agents + "]}";
 }
 
 bool parsePayload(const std::string &json, Payload &out) {
@@ -606,7 +644,11 @@ namespace {
 
 uint64_t g_wifiWonPasses = 0;  // passes that ended with BLE live but WiFi's payload applied
 
-void runScenario() {
+// Returns the modelled MCU current, mA.
+double runScenario() {
+  // Every run names its power source, whatever the caller's environment says.
+  setenv("CUBE_POWER", S.battery ? "battery" : "usb", 1);
+  g_benchAnimOff = S.animOff;
   setup();  // loads the config.h defaults, so the scenario's timers go in after it
   DeviceSettings d = deviceSettings();
   d.sleepMin = S.sleepMin;
@@ -677,6 +719,32 @@ void runScenario() {
          g_passes / (double)S.seconds, charge / total, g_backlightUs / total * 100.0, S.what);
   if (g_clamped) fprintf(g_out, "          (%llu passes clamped at %.0f ms host time)\n", (unsigned long long)g_clamped,
                         HOST_PASS_CAP_NS / 1e6);
+  return charge / total;
+}
+
+// Runs `name` in a child process (fresh firmware globals), which prints its own
+// row, and returns its modelled mA (< 0 if it failed or, when it must, did not sleep).
+double runChild(const std::string &name) {
+  int fd[2];
+  if (pipe(fd) != 0) return -1;
+  fflush(g_out);
+  const pid_t pid = fork();
+  if (pid < 0) return -1;
+  if (pid == 0) {
+    close(fd[0]);
+    S = makeScenario(name);
+    double ma = runScenario();
+    if (S.mustSleep && g_backlight != 0) ma = -1;
+    fflush(g_out);
+    _exit(write(fd[1], &ma, sizeof(ma)) == (ssize_t)sizeof(ma) ? 0 : 1);
+  }
+  close(fd[1]);
+  double ma = -1;
+  if (read(fd[0], &ma, sizeof(ma)) != (ssize_t)sizeof(ma)) ma = -1;
+  close(fd[0]);
+  int status = 0;
+  waitpid(pid, &status, 0);
+  return WIFEXITED(status) && WEXITSTATUS(status) == 0 ? ma : -1;
 }
 
 // Host time of one call of `fn`, less the time spent copying into the panel:
@@ -768,7 +836,25 @@ int main(int argc, char **argv) {
     fprintf(stderr, "unknown scenario %s\n", name.c_str());
     return 2;
   }
-  runScenario();
+  // The battery budget: the critters' frames against the same card drawn still.
+  double stillMa = 0;
+  if (name == "agents-battery") {
+    stillMa = runChild("agents-battery-still");
+    if (stillMa <= 0) {
+      fprintf(stderr, "%s: the still baseline failed\n", name.c_str());
+      return 1;
+    }
+  }
+  const double ma = runScenario();
+  if (stillMa > 0) {
+    fprintf(g_out, "          (animating / still = %.2f / %.2f mA = %.3fx, budget %.1fx)\n", ma, stillMa, ma / stillMa,
+            ANIM_BUDGET);
+    if (ma > ANIM_BUDGET * stillMa) {
+      fprintf(stderr, "%s: %.2f mA animating is over %.1fx the %.2f mA of the card drawn still\n", S.name, ma,
+              ANIM_BUDGET, stillMa);
+      return 1;
+    }
+  }
   if (g_stale || !g_checked) {
     fprintf(stderr, "%s: %llu of %llu frames left the panel different from the sprite\n", S.name,
             (unsigned long long)g_stale, (unsigned long long)g_checked);
