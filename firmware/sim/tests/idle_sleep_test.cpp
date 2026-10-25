@@ -82,6 +82,22 @@ void testStampNewerThanNow() {  // touch stamped later in the same loop pass tha
   CHECK(s.update(T, false, T));
 }
 
+void testWakeFromSleep() {
+  IdleSleep s;
+  s.begin(0);
+  CHECK(!s.update(T, false, T));
+  CHECK(s.wake(T + 10));
+  CHECK(s.update(T + 10, false, T));
+}
+
+void testWakeWhileOn() {
+  IdleSleep s;
+  s.begin(0);
+  CHECK(!s.wake(T - 100));    // already on: nothing to wake, but the timer restarts
+  CHECK(s.update(T - 100 + T - 1, false, T));
+  CHECK(!s.update(T - 100 + T, false, T));
+}
+
 }  // namespace
 
 int main() {
@@ -95,5 +111,7 @@ int main() {
   testBlockedWakesSleeper();
   testMillisWrap();
   testStampNewerThanNow();
+  testWakeFromSleep();
+  testWakeWhileOn();
   return checksDone("idle_sleep_test");
 }

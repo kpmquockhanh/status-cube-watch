@@ -4,7 +4,7 @@
 // caller reports data() only when what the cards read changed (readings_key.h),
 // not for every payload, or the Mac's 5 s resend would keep it on forever. New
 // readings while awake count as activity, but they never wake a sleeping
-// screen. A touch wakes it and is reported as consumed so it does not also
+// screen; only an alert can, through wake(). A touch wakes it and is reported as consumed so it does not also
 // change the card. `blocked` (editor open, pairing code...) forces the screen
 // on and restarts the timer. timeoutMs == 0 disables sleeping.
 
@@ -23,6 +23,15 @@ class IdleSleep {
     if (!asleep_) return false;
     asleep_ = false;
     return true;
+  }
+
+  // The screen should come on now (an agent alert). True if it was asleep.
+  // Restarts the timer either way, so the alert stays on for a full timeout.
+  bool wake(uint32_t now) {
+    last_ = now;
+    const bool was = asleep_;
+    asleep_ = false;
+    return was;
   }
 
   // Returns true while the screen should be on.
