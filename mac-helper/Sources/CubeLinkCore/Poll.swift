@@ -16,7 +16,8 @@ public enum PollPolicy {
         }
     }
 
-    public static func interval(payload: Data?) -> TimeInterval {
-        agentWaiting(payload: payload) ? waiting : idle
+    /// A detail screen open on the cube needs fresh numbers each second, like a waiting prompt.
+    public static func interval(payload: Data?, detailOpen: Bool = false) -> TimeInterval {
+        detailOpen || agentWaiting(payload: payload) ? waiting : idle
     }
 }
