@@ -1269,8 +1269,7 @@ void drawPromptColumn(LovyanGFX *g, const AgentPrompt &q, const PromptUi &v) {
   const bool enabled = v.off == ButtonsOff::No || v.off == ButtonsOff::NoAnswer;
   for (uint8_t i = 0; i < promptButtons(q); i++)
     drawOption(g, y0 + L.buttonY(i), q.opts[i], i == 0, enabled, i == v.lit);
-  if (reason)
-    drawCaps(g, reason, LCD_WIDTH / 2, y0 + L.backY() - PROMPT_BLOCK_GAP - PROMPT_REASON_H / 2, DIM, middle_center);
+  if (reason) drawCaps(g, reason, LCD_WIDTH / 2, y0 + L.reasonY() + PROMPT_REASON_H / 2, DIM, middle_center);
   drawBackButton(g, y0 + L.backY());
   g->clearClipRect();
   drawScrollBar(g, PROMPT_X + PROMPT_W + 6, PROMPT_VIEW_Y, PROMPT_VIEW_H, L.contentH(), v.scroll);

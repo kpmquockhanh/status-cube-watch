@@ -105,23 +105,29 @@ struct PromptMetrics {
 };
 
 // Blocks stacked in content coordinates from 0: title, detail box, context
-// line, option buttons, reason line, BACK. The optional ones leave no gap.
+// line, reason line, option buttons, BACK. The optional ones leave no gap. The
+// reason (why the buttons are off) sits above the buttons so it shows without
+// scrolling on a typical prompt.
 struct PromptLayout {
   void build(const PromptMetrics &m, uint8_t nButtons) {
     _n = nButtons;
     int16_t y = (int16_t)(m.titleLines * PROMPT_TITLE_LINE_H);
     if (m.detailLines > 0) y = (int16_t)(y + PROMPT_BLOCK_GAP + m.detailLines * PROMPT_DETAIL_LINE_H + PROMPT_DETAIL_PAD);
     if (m.context) y = (int16_t)(y + PROMPT_BLOCK_GAP + PROMPT_CONTEXT_H);
-    if (nButtons > 0) {
-      _btn0 = (int16_t)(y + PROMPT_BLOCK_GAP);
-      y = (int16_t)(_btn0 + nButtons * PROMPT_BTN_H + (nButtons - 1) * PROMPT_BTN_GAP);
+    _reason = -1;
+    if (m.reason) {
+      _reason = (int16_t)(y + PROMPT_BLOCK_GAP);
+      y = (int16_t)(_reason + PROMPT_REASON_H);
     }
-    if (m.reason) y = (int16_t)(y + PROMPT_BLOCK_GAP + PROMPT_REASON_H);
+    _btn0 = (int16_t)(y + PROMPT_BLOCK_GAP);
+    if (nButtons > 0) y = (int16_t)(_btn0 + nButtons * PROMPT_BTN_H + (nButtons - 1) * PROMPT_BTN_GAP);
     _back = (int16_t)(y + PROMPT_BLOCK_GAP);
     _h = (int16_t)(_back + PROMPT_BTN_H);
   }
   int16_t contentH() const { return _h; }
   int16_t buttonY(uint8_t i) const { return (int16_t)(_btn0 + i * (PROMPT_BTN_H + PROMPT_BTN_GAP)); }
+  // Top of the reason line, or -1 when there is none.
+  int16_t reasonY() const { return _reason; }
   int16_t backY() const { return _back; }
 
   // The button under screen height `y`: its index, PROMPT_HIT_BACK, or -1.
@@ -138,5 +144,5 @@ struct PromptLayout {
 
  private:
   uint8_t _n = 0;
-  int16_t _btn0 = 0, _back = 0, _h = 0;
+  int16_t _btn0 = 0, _back = 0, _h = 0, _reason = -1;
 };

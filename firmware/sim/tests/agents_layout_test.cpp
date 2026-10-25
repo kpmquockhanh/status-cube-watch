@@ -90,11 +90,26 @@ int main() {
   // Optional blocks.
   PromptMetrics m2{1, 0, false, true};
   p.build(m2, 2);
-  // title 0-20, gap, buttons 28 and 68 (to 102), gap, reason 110-128, gap, BACK 136
-  CHECK(p.buttonY(0) == 28);
-  CHECK(p.buttonY(1) == 68);
+  // title 0-20, gap, reason 28-46, gap, buttons 54 and 94 (to 128), gap, BACK 136
+  CHECK(p.reasonY() == 28);
+  CHECK(p.buttonY(0) == 54);
+  CHECK(p.buttonY(1) == 94);
   CHECK(p.backY() == 136);
   CHECK(p.contentH() == 170);
+  CHECK(p.buttonAt(PROMPT_VIEW_Y + 30, 0) == -1);  // the reason line is not a button
+  CHECK(p.buttonAt(PROMPT_VIEW_Y + 60, 0) == 0);
+
+  // The reason line pushes the buttons down by its height and one gap.
+  PromptMetrics m3{2, 3, true, false};
+  p.build(m3, 3);
+  const int16_t noReason = p.buttonY(0), backNo = p.backY();
+  CHECK(p.reasonY() == -1);
+  m3.reason = true;
+  p.build(m3, 3);
+  CHECK(p.reasonY() == 134);  // after the context line (110-126) and a gap
+  CHECK(p.buttonY(0) == noReason + PROMPT_REASON_H + PROMPT_BLOCK_GAP);
+  CHECK(p.buttonY(0) == noReason + 26);
+  CHECK(p.backY() == backNo + 26);
   p.build(m2, 0);  // no options (an input prompt): title, reason, BACK
   CHECK(p.backY() == 20 + 8 + 18 + 8);
   CHECK(p.buttonAt(PROMPT_VIEW_Y + 1000, 0) == -1);
