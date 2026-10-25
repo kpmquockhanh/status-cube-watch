@@ -30,7 +30,7 @@ const (
 	TileNameChars     = 16  // Tile.N
 	TileLineChars     = 16  // Tile.L
 	TileKindChars     = 5   // Tile.K: run|wait|idle|err|exit|start
-	TilePoseChars     = 8   // Tile.P: the longest is "delegate"
+	TilePoseChars     = 9   // Tile.P: the longest is "celebrate"
 	PromptIDChars     = 15  // AgentPrompt.P
 	PromptKindChars   = 10  // AgentPrompt.K: permission|question|input
 	PromptTitleChars  = 40  // AgentPrompt.T
@@ -59,7 +59,7 @@ func fitMarked(s string, n int) string {
 type Tile struct {
 	I string `json:"i"`           // agent id
 	N string `json:"n"`           // folder name
-	L string `json:"l"`           // status line: "needs you", "Edit +3", "thinking", "idle 12m", ...
+	L string `json:"l"`           // status line: "allow bash?", "edit . 41% ctx", "hungry . feed me", "done . 12m ago", ...
 	K string `json:"k"`           // run|wait|idle|err|exit|start
 	P string `json:"p"`           // pose: idle|start|run|think|read|write|bash|web|plan|delegate|compact|wait|err|exit|hungry|celebrate
 	X int    `json:"x"`           // context used, 0..100

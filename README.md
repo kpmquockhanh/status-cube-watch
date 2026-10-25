@@ -448,8 +448,9 @@ waiting, the cube wakes, jumps to the card, opens the question and beeps once (s
 
 The critters move while the Agents card (or a question) is on screen: ten frames a second on USB, two on
 battery, and the cube still goes to sleep on schedule. The board cannot tell USB from battery directly, so it
-guesses from the cell voltage (a full cell, or one that is rising, counts as plugged in); a full cell just
-unplugged looks plugged in until it drops a little. The drain on battery with that card showing is still to be
+guesses from the cell voltage (a full cell, or one that is rising, counts as plugged in; one whose voltage has
+fallen by 10 mV over the last two minutes counts as unplugged); a full cell just unplugged looks plugged in
+for a couple of minutes, until that fall shows. The drain on battery with that card showing is still to be
 measured on hardware (`docs/agents-acceptance.md`).
 
 Reading the question and answering it need Bluetooth: over WiFi the cube only learns that an agent

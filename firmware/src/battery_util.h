@@ -11,13 +11,17 @@ constexpr uint32_t BAT_NO_CELL_MV = 2500;
 constexpr uint32_t BAT_SAMPLE_MS = 5000;
 
 // A guess whether the cube runs on external power. The board has no VBUS or
-// charge pin, so it is voltage-based: no cell, or a filtered cell voltage of at
-// least 4150 mV, or a rise of 20 mV over the last 120 s. Feed it the filtered
+// charge pin, so it is voltage-based. No cell: external. Otherwise a sustained
+// fall (the latest filtered voltage 10 mV or more under the 120 s window's
+// maximum) reads as battery even above 4150 mV, so a full cell just unplugged
+// is caught while it sinks; failing that, a filtered voltage of at least
+// 4150 mV or a rise of 20 mV over the window reads as external. Feed it the filtered
 // millivolts the percent uses, once per BAT_SAMPLE_MS. Fixed ring, no heap.
 class PowerGuess {
  public:
   static constexpr uint16_t FULL_MV = 4150;
   static constexpr uint16_t RISE_MV = 20;
+  static constexpr uint16_t FALL_MV = 10;
   static constexpr uint32_t WINDOW_MS = 120000;
 
   void sample(uint32_t now, uint16_t mv, bool cell) {
@@ -44,21 +48,26 @@ class PowerGuess {
     // Until a full window exists (oldest sample within one cadence of 120 s
     // old) the rise rule does not apply.
     _rise = false;
+    _fall = false;
     if (now - _t[_head] + BAT_SAMPLE_MS >= WINDOW_MS) {
       // Rise = latest minus the window MINIMUM, so noise up and down is not
       // counted twice.
-      uint16_t lo = _v[_head];
+      uint16_t lo = _v[_head], hi = _v[_head];
       for (int i = 1; i < _n; i++) {
         const uint16_t x = _v[(_head + i) % CAP];
         if (x < lo) lo = x;
+        if (x > hi) hi = x;
       }
       _rise = mv >= lo + RISE_MV;
+      _fall = mv + FALL_MV <= hi;
     }
   }
 
   bool external() const {
     if (!_seen) return false;
-    return !_cell || _mv >= FULL_MV || _rise;
+    if (!_cell) return true;
+    if (_fall) return false;  // beats the full-cell rule
+    return _mv >= FULL_MV || _rise;
   }
 
  private:
@@ -67,7 +76,7 @@ class PowerGuess {
   uint16_t _v[CAP] = {};
   int _head = 0, _n = 0;
   uint16_t _mv = 0;
-  bool _cell = true, _seen = false, _rise = false;
+  bool _cell = true, _seen = false, _rise = false, _fall = false;
 };
 
 struct BatteryView {

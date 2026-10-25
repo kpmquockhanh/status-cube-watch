@@ -4,12 +4,17 @@ import CubeLinkCore
 let menuRowWidth: CGFloat = 264
 private let inset: CGFloat = 16
 
-/// Yellow #E8B94A and orange (the accent) #FF4D00 are the deck palette's; ink is the system text colour, which
-/// follows the menu's light or dark appearance (the palette's #E8E4DC would vanish on a light menu).
+/// Orange (the accent) #FF4D00 is the deck palette's. Ink is the system text colour and yellow is #E8B94A in a dark
+/// appearance and a darker amber (#B07D12) in a light one, since the palette's pale tones would vanish on a light menu.
 func tintColor(_ t: BarTint) -> NSColor {
     switch t {
     case .ink: .labelColor
-    case .yellow: NSColor(srgbRed: 0xE8 / 255, green: 0xB9 / 255, blue: 0x4A / 255, alpha: 1)
+    case .yellow:
+        NSColor(name: nil) { appearance in
+            let dark = appearance.bestMatch(from: [.darkAqua, .aqua]) == .darkAqua
+            return dark ? NSColor(srgbRed: 0xE8 / 255, green: 0xB9 / 255, blue: 0x4A / 255, alpha: 1)
+                        : NSColor(srgbRed: 0xB0 / 255, green: 0x7D / 255, blue: 0x12 / 255, alpha: 1)
+        }
     case .orange: NSColor(srgbRed: 0xFF / 255, green: 0x4D / 255, blue: 0x00 / 255, alpha: 1)
     }
 }

@@ -30,7 +30,7 @@ over Bluetooth with the Mac app running, and a few Claude Code sessions (some in
 
 - [ ] A tap on a waiting tile opens its prompt; a tap on any other tile does nothing.
 - [ ] Title, detail box, context and buttons fit; a long prompt scrolls to its last button and back.
-- [ ] BACK and a swipe right return to the Agents card.
+- [ ] back and a swipe right return to the Agents card.
 - [ ] Buttons are grey for about a second after the prompt appears, then live.
 - [ ] An input prompt, an agent outside tmux and a locked Mac each show their reason line and no live buttons.
 - [ ] Over WiFi only (Bluetooth off) the screen says "needs you / open on Bluetooth".
@@ -62,9 +62,10 @@ over Bluetooth with the Mac app running, and a few Claude Code sessions (some in
       only on the Agents card or a prompt; on any other card there are no animation frames.
 - [ ] The external-power guess, with the logging build (`pio run -e batlog -t upload`, then `pio device
       monitor -e batlog`): on the wall charger the cell reads as external (10 frames/s) within about two
-      minutes; unplugged and running on battery it switches to 2 frames/s once the voltage has stopped rising
-      and sunk under 4150 mV. Repeat with a full cell just unplugged: note how long it keeps animating at
-      10 frames/s, and that a cube with no cell fitted always counts as external.
+      minutes (a steady 4150 mV or more, or a rise of 20 mV in 120 s); unplugged and running on battery it
+      switches to 2 frames/s once the 120 s window shows a fall of 10 mV, even above 4150 mV. Time both cases:
+      (a) a half-charged cell unplugged, and (b) a full cell just unplugged (time from unplugging to the
+      switch), and check that a cube with no cell fitted always counts as external.
 - [ ] Battery drain: charge to full, unplug, leave the Agents card on screen with the backlight at its usual
       level and the screen sleep off, and log the cell once a minute for an hour with the logging build; do the
       same on the usage card. The simulator's bench cannot model panel or SPI current, so this is the only

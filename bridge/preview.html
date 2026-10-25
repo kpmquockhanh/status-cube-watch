@@ -38,8 +38,8 @@
     letter-spacing: 0;
   }
   .bar .fresh { display: flex; align-items: center; gap: 5px; font-weight: 500; letter-spacing: 0; }
-  .bar i { width: 6px; height: 6px; border-radius: 0; background: var(--green); }
-  .bar i.off { background: var(--red); }
+  .bar i { width: 6px; height: 6px; border-radius: 0; background: var(--ink); }
+  .bar i.off { background: var(--accent); }
 
   .ring { position: absolute; inset: 0; }
   /* The one piece of motion on the device, reproduced here so the mock and
@@ -62,9 +62,10 @@
     font-size: 28px; font-weight: 700; line-height: 1;
     letter-spacing: 0; font-variant-numeric: tabular-nums;
   }
-  /* Labels are drawn as the bridge sends them (lower case); only BLE/WIFI and
-     the age label are upper case. */
-  .mid .cap {
+  /* The bridge sends captions upper-case and the firmware lower-cases them
+     (lowerCopy in ui.cpp), so the mock does too; only BLE/WIFI and the age
+     label stay upper case. */
+  .mid .cap { text-transform: lowercase;
     font-size: 8px; font-weight: 600; letter-spacing: 0;
     color: var(--dim);
   }
@@ -73,7 +74,7 @@
     display: flex; align-items: baseline; justify-content: center; gap: 6px;
   }
   .read .pct { font-size: 15px; font-weight: 700; font-variant-numeric: tabular-nums; }
-  .read .label {
+  .read .label { text-transform: lowercase;
     font-size: 9px; font-weight: 500; letter-spacing: 0;
     color: var(--dim);
   }
@@ -88,6 +89,7 @@
   /* The card's name sits at the bottom of a ring card (NAME_Y in ui.cpp), and
      under the top bar on a text card (drawTextCard draws it at y=60). */
   .name {
+    text-transform: lowercase;
     position: absolute; top: 224px; left: 0; width: 240px; text-align: center;
     font-size: 9px; font-weight: 600; letter-spacing: 0; color: var(--dim);
   }
@@ -111,7 +113,7 @@
   .rows { position: absolute; top: 203px; left: 34px; right: 34px; }
   .rows .row { height: 22px; display: flex; align-items: center; }
   .rows .sw { width: 7px; height: 7px; border-radius: 0; margin-right: 6px; flex: none; }
-  .rows .k { width: 25px; font-size: 9px; font-weight: 500; letter-spacing: 0; color: var(--dim); }
+  .rows .k { text-transform: lowercase; width: 25px; font-size: 9px; font-weight: 500; letter-spacing: 0; color: var(--dim); }
   .rows .p { font-size: 15px; font-weight: 700; font-variant-numeric: tabular-nums; }
   .rows .r { margin-left: auto; font-size: 9px; font-weight: 500; letter-spacing: 0; color: var(--dim); }
 
@@ -132,7 +134,7 @@
   .agentsview { display: none; position: absolute; inset: 0; }
   .device.agents .agentsview { display: block; }
   .device.agents .ring, .device.agents .mid, .device.agents .mail, .device.agents .rows, .device.agents .read, .device.agents .name { display: none; }
-  .ag-cap { position: absolute; top: 36px; left: 0; width: 240px; text-align: center; font-size: 14px; font-weight: 700; }
+  .ag-cap { text-transform: lowercase; position: absolute; top: 36px; left: 0; width: 240px; text-align: center; font-size: 14px; font-weight: 700; }
   .ag-view { position: absolute; top: 54px; left: 0; width: 240px; height: 200px; overflow-y: auto; scrollbar-width: none; }
   .ag-view::-webkit-scrollbar { display: none; }
   .ag-grid { position: relative; }
@@ -164,21 +166,26 @@
   .tile.wait .crit { background: var(--bg); }
   .tile.wait .crit::before, .tile.wait .crit::after { background: var(--accent); }
   .crit .hat { position: absolute; left: 12px; top: -8px; width: 32px; height: 8px; }
-  .prompt { display: none; position: absolute; inset: 0; background: var(--bg); }
+  /* The prompt screen is the cube's: all accent, black text, a black detail box,
+     the first button solid black with accent text, the others a 2 px black
+     outline, and a button that is off (the browser never answers, so all of
+     them) black at 40 % (promptOff in ui.cpp). */
+  .prompt { display: none; position: absolute; inset: 0; background: var(--accent); color: var(--bg); --off: #9d3204; }
   .device.prompting .prompt { display: block; }
   .device.prompting .ag-cap, .device.prompting .ag-view { display: none; }
-  .pr-head { position: absolute; top: 34px; left: 14px; right: 14px; font-size: 14px; font-weight: 700; color: var(--accent); }
+  .pr-head { position: absolute; top: 34px; left: 14px; right: 14px; font-size: 14px; font-weight: 700; color: var(--bg); }
   .pr-col { position: absolute; top: 56px; left: 14px; right: 14px; bottom: 6px; overflow-y: auto; scrollbar-width: none; }
   .pr-col::-webkit-scrollbar { display: none; }
   .pr-title { font-size: 18px; font-weight: 700; line-height: 22px; margin-bottom: 8px; }
-  .pr-detail { background: var(--panel); border: 1px solid var(--faint); padding: 6px 8px; font-size: 12px; line-height: 15px; word-break: break-word; margin-bottom: 8px; }
-  .pr-ctx, .pr-reason { font-size: 11px; color: var(--dim); margin-bottom: 6px; }
+  .pr-detail { background: var(--bg); color: var(--ink); padding: 6px 8px; font-size: 12px; line-height: 15px; word-break: break-word; margin-bottom: 8px; }
+  .pr-ctx, .pr-reason { font-size: 11px; color: var(--bg); margin-bottom: 6px; }
   .pr-notice { text-align: center; margin-top: 56px; }
   .pr-notice b { display: block; font-size: 18px; margin-bottom: 8px; }
-  .pr-notice span { color: var(--dim); font-size: 12px; }
-  .btn { display: flex; align-items: center; gap: 8px; height: 34px; margin-bottom: 6px; padding: 0 10px; background: var(--faint); color: var(--dim); font-size: 12px; box-sizing: border-box; white-space: nowrap; overflow: hidden; }
-  .btn i { flex: none; width: 18px; height: 18px; background: var(--dim); color: var(--faint); font-style: normal; text-align: center; line-height: 18px; font-size: 11px; font-weight: 700; }
-  .btn.back { background: var(--panel); color: var(--ink); justify-content: center; cursor: pointer; }
+  .pr-notice span { font-size: 12px; }
+  .btn { display: flex; align-items: center; gap: 8px; height: 34px; margin-bottom: 6px; padding: 0 10px; border: 2px solid var(--off); color: var(--off); font-size: 12px; box-sizing: border-box; white-space: nowrap; overflow: hidden; }
+  .btn.first { background: var(--off); color: var(--accent); }
+  .btn i { flex: none; font-style: normal; font-size: 12px; width: 12px; }
+  .btn.back { border-color: var(--bg); color: var(--bg); justify-content: center; cursor: pointer; }
   .note { color: var(--red); font-size: 12px; margin: 0; min-height: 1.5em; }
 </style>
 </head>
@@ -283,7 +290,7 @@ function paintAgents(card, color) {
     (detail ? `<div class="pr-detail" style="${q.cut ? 'color:var(--dim)' : ''}">${esc(detail)}</div>` : '') +
     (q.c ? `<div class="pr-ctx">${esc(q.c)}</div>` : '') +
     `<div class="pr-reason">${esc(reason)}</div>` +
-    opts.map((o) => `<div class="btn"><i>${esc(o.k)}</i>${esc(o.l)}</div>`).join('') +
+    opts.map((o, n) => `<div class="btn${n ? '' : ' first'}"><i>${esc(o.k)}</i>${esc(o.l)}</div>`).join('') +
     '<div class="btn back" id="pback">back</div></div>';
   document.getElementById('pback').onclick = (ev) => { ev.stopPropagation(); promptAgent = null; paint(); };
 }

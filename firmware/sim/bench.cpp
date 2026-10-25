@@ -309,9 +309,9 @@ std::string agentsJson(uint32_t sinceStartMs, bool lan) {
   std::string card = std::string(",{\"t\":\"AGENTS\",\"v\":\"4\",\"s1\":\"") + (waiting ? "1 NEEDS YOU" : "4 WORKING") +
                      "\",\"s2\":\"\",\"c\":\"" + (waiting ? "amber" : "green") + "\",\"a\":[" + a + "]";
   if (waiting && !lan) {
-    card += ",\"q\":{\"i\":\"l00001\",\"p\":\"p1abc-1\",\"k\":\"permission\",\"t\":\"Run this command?\","
+    card += ",\"q\":{\"i\":\"l00001\",\"p\":\"p1abc-1\",\"k\":\"permission\",\"t\":\"run this command?\","
             "\"d\":\"terraform apply -target=module.staging_net\",\"c\":\"~/code/infra-network\","
-            "\"o\":[{\"k\":\"1\",\"l\":\"Yes\"},{\"k\":\"2\",\"l\":\"Yes, and don't ask again\"},{\"k\":\"3\",\"l\":\"No\"}]}";
+            "\"o\":[{\"k\":\"1\",\"l\":\"yes\"},{\"k\":\"2\",\"l\":\"yes, and don't ask again\"},{\"k\":\"3\",\"l\":\"no\"}]}";
   }
   return card + "}";
 }
@@ -334,7 +334,7 @@ std::string payloadJson(uint32_t nowMs, bool lan = false) {
     char buf[512];
     snprintf(buf, sizeof(buf),
              "{\"t\":\"CLAUDE\",\"v\":\"%s\","
-             "\"s1\":\"to reset\",\"s2\":\"\",\"c\":\"green\",\"g\":%d,\"c2\":\"green\",\"g2\":53,"
+             "\"s1\":\"to reset\",\"s2\":\"\",\"c\":\"ink\",\"g\":%d,\"c2\":\"ink\",\"g2\":53,"
              "\"rows\":[{\"k\":\"5H\",\"p\":\"%d%%\",\"r\":\"%s\"},{\"k\":\"7D\",\"p\":\"53%%\",\"r\":\"1d 1h\"}],"
              "\"m\":\"12\",\"mc\":\"amber\"}",
              reset, g, g, reset);

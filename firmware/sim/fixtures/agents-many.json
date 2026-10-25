@@ -11,9 +11,9 @@
    {"i":"l00008","n":"old-thing","l":"api 529 overl...","k":"err","p":"err","x":20,"h":98},
    {"i":"l00004","n":"docs-site","l":"hungry . feed me","k":"idle","p":"hungry","x":3,"u":1,"h":63},
    {"i":"l00007","n":"api-tests","l":"done . 4s ago","k":"idle","p":"celebrate","x":18,"h":1}],
-  "q":{"i":"l00001","p":"p1abc-2","k":"question","t":"Which database should the migration hit?",
+  "q":{"i":"l00001","p":"p1abc-2","k":"question","t":"which database should the migration hit?",
        "d":"The staging database was restored from last night's snapshot, so its schema may lag behind main by two migrations; p...",
        "c":"~/code/infra-network",
-       "o":[{"k":"1","l":"Staging"},{"k":"2","l":"Production, after a dry run against..."},{"k":"3","l":"Both, staging first"},
-            {"k":"4","l":"Neither for now"},{"k":"5","l":"Ask the on-call engineer"},{"k":"6","l":"Something else"}]}}
+       "o":[{"k":"1","l":"staging"},{"k":"2","l":"production, after a dry run against..."},{"k":"3","l":"both, staging first"},
+            {"k":"4","l":"neither for now"},{"k":"5","l":"ask the on-call engineer"},{"k":"6","l":"something else"}]}}
 ]}

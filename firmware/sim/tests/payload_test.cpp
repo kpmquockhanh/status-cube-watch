@@ -47,9 +47,9 @@ void testParsesTilesAndPrompt() {
   CHECK(a.hasPrompt && !a.promptDropped);
   CHECK(a.prompt.kind == PromptKind::Permission);
   CHECK(!strcmp(a.prompt.agent, "l00001") && !strcmp(a.prompt.id, "p1abc-1"));
-  CHECK(!strcmp(a.prompt.title, "Run this command?"));
+  CHECK(!strcmp(a.prompt.title, "run this command?"));
   CHECK(a.prompt.nOpts == 3 && a.prompt.opts[1].key == '2');
-  CHECK(!strcmp(a.prompt.opts[2].label, "No"));
+  CHECK(!strcmp(a.prompt.opts[2].label, "no"));
   CHECK(!a.prompt.notInTmux && !a.prompt.cut);
   const AgentTile *t = agentsTile(a, "l00003");
   CHECK(t && !strcmp(t->name, "claude-status..."));

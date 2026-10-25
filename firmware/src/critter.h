@@ -1,5 +1,5 @@
 // The pixel critter on each Agents tile, as plain rectangles in sprite cells
-// (x -3..20, y -8..10 with a hat or the celebrate hop; the body is x 0..14,
+// (x -5..20, y -8..10 with a hat or the celebrate hop; the body is x 0..14,
 // y 0..7.6). Pure: no Arduino, no LovyanGFX; ui.cpp maps the cells to pixels,
 // picks the colours and blends each shape at its alpha. The pose names are the
 // bridge's (`Tile.P`).

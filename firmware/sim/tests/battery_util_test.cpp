@@ -150,6 +150,61 @@ void powerSourceSteady() {
   CHECK(!g.external());
 }
 
+// A full cell just unplugged sinks about 1 mV per 10 s: once the 120 s window
+// shows a 10 mV drop it reads as battery although it is still above 4150 mV.
+void powerSourceUnpluggedFull() {
+  PowerGuess g;
+  uint32_t t = 0;
+  uint16_t mv = 4180;
+  for (int i = 0; i < 12; i++) {  // 60 s: no full window yet
+    g.sample(t, mv, true);
+    t += BAT_SAMPLE_MS;
+    if (i % 2) mv--;
+  }
+  CHECK(g.external());
+  for (int i = 0; i < 28; i++) {  // on to 200 s
+    g.sample(t, mv, true);
+    t += BAT_SAMPLE_MS;
+    if (i % 2) mv--;
+  }
+  CHECK(mv > PowerGuess::FULL_MV);
+  CHECK(!g.external());
+  PowerGuess n;  // no cell still wins
+  n.sample(0, 0, false);
+  CHECK(n.external());
+}
+
+void powerSourceChargerFullSteady() {
+  PowerGuess g;
+  uint32_t t = 0;
+  feed(g, t, 60, 4190);
+  CHECK(g.external());
+}
+
+// Through the filter, as battery.cpp feeds it: raw +-15 mV noise is neither a
+// fall nor a rise.
+void powerSourceNoisyRaw() {
+  BatteryFilter f;
+  PowerGuess steady, full;
+  uint32_t t = 0;
+  for (int i = 0; i < 100; i++) {
+    const int d = i % 2 ? 15 : -15;
+    f.update((uint32_t)(3900 + d));
+    steady.sample(t, (uint16_t)f.mv(), true);
+    t += BAT_SAMPLE_MS;
+  }
+  CHECK(!steady.external());
+  BatteryFilter h;
+  t = 0;
+  for (int i = 0; i < 100; i++) {
+    const int d = i % 2 ? 15 : -15;
+    h.update((uint32_t)(4190 + d));
+    full.sample(t, (uint16_t)h.mv(), true);
+    t += BAT_SAMPLE_MS;
+  }
+  CHECK(full.external());
+}
+
 }  // namespace
 
 int main() {
@@ -158,6 +213,9 @@ int main() {
   powerSourceUnplugged();
   powerSourceChargingRises();
   powerSourceSteady();
+  powerSourceUnpluggedFull();
+  powerSourceChargerFullSteady();
+  powerSourceNoisyRaw();
   testHysteresis();
   testEndsSnap();
   testPercentTable();
