@@ -144,7 +144,26 @@ void testEncodeClamps() {
 
 }  // namespace
 
+// Flag bit 6 (fw_rev 10): the Mac is locked whether or not it unlocks for 07.
+void testScreenLockedBit() {
+  MacVolume v{};
+  const uint8_t f46[] = {1, 50, 0x46};
+  CHECK(volumeParse(f46, sizeof(f46), v));
+  CHECK(v.screenLocked && !v.macLocked);
+  const uint8_t f66[] = {1, 50, 0x66};
+  CHECK(volumeParse(f66, sizeof(f66), v));
+  CHECK(v.screenLocked && v.macLocked);
+  const uint8_t f26[] = {1, 50, 0x26};  // older firmware's bits: not locked as far as bit 6 says
+  CHECK(volumeParse(f26, sizeof(f26), v));
+  CHECK(!v.screenLocked && v.macLocked);
+  MacVolume a{}, b{};
+  a.known = b.known = true;
+  b.screenLocked = true;
+  CHECK(!volumeSame(a, b));  // a lock change alone reaches the main loop
+}
+
 int main() {
+  testScreenLockedBit();
   testRequestFixture();
   testMediaFixture();
   testStateFixture();

@@ -18,7 +18,7 @@ Swift tests); the navigation frames by `firmware/src/nav_frame.h` and
 | Volume  | `6e6d3c10-5d1a-4c1e-9f0b-7c4a2b8e1a06` | write (encrypted + authenticated), fw_rev 5+ |
 | Nav     | `6e6d3c10-5d1a-4c1e-9f0b-7c4a2b8e1a07` | write + write without response (encrypted + authenticated), fw_rev 8+ |
 
-Info is 2 bytes: `[proto_ver, fw_rev]` (current firmware: `[1, 9]`). Reading it is what triggers pairing, so the Mac reads
+Info is 2 bytes: `[proto_ver, fw_rev]` (current firmware: `[1, 10]`). Reading it is what triggers pairing, so the Mac reads
 Info first, checks `proto_ver == 1`, then subscribes to Control, then writes payloads.
 
 A bonded Mac caches this table. When the cube boots a `fw_rev` other than the one it last
@@ -53,6 +53,7 @@ negotiated write length (`maximumWriteValueLength(for: .withResponse)`, about 50
 | `06 <key>` | press a media key on the Mac: `00` play/pause, `01` next, `02` previous (added in fw_rev 6, protocol still 1). The Volume card's buttons send it. Fire and forget: no ack, and it is dropped if no Mac is subscribed. A Mac that does not know `06` ignores it |
 | `07` | unlock the Mac's screen: a tap on the cube's unlock prompt (added in fw_rev 7, protocol still 1). The Mac types the stored login password only while its screen is locked, "Unlock Mac with cube" is on and it holds the Accessibility permission, and at most once per 5 s; otherwise it logs why and does nothing. Fire and forget: no ack, and it is dropped if no Mac is subscribed. A Mac that does not know `07` ignores it |
 | `08 <x> <y>` | the rider dragged the navigation map: `<x>`, `<y>` are i16 little-endian screen pixels (each within ±1000), how far the map is moved from where the phone would put it (added in fw_rev 9, protocol still 1). Meant for the iPhone, which subscribes to Control for it: it builds every following frame around that offset and echoes it (Nav frame version 2). Sent at most every 100 ms while a finger drags and at once when it lifts; `08 00 00 00 00` when the map goes back (a tap, or 8 s without a touch). The offset is reset to 0 on both sides when a ride starts. Fire and forget, to every Control subscriber; a Mac ignores it |
+| `09 <la> <agent> <lp> <prompt> <key>` | the cube answers a Claude prompt that waits on the Mac (added in fw_rev 10, protocol still 1): `<la>` and `<lp>` are byte lengths (1..15), `<agent>` and `<prompt>` the agent id and prompt id from the payload's `q` as printable ASCII, `<key>` one ASCII byte `'1'`..`'9'`, the option the user tapped. At most 34 bytes. Sent to the Mac's link only (never the iPhone), one message per tap, never resent; the cube sends it only while the prompt came over Bluetooth, is on screen and the Mac is not locked (Volume bit 6). Fire and forget: no ack, and it is dropped if no Mac is subscribed or the message does not fit the link's MTU - 3. The Mac acts on it from plan 4 of the agents work; a Mac that does not know `09` ignores it |
 
 ## Liveness
 
@@ -189,7 +190,9 @@ The Mac writes its output state to the Volume characteristic, with response, at 
 - `flags`: bit0 muted, bit1 the volume can be set, bit2 mute can be set, bit3 the Now Playing state
   is known, bit4 something is playing (bits 3-4 from fw_rev 6: the play/pause button shows play or
   pause; with bit3 clear it shows both), bit5 the Mac's screen is locked and it will unlock for
-  Control `07` (fw_rev 7, see "Unlock" below). Other bits are 0, and the cube ignores them, so older
+  Control `07` (fw_rev 7, see "Unlock" below), bit6 the Mac's screen is locked whether or not it will
+  unlock for `07` (fw_rev 10: the cube sends no Control `09` answer while it is set; a Mac that does
+  not know the bit leaves it 0, and acts on none of this before plan 4). Other bits are 0, and the cube ignores them, so older
   firmware ignores the bits it does not know. The Mac reads the state through an `osascript` child, because macOS
   answers MediaRemote's now-playing queries only for Apple-signed processes, and rewrites the
   frame whenever it changes.

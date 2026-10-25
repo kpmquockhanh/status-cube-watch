@@ -20,6 +20,7 @@
 #include <cstdlib>
 #include <cstring>
 
+#include "../src/answer_frame.h"
 #include "../src/ble.h"
 #include "nav_samples.h"
 
@@ -170,6 +171,20 @@ void bleSendMedia(MediaKey key) {
 }
 
 void bleSendUnlock() { Serial.println("[ble] (sim) unlock"); }
+
+bool bleSendAnswer(const char *agent, const char *prompt, char key) {
+  uint8_t m[BLE_ANSWER_MAX];
+  if (!answerEncode(agent, prompt, key, m, sizeof(m))) {
+    Serial.println("[ble] answer dropped: bad id or key");
+    return false;
+  }
+  if (mode() != Mode::Live) {
+    Serial.println("[ble] answer dropped: no Mac subscribed to Control");
+    return false;
+  }
+  Serial.printf("[ble] (sim) answer %s %s %c\n", agent, prompt, key);
+  return true;
+}
 
 void bleSendNavPan(int16_t x, int16_t y) { Serial.printf("[ble] (sim) nav pan %d,%d\n", x, y); }
 

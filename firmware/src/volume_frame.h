@@ -4,6 +4,7 @@
 //
 //   Mac -> cube, Volume characteristic: [ver=1][level][flags][name...]
 //   cube -> Mac, Control:               [0x05][level][muted], [0x06][key], [0x07]
+//                                    (and [0x09]... answers, answer_frame.h)
 #include <stddef.h>
 #include <stdint.h>
 #include <string.h>
@@ -19,6 +20,9 @@ constexpr uint8_t VOL_FLAG_MUTED = 1, VOL_FLAG_CAN_SET = 2, VOL_FLAG_CAN_MUTE = 
 constexpr uint8_t VOL_FLAG_PLAY_KNOWN = 8, VOL_FLAG_PLAYING = 16;
 // Not volume: the Mac's screen is locked and it will unlock for Control 07 (fw_rev 7).
 constexpr uint8_t VOL_FLAG_MAC_LOCKED = 32;
+// The Mac's screen is locked, whether or not it will unlock for Control 07 (fw_rev 10):
+// the cube never sends an answer to a prompt meanwhile.
+constexpr uint8_t VOL_FLAG_SCREEN_LOCKED = 64;
 constexpr size_t BLE_VOLUME_REQ_LEN = 3;
 
 // What the Mac last reported. known=false: nothing yet, or the link dropped.
@@ -31,6 +35,7 @@ struct MacVolume {
   bool playKnown;  // the Mac reported whether anything plays
   bool playing;
   bool macLocked;  // the Mac is locked and waits for a tap on the unlock prompt
+  bool screenLocked;  // the Mac is locked (bit 6), unlock enabled or not
   char name[VOLUME_NAME_MAX + 1];
 };
 
@@ -52,6 +57,7 @@ inline bool volumeParse(const uint8_t *d, size_t n, MacVolume &out) {
   v.playKnown = (d[2] & VOL_FLAG_PLAY_KNOWN) != 0;
   v.playing = v.playKnown && (d[2] & VOL_FLAG_PLAYING) != 0;
   v.macLocked = (d[2] & VOL_FLAG_MAC_LOCKED) != 0;
+  v.screenLocked = (d[2] & VOL_FLAG_SCREEN_LOCKED) != 0;
   out = v;
   return true;
 }
@@ -79,5 +85,5 @@ inline void unlockRequestEncode(uint8_t out[BLE_UNLOCK_REQ_LEN]) { out[0] = BLE_
 inline bool volumeSame(const MacVolume &a, const MacVolume &b) {
   return a.known == b.known && a.level == b.level && a.muted == b.muted && a.canSet == b.canSet &&
          a.canMute == b.canMute && a.playKnown == b.playKnown && a.playing == b.playing &&
-         a.macLocked == b.macLocked && strcmp(a.name, b.name) == 0;
+         a.macLocked == b.macLocked && a.screenLocked == b.screenLocked && strcmp(a.name, b.name) == 0;
 }

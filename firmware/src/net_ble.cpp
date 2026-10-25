@@ -9,6 +9,7 @@
 #include "ble_conn.h"
 #include "ble_frame.h"
 #include "nav_frame.h"
+#include "answer_frame.h"
 #include "nav_pan.h"
 #include "settings_json.h"
 
@@ -54,6 +55,7 @@ struct Link {
   bool secured;
   bool dropping;   // bleUnsecuredExpired already asked for the disconnect
   BondKind kind;   // Unknown until secured and identified
+  bool control;    // subscribed to Control notifications
   bool kindDirty;  // learned on this link: the main loop stores it and evicts
   bool newBond;    // pairing on this link stored a bond that was not there before
   NimBLEAddress id;
@@ -443,7 +445,13 @@ struct VolumeCb : NimBLECharacteristicCallbacks {
 };
 
 struct ControlCb : NimBLECharacteristicCallbacks {
-  void onSubscribe(NimBLECharacteristic *, NimBLEConnInfo &, uint16_t subValue) override {
+  void onSubscribe(NimBLECharacteristic *, NimBLEConnInfo &info, uint16_t subValue) override {
+    Link *l = linkFor(info.getConnHandle());
+    if (l) {
+      portENTER_CRITICAL(&g_mux);
+      l->control = (subValue & 1) != 0;
+      portEXIT_CRITICAL(&g_mux);
+    }
     if (subValue & 1) g_sendNow = true;  // sent from bleTake(), on the main loop
   }
 };
@@ -845,6 +853,43 @@ void bleSendUnlock() {
   unlockRequestEncode(m);
   notifyControl(m, sizeof(m));
   Serial.println("[ble] unlock requested");
+}
+
+bool bleSendAnswer(const char *agent, const char *prompt, char key) {
+  uint8_t m[BLE_ANSWER_MAX];
+  const size_t len = answerEncode(agent, prompt, key, m, sizeof(m));
+  if (!len) {
+    Serial.println("[ble] answer dropped: bad id or key");
+    return false;
+  }
+  // Only the Mac's link: an iPhone also subscribes to Control, and a Claude
+  // prompt is none of its business.
+  uint16_t handle = BLE_HS_CONN_HANDLE_NONE;
+  bool subscribed = false;
+  portENTER_CRITICAL(&g_mux);
+  for (const Link &l : g_links)
+    if (l.used && l.secured && l.kind == BondKind::Mac) {
+      handle = l.handle;
+      subscribed = l.control;
+      break;
+    }
+  portEXIT_CRITICAL(&g_mux);
+  if (handle == BLE_HS_CONN_HANDLE_NONE || !subscribed || !g_control) {
+    Serial.println("[ble] answer dropped: no Mac subscribed to Control");
+    return false;
+  }
+  NimBLEServer *server = NimBLEDevice::getServer();
+  const uint16_t mtu = server ? server->getPeerMTU(handle) : 0;
+  if (mtu < 3 || len > (size_t)(mtu - 3)) {
+    Serial.printf("[ble] answer dropped: %u bytes do not fit MTU %u\n", (unsigned)len, (unsigned)mtu);
+    return false;
+  }
+  if (!g_control->notify(m, len, handle)) {
+    Serial.println("[ble] answer dropped: notify failed");
+    return false;
+  }
+  Serial.printf("[ble] answer %s %s %c\n", agent, prompt, key);
+  return true;
 }
 
 void bleSendNavPan(int16_t x, int16_t y) {
