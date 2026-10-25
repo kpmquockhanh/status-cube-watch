@@ -65,6 +65,9 @@ var policy = PushPolicy(heartbeat: 5)
 var lastBridgeError = ""
 var lastBody: Data?
 var bridgeUp = false
+var lastFetch: Date?
+var fetching = false
+var answerPolicy = AnswerPolicy()
 
 /// An accessory app shows no menu bar, but key equivalents still go through the main menu: without an
 /// Edit menu, Cmd-C/V/X/A/Z do nothing in the settings window's text fields.
@@ -111,9 +114,19 @@ func refreshMenu() {
     statusMenu.apply(MenuModel.make(payload: lastBody, bridgeUp: bridgeUp, link: link.state))
 }
 
+/// Runs every second; fetches `/api/status` at `PollPolicy`'s pace (a little early, so 5 s stays 5 s),
+/// at once when forced, and never while a fetch is still out.
 func tick(force: Bool) {
+    let now = Date()
+    if !force {
+        if fetching { return }
+        if let last = lastFetch, now.timeIntervalSince(last) < PollPolicy.interval(payload: lastBody) - 0.25 { return }
+    }
+    lastFetch = now
+    fetching = true
     client.fetch { body, why in
         DispatchQueue.main.async {
+            fetching = false
             Trace.log("tick", "force \(force), body \(body?.count ?? 0) B, link ready \(link.isReady), link state \(link.state)")
             if body == nil, let why, why != lastBridgeError {
                 lastBridgeError = why
@@ -177,6 +190,7 @@ func volumeFrame(_ v: MacVolume) -> Data {
     var v = v
     v.playing = nowPlaying.playing
     v.locked = UnlockPolicy.offer(enabled: unlocker.isEnabled, locked: screenLock.isLocked)
+    v.screenLocked = screenLock.isLocked
     return encodeVolume(v)
 }
 systemVolume.onChange = { v in
@@ -213,6 +227,20 @@ link.onUnlock = {
         log("unlock request ignored: \(why)")
     }
 }
+link.onAnswer = { agent, prompt, key in
+    switch answerPolicy.decide(locked: screenLock.isLocked) {
+    case .ignore(let why):
+        log("answer for \(agent) ignored: \(why)")
+    case .post:
+        client.answer(agent: agent, prompt: prompt, key: key) { status, error in
+            DispatchQueue.main.async {
+                answerPolicy.finished()
+                log("answer \(key) for \(agent)/\(prompt): \(describe(answerOutcome(status: status, error: error)))")
+                tick(force: true)  // the cube learns from the next payload
+            }
+        }
+    }
+}
 statusMenu.unlockOn = unlocker.isEnabled
 statusMenu.onToggleUnlock = {
     if unlocker.isEnabled { unlocker.disable() } else { unlocker.enableInteractively() }
@@ -227,8 +255,9 @@ statusMenu.onForgetCube = { link.forgetCube() }
 statusMenu.logURL = logURL
 supervisor.start()
 // In .common modes, not just .default: the heartbeat must keep going while the status menu is open,
-// or after 15 s the cube calls the link stale and falls back to WiFi.
-let tickTimer = Timer(timeInterval: 5, repeats: true) { _ in tick(force: false) }
+// or after 15 s the cube calls the link stale and falls back to WiFi. Ticks every second; tick()
+// decides whether this one fetches (1 s while an agent waits, else 5 s).
+let tickTimer = Timer(timeInterval: 1, repeats: true) { _ in tick(force: false) }
 RunLoop.main.add(tickTimer, forMode: .common)
 log("Claude Cube Link started (bridge :\(port), dir \(bridgeDir.path))")
 Trace.log("main", "tracing on; bridge binary \(binaryFound ? binaryPath : "not found")")
