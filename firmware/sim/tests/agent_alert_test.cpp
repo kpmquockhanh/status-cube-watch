@@ -112,6 +112,55 @@ void testPromptIdMemory() {
   }
 }
 
+// A tile turns Wait one payload before its prompt arrives: one alert, not two.
+void tileThenPromptBeepsOnce() {
+  AgentAlert a;
+  reset(); tile("a1", AgentKind::Run);
+  a.update(g); CHECK(!takeOne(a, false));
+  reset(); tile("a1", AgentKind::Wait);
+  a.update(g); CHECK(takeOne(a, false));
+  reset(); tile("a1", AgentKind::Wait); prompt("a1", "p1");
+  for (int i = 0; i < 3; i++) { a.update(g); CHECK(!takeOne(a, false)); }
+  // Also while the first alert is still pending (held back).
+  AgentAlert b;
+  reset(); tile("a1", AgentKind::Run);
+  b.update(g);
+  reset(); tile("a1", AgentKind::Wait);
+  b.update(g); CHECK(!takeOne(b, true));
+  reset(); tile("a1", AgentKind::Wait); prompt("a1", "p1");
+  b.update(g);
+  CHECK(takeOne(b, false));
+  CHECK(!takeOne(b, false));
+}
+
+// The agent went back to work and waits again: a new wait, a new alert.
+void freshWaitAfterRunAlertsAgain() {
+  AgentAlert a;
+  reset(); tile("a1", AgentKind::Run);
+  a.update(g);
+  reset(); tile("a1", AgentKind::Wait);
+  a.update(g); CHECK(takeOne(a, false));
+  reset(); tile("a1", AgentKind::Run);
+  a.update(g); CHECK(!takeOne(a, false));
+  reset(); tile("a1", AgentKind::Wait); prompt("a1", "p1");
+  a.update(g); CHECK(takeOne(a, false));
+}
+
+// p1 alerted; p2 for the same agent, its tile still waiting: alerts.
+void secondPromptSameAgentAlerts() {
+  AgentAlert a;
+  reset(); tile("a1", AgentKind::Run);
+  a.update(g);
+  reset(); tile("a1", AgentKind::Wait);
+  a.update(g); CHECK(takeOne(a, false));
+  reset(); tile("a1", AgentKind::Wait); prompt("a1", "p1");
+  a.update(g); CHECK(!takeOne(a, false));  // the bare wait's prompt: silent
+  reset(); tile("a1", AgentKind::Wait); prompt("a1", "p2");
+  a.update(g); CHECK(takeOne(a, false));
+  reset(); tile("a1", AgentKind::Wait); prompt("a1", "p3");
+  a.update(g); CHECK(takeOne(a, false));
+}
+
 }  // namespace
 
 int main() {
@@ -122,5 +171,8 @@ int main() {
   testBlockedAlertWaits();
   testBlockedAlertDropsWhenAnswered();
   testPromptIdMemory();
+  tileThenPromptBeepsOnce();
+  freshWaitAfterRunAlertsAgain();
+  secondPromptSameAgentAlerts();
   return checksDone("agent_alert_test");
 }

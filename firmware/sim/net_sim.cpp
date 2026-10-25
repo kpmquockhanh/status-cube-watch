@@ -69,14 +69,15 @@ std::string bridgeUrl() {
 
 // CUBE_PAYLOAD=<file> stands in for the bridge: every fetch reads that JSON.
 // CUBE_PAYLOAD2=<file> with CUBE_PAYLOAD2_MS=<n> switches to the second file n
-// ms after start, as a prompt arriving while the cube shows the first.
-// Returns nullptr when CUBE_PAYLOAD is unset (fetch from the bridge).
+// ms after start, as a prompt arriving while the cube shows the first; without
+// CUBE_PAYLOAD2_MS it never switches. Returns nullptr when CUBE_PAYLOAD is
+// unset (fetch from the bridge).
 const char *payloadFile() {
   const char *first = getenv("CUBE_PAYLOAD");
   if (!first || !*first) return nullptr;
   const char *second = getenv("CUBE_PAYLOAD2");
   const char *ms = getenv("CUBE_PAYLOAD2_MS");
-  if (second && *second && millis() >= (uint32_t)(ms ? atol(ms) : 0)) return second;
+  if (second && *second && ms && *ms && millis() >= (uint32_t)atol(ms)) return second;
   return first;
 }
 

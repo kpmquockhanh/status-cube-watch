@@ -16,7 +16,7 @@
 // backlight LEDs are not in that figure; the backlight is reported on its own
 // as a duty cycle.
 //
-//   ./build/cube-bench <desk|linked|browse|editor|sleep|volume|nav|ride|agents|alert|render> [slowdown]
+//   ./build/cube-bench <desk|linked|browse|editor|sleep|volume|nav|ride|agents|alert|handover|render> [slowdown]
 
 #include <ArduinoJson.h>
 
@@ -53,6 +53,7 @@ Display *g_simDisplay = nullptr;
 uint8_t benchCardIndex();  // main.cpp
 bool benchNavActive();     // main.cpp
 bool benchPromptOpen();    // main.cpp
+bool benchPayloadViaBle(); // main.cpp
 
 namespace {
 
@@ -138,8 +139,12 @@ struct Scenario {
   bool mustSleep;
   uint16_t rotateSec;  // auto-advance, 0 = off
   // The Agents card after the usage card: AGENTS_RUNNING is four working
-  // agents; AGENTS_ALERT the same until ALERT_AT_MS, then one waits on a prompt.
-  enum : uint8_t { AGENTS_NONE, AGENTS_RUNNING, AGENTS_ALERT } agents;
+  // agents; AGENTS_ALERT the same until ALERT_AT_MS, then one waits on a prompt;
+  // AGENTS_HANDOVER has it waiting from the start.
+  enum : uint8_t { AGENTS_NONE, AGENTS_RUNNING, AGENTS_ALERT, AGENTS_HANDOVER } agents;
+  // BLE payloads start this long into the run (0 = at once); until then WiFi
+  // delivers, and for `handover` its fetches answer with the LAN variant.
+  uint32_t bleFromMs;
   std::vector<Stroke> strokes;
 };
 
@@ -217,6 +222,11 @@ Scenario makeScenario(const std::string &name) {
     s.seconds = 330;
     s.sleepMin = 2;
     s.agents = Scenario::AGENTS_ALERT;
+  } else if (name == "handover") {
+    s.what = "an agent waits; WiFi (LAN variant, no prompt) until BLE starts at 40 s; BLE wins while live, one beep";
+    s.seconds = 120;
+    s.agents = Scenario::AGENTS_HANDOVER;
+    s.bleFromMs = 40000;
   } else if (name == "sleep") {
     s.what = "Mac gone: WiFi fetches fail, screen sleeps after the timeout (2 min)";
     s.seconds = 600;
@@ -235,12 +245,14 @@ constexpr uint32_t ALERT_AT_MS = 300000;
 
 // The scenario's Agents card (none for most): four agents at work, whose lines,
 // poses and context move every 5 s as the bridge's would; for `alert`, from
-// ALERT_AT_MS the first one waits on a prompt.
-std::string agentsJson(uint32_t sinceStartMs) {
+// ALERT_AT_MS the first one waits on a prompt (for `handover`, from the start).
+// `lan`: the variant WiFi gets, without the prompt.
+std::string agentsJson(uint32_t sinceStartMs, bool lan) {
   if (S.agents == Scenario::AGENTS_NONE) return "";
   static const char *const names[4] = {"infra-network", "checkout-api", "docs-site", "claude-status..."};
   static const char *const poses[5] = {"bash", "read", "write", "think", "web"};
-  const bool waiting = S.agents == Scenario::AGENTS_ALERT && sinceStartMs >= ALERT_AT_MS;
+  const bool waiting = S.agents == Scenario::AGENTS_HANDOVER ||
+                       (S.agents == Scenario::AGENTS_ALERT && sinceStartMs >= ALERT_AT_MS);
   const uint32_t tick = S.agents == Scenario::AGENTS_RUNNING ? sinceStartMs / 5000 : 0;
   std::string a;
   for (int i = 0; i < 4; i++) {
@@ -257,7 +269,7 @@ std::string agentsJson(uint32_t sinceStartMs) {
   }
   std::string card = std::string(",{\"t\":\"AGENTS\",\"v\":\"4\",\"s1\":\"") + (waiting ? "1 NEEDS YOU" : "4 WORKING") +
                      "\",\"s2\":\"\",\"c\":\"" + (waiting ? "amber" : "green") + "\",\"a\":[" + a + "]";
-  if (waiting) {
+  if (waiting && !lan) {
     card += ",\"q\":{\"i\":\"l00001\",\"p\":\"p1abc-1\",\"k\":\"permission\",\"t\":\"Run this command?\","
             "\"d\":\"terraform apply -target=module.staging_net\",\"c\":\"~/code/infra-network\","
             "\"o\":[{\"k\":\"1\",\"l\":\"Yes\"},{\"k\":\"2\",\"l\":\"Yes, and don't ask again\"},{\"k\":\"3\",\"l\":\"No\"}]}";
@@ -268,8 +280,8 @@ std::string agentsJson(uint32_t sinceStartMs) {
 // The usage card from fixtures/usage.json, with the countdown running down a
 // minute at a time and the 5h percentage creeping up, as the bridge sends it,
 // then the scenario's Agents card.
-std::string payloadJson(uint32_t nowMs) {
-  const std::string agents = agentsJson(g_running ? nowMs - g_start : 0);
+std::string payloadJson(uint32_t nowMs, bool lan = false) {
+  const std::string agents = agentsJson(g_running ? nowMs - g_start : 0, lan);
   static std::string cache;
   static int cachedMin = -1;
   const int min = (int)(nowMs / 60000);
@@ -435,6 +447,7 @@ bool bleTakeNav(NavScene &out) {
 bool bleTake(Payload &out) {
   if (!S.bleLive || !g_running) return false;
   const uint32_t now = millis();
+  if (now - g_start < S.bleFromMs) return false;
   if (g_bleLastPush && now - g_bleLastPush < 5000) return false;
   g_bleLastPush = now ? now : 1;
   if (!parsePayload(payloadJson(now), out)) return false;
@@ -532,9 +545,14 @@ void netRequest() {
   g_fetching = true;
   g_fetchAt = millis();
 }
-NetFetch netTake(Payload &) {
+uint32_t g_wifiOkWhileLive = 0;  // `handover`: WiFi payloads delivered while BLE was live
+NetFetch netTake(Payload &out) {
   if (!g_fetching || millis() - g_fetchAt < FETCH_REFUSED_MS) return NetFetch::None;
   g_fetching = false;
+  if (S.agents == Scenario::AGENTS_HANDOVER && parsePayload(payloadJson(millis(), true), out)) {
+    if (g_bleLastGood && millis() - g_bleLastGood < 15000) g_wifiOkWhileLive++;
+    return NetFetch::Ok;
+  }
   return NetFetch::Failed;
 }
 const char *netLastError() { return "refused (bench)"; }
@@ -572,11 +590,14 @@ void buzzerUpdate(uint32_t) {}
 // --- running ---------------------------------------------------------------------
 namespace {
 
+uint64_t g_wifiWonPasses = 0;  // passes that ended with BLE live but WiFi's payload applied
+
 void runScenario() {
   setup();  // loads the config.h defaults, so the scenario's timers go in after it
   DeviceSettings d = deviceSettings();
   d.sleepMin = S.sleepMin;
   d.rotateSec = S.rotateSec;
+  if (S.agents == Scenario::AGENTS_HANDOVER) d.pollSec = 5;  // WiFi fetches overlap BLE several times
   deviceSettingsSave(d);
   publishSettings();  // as if stored before boot
   if (!settingsHaveWifi()) {  // the scenarios assume a network is configured, whoever's config.h this is
@@ -608,6 +629,8 @@ void runScenario() {
     // Mac's next Settings read must see what it saved.
     if (g_pubDevice != deviceSettings()) g_unpublished++;
     if (benchNavActive() && g_wifi) g_wifiRidePasses++;
+    // BLE is live (a push in the last 15 s, the policy's BLE_LIVE_MS), yet the payload is WiFi's.
+    if (g_bleLastGood && millis() - g_bleLastGood < 15000 && !benchPayloadViaBle()) g_wifiWonPasses++;
     double ns = hostNs(t0, Clock::now()) - (double)g_panelNs;
     if (ns > HOST_PASS_CAP_NS) {
       ns = HOST_PASS_CAP_NS;
@@ -766,6 +789,16 @@ int main(int argc, char **argv) {
       (g_backlight == 0 || g_attention != 1 || !benchPromptOpen() || g_answers != 1)) {
     fprintf(stderr, "%s: at the end the screen was %s, %u attention beeps (expected 1), prompt drawn=%d, %u answers (expected 1)\n",
             S.name, g_backlight ? "on" : "off", (unsigned)g_attention, (int)benchPromptOpen(), (unsigned)g_answers);
+    return 1;
+  }
+  // The handover: once BLE is live its payload stays (WiFi results are drained),
+  // the prompt it carries is drawn, and the tile's wait (seen first over WiFi)
+  // and its prompt (then over BLE) beep once between them.
+  if (S.agents == Scenario::AGENTS_HANDOVER &&
+      (!g_wifiOkWhileLive || g_wifiWonPasses || g_attention != 1 || !benchPromptOpen())) {
+    fprintf(stderr, "%s: %u WiFi payloads while BLE was live, %llu passes showed WiFi's payload, %u beeps (expected 1), prompt drawn=%d\n",
+            S.name, (unsigned)g_wifiOkWhileLive, (unsigned long long)g_wifiWonPasses, (unsigned)g_attention,
+            (int)benchPromptOpen());
     return 1;
   }
   if (S.agents == Scenario::AGENTS_RUNNING && g_attention != 0) {
