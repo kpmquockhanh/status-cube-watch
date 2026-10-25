@@ -21,8 +21,8 @@ constexpr bool detailIn(const LayoutRect &r, int16_t x, int16_t y) {
 }
 
 // What a tap at (x, y) on the detail screen hits: DETAIL_HIT_BACK,
-// DETAIL_HIT_CRITTER, or 0 for nothing. The zones overlap on rows 58-59
-// 30..59), so the zones never overlap.
+// DETAIL_HIT_CRITTER, or 0 for nothing. Back covers rows 30..59 and the
+// critter zone starts at row 60, so they do not overlap.
 constexpr int detailHit(int16_t x, int16_t y) {
   return detailIn(DETAIL_BACK, x, y) ? DETAIL_HIT_BACK : detailIn(DETAIL_CRITTER, x, y) ? DETAIL_HIT_CRITTER : 0;
 }

@@ -22,7 +22,7 @@ make test                                          # every host test; stops at t
 make build/gesture_test && ./build/gesture_test    # one test
 ./build/cube-shot build/ring fixtures/ring.json    # render a saved payload (fixtures/: every ring level, the usage card)
 make bench                                         # frames, pixels sent, CPU clock and modelled mA per scenario, then per-screen compose cost
-make bench BENCH_RUNS="agents alert handover"       # BENCH_RUNS names the scenarios (default: desk linked browse editor sleep volume nav ride agents alert handover detail agents-usb agents-battery; agents-battery also runs agents-battery-still and fails above 1.2x its mA)
+make bench BENCH_RUNS="agents alert handover"       # BENCH_RUNS names the scenarios (default: desk linked browse editor sleep volume nav ride agents alert handover detail detail-ride agents-usb agents-battery; agents-battery also runs agents-battery-still and fails above 1.2x its mA)
 ./build/cube-bench browse 20                       # one scenario at another host slowdown (default 40 = ESP32 at 240 MHz vs this host)
 make clean                                         # required after changing SCALE: the Makefile tracks headers, not flags
 ```

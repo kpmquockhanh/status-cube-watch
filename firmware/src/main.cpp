@@ -22,7 +22,6 @@
 #include "cpu_policy.h"
 #include "deck_util.h"
 #include "detail_layout.h"
-#include "detail_frame.h"  // HAT_NONE, HAT_AUTO
 #include "detail_view.h"
 #include "display.h"
 #include "gesture.h"
@@ -352,11 +351,12 @@ const PromptLayout &currentPromptLayout(uint32_t now) {
   return promptLayout;
 }
 
-// Closing tells the Mac (Control `0a 00`), so the payload drops `d` again.
+// Closing tells the Mac (Control `0a 00`), so the payload drops `d` again; a
+// close that could not go out is tried again by updateDetail.
 void closeDetail(uint32_t now) {
   if (!detailView.isOpen()) return;
   detailView.close();
-  bleSendDetail(nullptr);
+  detailView.closeSent(bleSendDetail(nullptr), now);
   backToGrid(now);
 }
 
@@ -364,7 +364,10 @@ void closeDetail(uint32_t now) {
 // (the prompt is the alert's or a tap's to open), and asks the Mac for `d`
 // when DetailView says it is due (at once after opening, then while none came).
 void updateDetail(uint32_t now) {
-  if (!detailView.isOpen()) return;
+  if (!detailView.isOpen()) {
+    if (detailView.closeDue(now)) detailView.closeSent(bleSendDetail(nullptr), now);
+    return;
+  }
   const AgentTile *t = agentsTile(payload.agents, detailView.agent());
   if (!t || t->kind == AgentKind::Wait) {
     closeDetail(now);
@@ -397,33 +400,9 @@ bool detailHatAuto() {
 void pickHat(HatPick p, uint32_t now) {
   const AgentTile *t = agentsTile(payload.agents, detailView.agent());
   if (!t) return;
-  constexpr int16_t PICK_AUTO = -2;  // detail_view.h's code for "automatic"
-  const int16_t shown = detailView.shownHat(t->hat, now);
-  const int shape = shown >= 0 ? shown / 8 : -1, color = shown >= 0 ? shown % 8 : 0;
-  int16_t code;
-  uint8_t wire;
-  switch (p.kind) {
-    case HatPick::Shape:
-      code = (int16_t)(p.index * 8 + color);
-      wire = (uint8_t)code;
-      break;
-    case HatPick::Color:
-      if (shape < 0) return;
-      code = (int16_t)(shape * 8 + p.index);
-      wire = (uint8_t)code;
-      break;
-    case HatPick::None:
-      code = -1;
-      wire = HAT_NONE;
-      break;
-    case HatPick::Auto:
-      code = PICK_AUTO;
-      wire = HAT_AUTO;
-      break;
-    default:
-      return;
-  }
-  if (!bleSendHat(t->id, wire)) Serial.println("[agents] hat pick shown, not sent");
+  const int16_t code = hatPickCode(p, detailView.shownHat(t->hat, now));  // hat_picker_layout.h
+  if (code == HAT_PICK_IGNORE) return;
+  if (!bleSendHat(t->id, hatPickWire(code))) Serial.println("[agents] hat pick shown, not sent");
   detailView.pick(code, now);
   dirty = true;
 }
@@ -938,6 +917,7 @@ void loop() {
       buzzerSetLevel(deviceSettings().sound);
     }
     if (volSlider.held()) volSlider.release(now);
+    closeDetail(now);  // with its picker: the Mac stops asking for `d` while the map streams (0a 00)
     if (screenOn) lcd.setBrightness(255);
     dirty = true;
   }

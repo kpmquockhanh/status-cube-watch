@@ -2,11 +2,13 @@
 // The hat picker (opened by a tap on the critter on the agent detail screen):
 // where its cells, colour swatches and `< back` sit. Pure: no Arduino. ui.cpp
 // draws inside these rectangles and main.cpp hit-tests with hatPickerAt, so
-// what is drawn and what is pressed cannot drift apart. Host-tested in
+// what is drawn and what is pressed cannot drift apart; hatPickCode and
+// hatPickWire say what a pick sends. Host-tested in
 // sim/tests/hat_picker_layout_test.cpp.
 #include <stdint.h>
 
 #include "agents_layout.h"  // LayoutRect
+#include "detail_frame.h"   // HAT_NONE, HAT_AUTO
 
 // 15 cells: 0..12 the shapes in agents-deck's order, 13 `none`, 14 `auto`.
 constexpr int HAT_PICK_SHAPES = 13, HAT_PICK_CELLS = 15, HAT_PICK_COLORS = 8;
@@ -75,4 +77,24 @@ constexpr HatPick hatPickerAt(int16_t x, int16_t y) {
   return hatPickIn(HAT_PICK_BACK, x, y)    ? HatPick{HatPick::Back, 0}
          : hatPickSwatchAt(x, y) >= 0      ? HatPick{HatPick::Color, (uint8_t)hatPickSwatchAt(x, y)}
                                            : hatPickOfCell(hatPickCellAt(x, y));
+}
+
+// A pick as DetailView::pick takes it: 0..103 (shape * 8 + colour), none, or
+// automatic; HAT_PICK_IGNORE for a tap that picks nothing.
+constexpr int16_t HAT_CODE_NONE = -1, HAT_CODE_AUTO = -2, HAT_PICK_IGNORE = -3;
+
+// The code a pick makes, given the hat shown now (-1 = none): a shape keeps the
+// current colour (0 when none), a colour keeps the current shape (ignored
+// while there is none).
+constexpr int16_t hatPickCode(HatPick p, int16_t shown) {
+  return p.kind == HatPick::Shape ? (int16_t)(p.index * 8 + (shown >= 0 ? shown % 8 : 0))
+         : p.kind == HatPick::Color ? (shown >= 0 ? (int16_t)((shown / 8) * 8 + p.index) : HAT_PICK_IGNORE)
+         : p.kind == HatPick::None  ? HAT_CODE_NONE
+         : p.kind == HatPick::Auto  ? HAT_CODE_AUTO
+                                    : HAT_PICK_IGNORE;
+}
+
+// A code as Control 0B carries it (detail_frame.h): 0..103, HAT_NONE, HAT_AUTO.
+constexpr uint8_t hatPickWire(int16_t code) {
+  return code == HAT_CODE_NONE ? HAT_NONE : code == HAT_CODE_AUTO ? HAT_AUTO : (uint8_t)code;
 }

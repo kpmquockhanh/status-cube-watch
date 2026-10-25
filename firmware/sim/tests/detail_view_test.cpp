@@ -111,9 +111,59 @@ void testPick(uint32_t t) {
   CHECK(!v.pickedAuto(false, t + 100));
 }
 
+// `0a 00` that could not go out is tried again every second for up to 5 s,
+// until one goes out or a detail opens again.
+void testCloseRetry(uint32_t t) {
+  DetailView v;
+  CHECK(!v.closeDue(t));
+  // A close that went out: nothing to retry.
+  v.open("l00002", t);
+  v.close();
+  v.closeSent(true, t);
+  CHECK(!v.closeDue(t + 1000));
+
+  // A close that failed: due again 1 s later, not before.
+  v.open("l00002", t);
+  v.close();
+  v.closeSent(false, t);
+  CHECK(!v.closeDue(t));
+  CHECK(!v.closeDue(t + 999));
+  CHECK(v.closeDue(t + 1000));
+  // The retry fails too: the next one a second after it; the 5 s count from the first.
+  v.closeSent(false, t + 1000);
+  CHECK(!v.closeDue(t + 1999));
+  CHECK(v.closeDue(t + 2000));
+  v.closeSent(false, t + 2000);
+  v.closeSent(false, t + 3000);
+  v.closeSent(false, t + 4000);
+  CHECK(!v.closeDue(t + 4999));
+  CHECK(!v.closeDue(t + 5000));  // given up
+  CHECK(!v.closeDue(t + 9000));
+
+  // A retry that goes out ends it.
+  v.open("l00002", t);
+  v.close();
+  v.closeSent(false, t);
+  CHECK(v.closeDue(t + 1000));
+  v.closeSent(true, t + 1000);
+  CHECK(!v.closeDue(t + 2000));
+
+  // A detail opening again ends it (its own 0A goes instead).
+  v.open("l00002", t);
+  v.close();
+  v.closeSent(false, t);
+  v.open("l00003", t + 500);
+  CHECK(!v.closeDue(t + 1000));
+  v.close();
+  CHECK(!v.closeDue(t + 2000));  // closed without a failed send: nothing pending
+  CHECK(DETAIL_CLOSE_RETRY_MS == 1000 && DETAIL_CLOSE_GIVE_UP_MS == 5000);
+}
+
 }  // namespace
 
 int main() {
+  testCloseRetry(700);
+  testCloseRetry(0xFFFFFFFFu - 2500);  // millis() wraps inside the 5 s
   testClosed();
   testResend(1000);
   testResend(0xFFFFFFFFu - 2000);  // millis() wraps inside the 5 s

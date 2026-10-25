@@ -144,6 +144,7 @@ struct Scenario {
   // The iPhone: `nav` names a nav_samples.h scene it sends every 200 ms while
   // the scenario runs (nullptr = no phone).
   const char *nav;
+  uint32_t navFromMs;  // the phone starts sending this long into the run
   // Screen sleep, set by the scenario so the numbers do not depend on whose
   // config.h the bench is built with. `mustSleep`: the run fails unless the
   // screen is off at the end.
@@ -186,6 +187,8 @@ constexpr uint32_t DETAIL_OPEN_MS = 2000, DETAIL_CLOSE_MS = 20000, DETAIL_REOPEN
 constexpr uint32_t DETAIL_PICKER_MS = 26000, DETAIL_SHAPE_MS = 28000, DETAIL_COLOR_MS = 30000,
                    DETAIL_PICK_BACK_MS = 32000;
 constexpr uint32_t DETAIL_WAIT_MS = 38000, DETAIL_WAIT_END_MS = 48000, DETAIL_OPEN2_MS = 52000;
+// `detail-ride`: the phone's first frame.
+constexpr uint32_t DETAIL_RIDE_MS = 10000;
 constexpr uint32_t DETAIL_GONE_MS = 58000, DETAIL_GONE_END_MS = 68000, DETAIL_OPEN3_MS = 72000,
                    DETAIL_PICKER2_MS = 74000;
 
@@ -279,7 +282,7 @@ Scenario makeScenario(const std::string &name) {
     s.battery = true;
     s.agents = Scenario::AGENTS_DECK;
   } else if (name == "detail") {
-    s.what = "Agents card: tap a working tile (0A, again every 5 s), back (0A 00); open, pick a hat (0B x2); the tile "
+    s.what = "Agents card: tap a working tile (0A, again every 5 s), back (0A 00 fails, goes 1 s later); open, pick a hat (0B x2); the tile "
              "waits, then goes (0A 00 each); picker left open: sleep at 2 min closes it (0A 00)";
     s.seconds = 210;
     s.sleepMin = 2;
@@ -297,6 +300,13 @@ Scenario makeScenario(const std::string &name) {
     s.strokes.push_back(tapAt(DETAIL_OPEN2_MS, 177, 100));    // after the wait: open again
     s.strokes.push_back(tapAt(DETAIL_OPEN3_MS, 177, 100));    // after it was gone: open again
     s.strokes.push_back(tapAt(DETAIL_PICKER2_MS, critX, critY));  // the picker, left up
+  } else if (name == "detail-ride") {
+    s.what = "Agents card: a working tile's detail open (0A), then a ride starts: one 0A 00, nothing left open";
+    s.seconds = 30;
+    s.agents = Scenario::AGENTS_DECK;
+    s.nav = "turn";
+    s.navFromMs = DETAIL_RIDE_MS;
+    s.strokes.push_back(tapAt(DETAIL_OPEN_MS, 177, 100));  // tile 1, checkout-api, running
   } else if (name == "sleep") {
     s.what = "Mac gone: WiFi fetches fail, screen sleeps after the timeout (2 min)";
     s.seconds = 600;
@@ -522,6 +532,7 @@ bool bleTakeNav(NavScene &out) {
   static bool sent = false;
   if (!S.nav || !g_running) return false;
   const uint32_t now = millis();
+  if (now - g_start < S.navFromMs) return false;
   if (sent && now - last < 200) return false;
   if (!nav_samples::navSample(S.nav, out)) return false;
   // The rider moves: the whole map slides 2 px down per frame and wraps, so
@@ -601,10 +612,17 @@ uint32_t g_details = 0;  // Control 0A sends
 constexpr int DETAIL_LOG = 64;
 uint32_t g_detailAt[DETAIL_LOG], g_detailCloseAt[DETAIL_LOG];
 uint32_t g_detailOpens = 0, g_detailCloses = 0;
+// `detail`: the first 0A 00 cannot go out (as a failed notify), so it is tried again.
+uint32_t g_detailCloseFails = 0, g_detailCloseFailAt = 0;
 bool bleSendDetail(const char *agent) {
   g_details++;
   if (!g_running) return true;
   const uint32_t t = millis() - g_start;
+  if (!(agent && agent[0]) && !strcmp(S.name, "detail") && g_detailCloseFails == 0) {
+    g_detailCloseFails++;
+    g_detailCloseFailAt = t;
+    return false;
+  }
   if (agent && agent[0]) {
     if (g_detailOpens < DETAIL_LOG) g_detailAt[g_detailOpens] = t;
     g_detailOpens++;
@@ -991,7 +1009,8 @@ int main(int argc, char **argv) {
     return 1;
   }
   // The detail: one 0A as the tap lifts, again 5 s later while no `d` came,
-  // so four before back; back sends 0A 00 once; the reopen sends 0A at once.
+  // so four before back; back's 0A 00 fails (the stand-in) and goes out on
+  // its retry a second later; the reopen sends 0A at once.
   // The picker: a shape keeps the tile's colour (h 17 = shape 2, colour 1),
   // a colour keeps the picked shape, both for the open agent; its back leaves
   // the detail open. Then each way out sends one 0A 00: the tile waiting (and
@@ -1016,7 +1035,11 @@ int main(int argc, char **argv) {
     const bool resendOk = firstOk && g_detailAt[1] - g_detailAt[0] >= DETAIL_RESEND_MS &&
                           g_detailAt[1] - g_detailAt[0] < DETAIL_RESEND_MS + 100;
     const bool reopenOk = reopenAt >= DETAIL_REOPEN_MS && reopenAt < DETAIL_REOPEN_MS + 300;
-    const bool closesOk = g_detailCloses == 4 && c[0] >= DETAIL_CLOSE_MS && c[0] < DETAIL_CLOSE_MS + 300 &&
+    const bool failOk = g_detailCloseFails == 1 && g_detailCloseFailAt >= DETAIL_CLOSE_MS &&
+                        g_detailCloseFailAt < DETAIL_CLOSE_MS + 300;
+    // (c[0] + 50: the stand-in stamps mid-pass, the retry is timed from the pass's start.)
+    const bool closesOk = g_detailCloses == 4 && failOk && c[0] + 50 >= g_detailCloseFailAt + DETAIL_CLOSE_RETRY_MS &&
+                          c[0] < g_detailCloseFailAt + DETAIL_CLOSE_RETRY_MS + 100 &&
                           c[1] >= DETAIL_WAIT_MS && c[1] < DETAIL_WAIT_END_MS &&  // the payload that waits
                           c[2] >= DETAIL_GONE_MS && c[2] < DETAIL_GONE_END_MS &&  // the payload without it
                           c[3] >= sleepAt && c[3] < sleepAt + 2000;               // the screen's sleep
@@ -1032,10 +1055,29 @@ int main(int argc, char **argv) {
       for (uint32_t i = 0; i < n; i++) fprintf(stderr, " %u", (unsigned)g_detailAt[i]);
       fprintf(stderr, " ms (%u before back, expected 4); 0A 00 sends at", (unsigned)before);
       for (uint32_t i = 0; i < g_detailCloses && i < (uint32_t)DETAIL_LOG; i++) fprintf(stderr, " %u", (unsigned)c[i]);
-      fprintf(stderr, " ms (expected 4: back, wait, gone, sleep at %u)\n", (unsigned)sleepAt);
+      fprintf(stderr, " ms (expected 4: back's retry, wait, gone, sleep at %u); %u failed, at %u ms (expected 1, at back)\n",
+              (unsigned)sleepAt, (unsigned)g_detailCloseFails, (unsigned)g_detailCloseFailAt);
       fprintf(stderr, "%s: %u 0B sends (expected 2: 33 then 34)", S.name, (unsigned)g_hats);
       for (uint32_t i = 0; i < g_hats && i < 2; i++) fprintf(stderr, " %s:%u", g_hatAgent[i], (unsigned)g_hatSent[i]);
       fprintf(stderr, "; %u beeps (expected 1); open at the end=%d\n", (unsigned)g_attention, (int)benchDetailOpen());
+      return 1;
+    }
+  }
+  // A ride starting over the detail closes it: one 0A 00 as the first frame
+  // lands, nothing open afterwards, and no 0A once the ride owns the screen.
+  if (!strcmp(S.name, "detail-ride")) {
+    const uint32_t n = g_detailOpens < DETAIL_LOG ? g_detailOpens : DETAIL_LOG;
+    uint32_t after = 0;
+    for (uint32_t i = 0; i < n; i++)
+      if (g_detailAt[i] >= DETAIL_RIDE_MS) after++;
+    const bool ok = n >= 1 && g_detailAt[0] >= DETAIL_OPEN_MS && g_detailAt[0] < DETAIL_OPEN_MS + 300 &&
+                    g_detailCloses == 1 && g_detailCloseAt[0] >= DETAIL_RIDE_MS &&
+                    g_detailCloseAt[0] < DETAIL_RIDE_MS + 300 && after == 0 && !benchDetailOpen() && benchNavActive();
+    if (!ok) {
+      fprintf(stderr, "%s: %u 0A sends (%u after the ride started, expected 0), %u 0A 00 (expected 1, at %u ms: %u), "
+              "open at the end=%d, ride=%d\n", S.name, (unsigned)g_detailOpens, (unsigned)after,
+              (unsigned)g_detailCloses, (unsigned)DETAIL_RIDE_MS, (unsigned)(g_detailCloses ? g_detailCloseAt[0] : 0),
+              (int)benchDetailOpen(), (int)benchNavActive());
       return 1;
     }
   }

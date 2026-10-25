@@ -17,6 +17,9 @@
 constexpr uint32_t DETAIL_RESEND_MS = 5000;
 // A picked hat is drawn this long, or until the payload shows it.
 constexpr uint32_t HAT_PICK_HOLD_MS = 4000;
+// A `0a 00` that could not go out is tried again this often, for this long
+// after the first try (else the Mac would keep asking for `d` every second).
+constexpr uint32_t DETAIL_CLOSE_RETRY_MS = 1000, DETAIL_CLOSE_GIVE_UP_MS = 5000;
 
 class DetailView {
  public:
@@ -37,6 +40,7 @@ class DetailView {
     open_ = true;
     sentOnce_ = false;
     picker_ = false;
+    closePending_ = false;  // its own 0A replaces a close still owed
   }
 
   // Also closes the picker. The caller sends Control `0a 00`.
@@ -61,6 +65,23 @@ class DetailView {
   void sent(uint32_t now) {
     sentOnce_ = true;
     sentAt_ = now;
+  }
+
+  // How the caller's `0a 00` went: a failure is tried again (closeDue) every
+  // DETAIL_CLOSE_RETRY_MS until one goes out, a detail opens again, or
+  // DETAIL_CLOSE_GIVE_UP_MS after the first failure.
+  void closeSent(bool ok, uint32_t now) {
+    if (ok) {
+      closePending_ = false;
+      return;
+    }
+    if (!closePending_) closeFirstAt_ = now;
+    closePending_ = true;
+    closeTriedAt_ = now;
+  }
+  bool closeDue(uint32_t now) const {
+    return closePending_ && !open_ && now - closeTriedAt_ >= DETAIL_CLOSE_RETRY_MS &&
+           now - closeFirstAt_ < DETAIL_CLOSE_GIVE_UP_MS;
   }
 
   // A tap on the critter. Only while the detail screen is open.
@@ -104,4 +125,6 @@ class DetailView {
   bool picked_ = false;
   int16_t pick_ = 0;
   uint32_t pickAt_ = 0;
+  bool closePending_ = false;
+  uint32_t closeFirstAt_ = 0, closeTriedAt_ = 0;
 };

@@ -47,5 +47,23 @@ int main() {
   CHECK(kind(hatPickerAt(96, 40), HatPick::Nothing));
   CHECK(kind(hatPickerAt(10, 29), HatPick::Nothing));
 
+  // What a pick means, given the hat shown now (-1 none).
+  const HatPick shape4{HatPick::Shape, 4}, color2{HatPick::Color, 2};
+  CHECK(hatPickCode(shape4, 17) == 4 * 8 + 1);  // keeps colour 1
+  CHECK(hatPickCode(shape4, -1) == 4 * 8 + 0);  // none: colour 0
+  CHECK(hatPickCode(HatPick{HatPick::Shape, 12}, 103) == 12 * 8 + 7);
+  CHECK(hatPickCode(color2, 17) == 2 * 8 + 2);  // keeps shape 2
+  CHECK(hatPickCode(HatPick{HatPick::Color, 7}, 96) == 12 * 8 + 7);
+  CHECK(hatPickCode(color2, -1) == HAT_PICK_IGNORE);  // no hat to colour
+  CHECK(hatPickCode(HatPick{HatPick::None, 0}, 17) == HAT_CODE_NONE && HAT_CODE_NONE == -1);
+  CHECK(hatPickCode(HatPick{HatPick::Auto, 0}, 17) == HAT_CODE_AUTO && HAT_CODE_AUTO == -2);
+  CHECK(hatPickCode(HatPick{HatPick::Auto, 0}, -1) == HAT_CODE_AUTO);
+  CHECK(hatPickCode(HatPick{HatPick::Back, 0}, 17) == HAT_PICK_IGNORE);
+  CHECK(hatPickCode(HatPick{HatPick::Nothing, 0}, 17) == HAT_PICK_IGNORE);
+  // The code on the wire (Control 0B).
+  CHECK(hatPickWire(HAT_CODE_NONE) == 0xFE && hatPickWire(HAT_CODE_NONE) == HAT_NONE);
+  CHECK(hatPickWire(HAT_CODE_AUTO) == 0xFF && hatPickWire(HAT_CODE_AUTO) == HAT_AUTO);
+  CHECK(hatPickWire(0) == 0 && hatPickWire(33) == 33 && hatPickWire(103) == 103);
+
   return checksDone("hat_picker_layout");
 }
