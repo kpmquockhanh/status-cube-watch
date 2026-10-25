@@ -83,10 +83,11 @@ void testStateFixture() {
     CHECK(v.playKnown == ((flags & VOL_FLAG_PLAY_KNOWN) != 0));
     CHECK(v.playing == ((flags & VOL_FLAG_PLAYING) != 0));
     CHECK(v.macLocked == ((flags & VOL_FLAG_MAC_LOCKED) != 0));
+    CHECK(v.screenLocked == ((flags & VOL_FLAG_SCREEN_LOCKED) != 0));
     CHECK(name == v.name);
     n++;
   }
-  CHECK(n == 7);
+  CHECK(n == 9);
 }
 
 // Every rejection leaves the previous state untouched.

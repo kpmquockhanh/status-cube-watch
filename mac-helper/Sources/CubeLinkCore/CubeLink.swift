@@ -15,6 +15,8 @@ public final class CubeLink: NSObject, CBCentralManagerDelegate, CBPeripheralDel
     public var onMediaKey: ((MediaKey) -> Void)?
     /// A tap on the cube's unlock prompt: unlock the Mac's screen, if `UnlockPolicy` agrees.
     public var onUnlock: (() -> Void)?
+    /// The user tapped an answer on the cube (Control 09, fw_rev 10): agent id, prompt id, option key.
+    public var onAnswer: ((String, String, Character) -> Void)?
     /// The link became ready (Control subscribed). The Volume state is written from here.
     public var onReady: (() -> Void)?
     /// The cube's settings, read once the link is ready and again after every write. Nil while
@@ -333,6 +335,8 @@ public final class CubeLink: NSObject, CBCentralManagerDelegate, CBPeripheralDel
                 onMediaKey?(key)
             case .unlock:
                 onUnlock?()
+            case .answer(let agent, let prompt, let key):
+                onAnswer?(agent, prompt, key)
             case .settings(let r):
                 onSettingsResult?(r)
                 if r != .okReboot { refreshSettings() }

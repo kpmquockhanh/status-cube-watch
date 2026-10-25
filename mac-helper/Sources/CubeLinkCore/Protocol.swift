@@ -63,6 +63,9 @@ public enum ControlMessage: Equatable {
     case media(MediaKey)
     /// Unlock the Mac's screen: a tap on the cube's unlock prompt (fw_rev 7).
     case unlock
+    /// The user tapped an answer to a Claude prompt (fw_rev 10): the agent id and prompt id from the
+    /// payload's `q`, passed through unchanged, and the option key '1'...'9'.
+    case answer(agent: String, prompt: String, key: Character)
 
     public static func parse(_ d: Data) -> ControlMessage? {
         let b = [UInt8](d)
@@ -81,9 +84,27 @@ public enum ControlMessage: Equatable {
             guard b.count >= 2, let k = MediaKey(rawValue: b[1]) else { return nil }
             return .media(k)
         case 0x07: return .unlock
+        case 0x09: return parseAnswer(b)
         default: return nil
         }
     }
+}
+
+/// `09 <la> <agent> <lp> <prompt> <key>`: ids are 1...15 printable ASCII bytes, the key '1'...'9',
+/// and the message is exactly 4 + la + lp bytes.
+private func parseAnswer(_ b: [UInt8]) -> ControlMessage? {
+    guard b.count >= 4 else { return nil }
+    let la = Int(b[1])
+    guard (1...15).contains(la), b.count >= 4 + la else { return nil }
+    let lp = Int(b[2 + la])
+    guard (1...15).contains(lp), b.count == 4 + la + lp else { return nil }
+    let agent = Array(b[2..<(2 + la)])
+    let prompt = Array(b[(3 + la)..<(3 + la + lp)])
+    let key = b[3 + la + lp]
+    let printable: (UInt8) -> Bool = { $0 >= 0x20 && $0 <= 0x7E }
+    guard agent.allSatisfy(printable), prompt.allSatisfy(printable), (0x31...0x39).contains(key) else { return nil }
+    return .answer(agent: String(decoding: agent, as: UTF8.self), prompt: String(decoding: prompt, as: UTF8.self),
+                   key: Character(UnicodeScalar(key)))
 }
 
 /// The cube's reply to a Settings write: Control `03 <result>`.

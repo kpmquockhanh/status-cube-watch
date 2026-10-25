@@ -24,7 +24,7 @@ media 1 06 01
 media 2 06 02
 # Control (cube -> Mac): unlock the Mac's screen (fw_rev 7). unlock <bytes>.
 unlock 07
-# Volume characteristic (Mac -> cube): vol_state <level|none> <flags hex> "<name>" <bytes>. none = no output device (ff); flags bit0 muted, bit1 volume settable, bit2 mute settable, bit3 play state known, bit4 playing (bits 3-4 from fw_rev 6), bit5 the Mac is locked and unlocks for Control 07 (fw_rev 7), bit6 the Mac is locked whether or not it unlocks (fw_rev 10, no line here until the Mac encoder learns it); older firmware ignores the bits it does not know.
+# Volume characteristic (Mac -> cube): vol_state <level|none> <flags hex> "<name>" <bytes>. none = no output device (ff); flags bit0 muted, bit1 volume settable, bit2 mute settable, bit3 play state known, bit4 playing (bits 3-4 from fw_rev 6), bit5 the Mac is locked and unlocks for Control 07 (fw_rev 7), bit6 the Mac is locked whether or not it unlocks (fw_rev 10); older firmware ignores the bits it does not know.
 vol_state 56 06 "MacBook Pro Speakers" 01 38 06 4d 61 63 42 6f 6f 6b 20 50 72 6f 20 53 70 65 61 6b 65 72 73
 vol_state 30 07 "AirPods Pro" 01 1e 07 41 69 72 50 6f 64 73 20 50 72 6f
 vol_state 100 04 "HDMI" 01 64 04 48 44 4d 49
@@ -32,6 +32,8 @@ vol_state none 00 "" 01 ff 00
 vol_state 56 1e "Speakers" 01 38 1e 53 70 65 61 6b 65 72 73
 vol_state 56 0e "Speakers" 01 38 0e 53 70 65 61 6b 65 72 73
 vol_state 56 26 "Speakers" 01 38 26 53 70 65 61 6b 65 72 73
-# Control 09 (cube -> Mac, fw_rev 10): answer <agent id> <prompt id> <key> <bytes>. [09][la][agent][lp][prompt][key], ids 1..15 printable ASCII, key '1'..'9'. A Mac that does not know 09 ignores it (read from plan 4).
+vol_state 56 46 "Speakers" 01 38 46 53 70 65 61 6b 65 72 73
+vol_state 56 66 "Speakers" 01 38 66 53 70 65 61 6b 65 72 73
+# Control 09 (cube -> Mac, fw_rev 10): answer <agent id> <prompt id> <key> <bytes>. [09][la][agent][lp][prompt][key], ids 1..15 printable ASCII, key '1'..'9'. The Mac app parses it; an older app ignores it.
 answer l1a2b3 p1kq3x0-7 2 09 06 6c 31 61 32 62 33 09 70 31 6b 71 33 78 30 2d 37 32
 answer labcdefabcdefab pzzzzzzzzzz-123 9 09 0f 6c 61 62 63 64 65 66 61 62 63 64 65 66 61 62 0f 70 7a 7a 7a 7a 7a 7a 7a 7a 7a 7a 2d 31 32 33 39
