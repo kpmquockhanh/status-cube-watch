@@ -97,5 +97,15 @@ PromptMetrics uiPromptMetrics(const AgentPrompt &q, bool reason);
 // option buttons): main.cpp hit-tests and sizes its scroll with this.
 PromptLayout uiPromptLayout(const AgentPrompt &q, ButtonsOff off);
 
+// The detail screen of an agent that is not waiting, opened from its tile
+// (detail_layout.h places `< back` and the critter, which main.cpp
+// hit-tests): status pill, critter in `hat` (the shown one: a pick in flight
+// wins over the tile's `h`), title, subagents, what it is doing, context bar,
+// last prompt, meta line, from the Agents card's `d` when it is this agent's
+// and came over BLE (`viaBle`); until then `loading...`, or
+// `details need Bluetooth` for a WiFi payload.
+void uiAgentDetail(Display &lcd, const AgentsData &a, const AgentTile &tile, int16_t hat, bool viaBle,
+                   bool online, uint32_t ageMs, const BatteryView &bat, UiLink link);
+
 // Progress screen while an OTA image is arriving.
 void uiOta(Display &lcd, uint8_t percent);

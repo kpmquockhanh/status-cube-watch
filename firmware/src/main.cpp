@@ -3,7 +3,8 @@
 // Polls the host bridge for a small pre-formatted JSON payload and renders it
 // as a swipeable deck of cards. Swipe left/right to change card; the deck can
 // also auto-advance (the rotate setting). On the Agents card a tap on a waiting
-// agent opens its prompt, whose buttons answer it over BLE.
+// agent opens its prompt, whose buttons answer it over BLE; a tap on any other
+// agent opens its detail screen.
 
 #include <Arduino.h>
 #include <string.h>
@@ -20,6 +21,8 @@
 #include "config.h"
 #include "cpu_policy.h"
 #include "deck_util.h"
+#include "detail_layout.h"
+#include "detail_view.h"
 #include "display.h"
 #include "gesture.h"
 #include "idle_sleep.h"
@@ -119,6 +122,11 @@ struct DrawnPrompt {
 DrawnPrompt drawnPrompt{};
 ButtonsOff promptLayoutOff = ButtonsOff::No;  // what promptLayout was built for
 bool touchOnPrompt = false;  // the finger now down landed on the prompt screen (latched at landing)
+// The detail screen of an agent that is not waiting (detail_view.h), opened by
+// a tap on its tile and drawn under the prompt screen. While it is open the Mac
+// is asked (Control 0A) to put that agent's `d` in the payload.
+DetailView detailView;
+bool touchOnDetail = false;  // the finger now down landed on the detail screen (latched at landing)
 // The finger now down landed on the BLE passkey or the first-boot "waiting for a Mac" screen
 // (latched at landing): nothing it does reaches what is under them.
 bool touchCovered = false;
@@ -342,7 +350,55 @@ const PromptLayout &currentPromptLayout(uint32_t now) {
   return promptLayout;
 }
 
+// Closing tells the Mac (Control `0a 00`), so the payload drops `d` again.
+void closeDetail(uint32_t now) {
+  if (!detailView.isOpen()) return;
+  detailView.close();
+  bleSendDetail(nullptr);
+  backToGrid(now);
+}
+
+// Every pass while it is open: it closes when its tile goes or starts waiting
+// (the prompt is the alert's or a tap's to open), and asks the Mac for `d`
+// when DetailView says it is due (at once after opening, then while none came).
+void updateDetail(uint32_t now) {
+  if (!detailView.isOpen()) return;
+  const AgentTile *t = agentsTile(payload.agents, detailView.agent());
+  if (!t || t->kind == AgentKind::Wait) {
+    closeDetail(now);
+    return;
+  }
+  if (detailView.sendDue(payload.agents, now)) {
+    bleSendDetail(detailView.agent());  // a failure is logged; sent() paces the retry either way
+    detailView.sent(now);
+  }
+}
+
+void openDetail(const char *agent, uint32_t now) {
+  detailView.open(agent, now);
+  updateDetail(now);  // the first 0A goes now
+  dirty = true;
+}
+
+// The detail screen: a swipe right or `< back` closes it, a tap on the critter
+// opens the hat picker (drawn by a later task: until then the detail stays).
+// The other gestures do nothing, so the display panel does not open over it.
+void detailGesture(Gesture g, uint32_t now) {
+  if (g == Gesture::SwipePrev) {
+    closeDetail(now);
+  } else if (g == Gesture::Tap) {
+    const int hit = detailHit(gestures.startX(), gestures.startY());
+    if (hit == DETAIL_HIT_BACK) {
+      closeDetail(now);
+    } else if (hit == DETAIL_HIT_CRITTER) {
+      detailView.openPicker();
+      dirty = true;
+    }
+  }
+}
+
 void openAgentView(const char *agent, uint32_t now) {
+  closeDetail(now);  // the prompt replaces it
   agentView.open(agent, now);
   promptScroll.reset();
   promptLayoutStale = true;
@@ -443,6 +499,13 @@ void pollTouch() {
     touchOnPrompt = agentView.isOpen() && !covered && !editing && !onUnlock && !navSession.active() && !pairingMsgUp();
   }
   const bool onPrompt = touchOnPrompt && !covered && !editing && !onUnlock && !navSession.active() && !pairingMsgUp();
+  // The detail screen sits under the prompt screen, latched the same way.
+  if (landing) {
+    touchOnDetail = detailView.isOpen() && !agentView.isOpen() && !covered && !editing && !onUnlock &&
+                    !navSession.active() && !pairingMsgUp();
+  }
+  const bool onDetail = touchOnDetail && !onPrompt && !covered && !editing && !onUnlock && !navSession.active() &&
+                        !pairingMsgUp();
   // On the Volume card a vertical move is the volume, not a swipe (gesture.h).
   // Whether it is the slider's touch is decided where the finger landed, so a touch that began on
   // another card never reaches it; the latch clears on the lift pass, after the gesture is routed.
@@ -451,15 +514,16 @@ void pollTouch() {
   // swipe down from the caption, or on a grid that fits, still opens the
   // display panel.
   if (landing) {
-    const bool deckUp = !covered && !editing && !onUnlock && !onPrompt && !navSession.active() && !pairingMsgUp();
+    const bool deckUp =
+        !covered && !editing && !onUnlock && !onPrompt && !onDetail && !navSession.active() && !pairingMsgUp();
     touchOnVolume = onVolumeCard() && deckUp;
     touchOnVolumeRow = touchOnVolume && volumeInRow(y);
     touchOnGrid = onAgentsCard() && deckUp && gridScrolls() && y >= AGENTS_VIEW_Y && y < AGENTS_VIEW_Y + AGENTS_VIEW_H;
   }
   const bool onVolume = touchOnVolume && onVolumeCard() && !editing;
   const bool onVolumeRow = onVolume && touchOnVolumeRow;
-  const bool onGrid = touchOnGrid && onAgentsCard() && !editing && !onPrompt;
-  if (!down) touchOnVolume = touchOnVolumeRow = touchOnGrid = touchOnPrompt = touchCovered = false;
+  const bool onGrid = touchOnGrid && onAgentsCard() && !editing && !onPrompt && !onDetail;
+  if (!down) touchOnVolume = touchOnVolumeRow = touchOnGrid = touchOnPrompt = touchOnDetail = touchCovered = false;
   // In the button row the tracker stays in tap mode: a press that drifts a few
   // pixels is still a Tap (TAP_MAX_PX), not a drag of the slider. On the map a
   // move either way drags it.
@@ -535,6 +599,10 @@ void pollTouch() {
     promptGesture(gesture, now);
     return;
   }
+  if (onDetail) {
+    detailGesture(gesture, now);
+    return;
+  }
   if (onAgentsCard() && !onVolume) {
     switch (gesture) {
       case Gesture::DragStart:
@@ -553,10 +621,11 @@ void pollTouch() {
       case Gesture::DragEnd:
         gridScroll.release();
         break;
-      case Gesture::Tap: {  // only a waiting agent has a prompt to open
+      case Gesture::Tap: {  // a waiting agent opens its prompt, any other its detail
         const AgentsData &a = payload.agents;
         const int i = agentsTileAt(gestures.startX(), gestures.startY(), a.nTiles, gridScroll.offset());
         if (i >= 0 && a.tiles[i].kind == AgentKind::Wait) openAgentView(a.tiles[i].id, now);
+        else if (i >= 0) openDetail(a.tiles[i].id, now);
         break;
       }
       default:
@@ -704,10 +773,12 @@ void setup() {
 
 // The one screen a frame draws, in priority order. The draw path and the
 // animation pacer both ask this, so they agree on what is on the glass.
-enum class Shown : uint8_t { Passkey, Nav, PairingMsg, Waiting, Editor, Unlock, Prompt, Deck };
-Shown shownScreen(uint32_t now, const AgentTile **promptTile) {
-  // The open prompt's agent (update() closed the view if its tile went).
+enum class Shown : uint8_t { Passkey, Nav, PairingMsg, Waiting, Editor, Unlock, Prompt, Detail, Deck };
+Shown shownScreen(uint32_t now, const AgentTile **promptTile, const AgentTile **detailTile) {
+  // The open prompt's agent (update() closed the view if its tile went), and
+  // the open detail's (updateDetail() closes it likewise).
   *promptTile = agentView.isOpen() ? agentsTile(payload.agents, agentView.agent()) : nullptr;
+  *detailTile = detailView.isOpen() ? agentsTile(payload.agents, detailView.agent()) : nullptr;
   if (bleState() == BleState::Pairing) return Shown::Passkey;  // the code must be seen
   if (navSession.active()) return Shown::Nav;
   if (pairingMsgUp()) return Shown::PairingMsg;
@@ -715,10 +786,11 @@ Shown shownScreen(uint32_t now, const AgentTile **promptTile) {
   if (editing && !uiEditorSliding()) return Shown::Editor;
   if (!editing && unlock.screen(now) != UnlockScreen::Hidden) return Shown::Unlock;
   if (*promptTile) return Shown::Prompt;
+  if (*detailTile) return Shown::Detail;
   return Shown::Deck;
 }
 
-// The critters move on the Agents card and the prompt screen (anim_pacer.h).
+// The critters move on the Agents card, the prompt screen and the detail screen (anim_pacer.h).
 AnimPacer animPacer;
 #ifdef SIM_BENCH
 bool g_benchAnimOff = false;  // the bench's still run: the same card, never animated
@@ -886,6 +958,8 @@ void loop() {
   }
   // Only now, with this pass's payload and lock state in the view.
   routePromptTap(now);
+  // The detail, against this pass's payload: its tile may have gone or started waiting.
+  updateDetail(now);
   // The grid starts at its top whenever the deck comes back to the card.
   if (onAgentsCard()) gridScroll.setRange(agentsContentH(payload.agents.nTiles), AGENTS_VIEW_H);
   else gridScroll.reset();
@@ -907,7 +981,7 @@ void loop() {
   }
 
   if (!blePairingOpen()) pairMsgDismissed = false;
-  if (rotateMs() > 0 && !editing && !navSession.active() && !agentView.isOpen() && !touchDown && !volSlider.held() && now - lastRotate >= rotateMs()) {
+  if (rotateMs() > 0 && !editing && !navSession.active() && !agentView.isOpen() && !detailView.isOpen() && !touchDown && !volSlider.held() && now - lastRotate >= rotateMs()) {
     step(1);
   }
 
@@ -944,9 +1018,9 @@ void loop() {
 
   // The critters' next frame. Never activity (idle is not told), and on battery
   // it does not raise the clock: only touch and the ring/slide animations do.
-  const AgentTile *promptTile = nullptr;
-  const Shown shown = shownScreen(now, &promptTile);
-  bool animOn = shown == Shown::Prompt || (shown == Shown::Deck && onAgentsCard());
+  const AgentTile *promptTile = nullptr, *detailTile = nullptr;
+  const Shown shown = shownScreen(now, &promptTile, &detailTile);
+  bool animOn = shown == Shown::Prompt || shown == Shown::Detail || (shown == Shown::Deck && onAgentsCard());
 #ifdef SIM_BENCH
   if (g_benchAnimOff) animOn = false;
 #endif
@@ -992,6 +1066,9 @@ void loop() {
         drawnPrompt.scroll = pv.scroll;
         drawnPrompt.layout = layout;
       }
+    } else if (shown == Shown::Detail) {
+      uiAgentDetail(lcd, payload.agents, *detailTile, detailView.shownHat(detailTile->hat, now), payloadViaBle, online,
+                    age, bv, link);
     } else {
       VolumeView vv = volSlider.view();
       vv.pressed = mediaPressed;

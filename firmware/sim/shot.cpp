@@ -9,6 +9,7 @@
 //                                   # @portal, @ota, @ble-pair, @ble-wait, @waiting, @dev-edit,
 //                                   # @unlock|unlock-wait, @nav-turn|vn|long|longeta|reroute|offroute|arrived|lost|busy, @vol-56|muted|full|zero|fixed|noout|long|none|press|playing|paused,
 //                                   # @agents, @agents-scroll, @agents-hats, @agents-long, @prompt, @prompt-settle|sent|noanswer|tmux|locked|input|cut|long|wifi|queued|dropped
+//                                   # @detail, @detail-loading|wifi|err|long
 //
 // Reads the payload JSON from the file named on the command line, or stdin.
 
@@ -314,6 +315,41 @@ bool promptShot(Display &lcd, const char *state) {
   return true;
 }
 
+// The detail screen of fixtures/agents-full.json's running agent l00002, whose
+// `d` the fixture carries: as it arrives over BLE (""), before `d` comes
+// ("loading"), from a WiFi payload ("wifi"), with a last error ("err").
+bool detailShot(Display &lcd, const char *state) {
+  static Payload p;
+  if (!loadPayload("fixtures/agents-full.json", p)) return false;
+  AgentsData &a = p.agents;
+  const AgentTile *tile = agentsTile(a, "l00002");
+  if (!tile) return false;
+  bool viaBle = true;
+  UiLink link = linkFromEnv();
+  if (!strcmp(state, "")) {
+  } else if (!strcmp(state, "loading")) {
+    a.detail.present = false;
+  } else if (!strcmp(state, "wifi")) {
+    a.detail.present = false;  // the LAN variant never carries `d`
+    viaBle = false;
+    link = UiLink::Wifi;
+  } else if (!strcmp(state, "err")) {
+    snprintf(a.detail.err, sizeof(a.detail.err), "npm test exited 1: 3 failing in session.test.ts");
+  } else if (!strcmp(state, "long")) {  // every field at the bridge's maximum
+    snprintf(a.detail.title, sizeof(a.detail.title), "fix the refresh-token race in session...");
+    snprintf(a.detail.status, sizeof(a.detail.status), "running \xc2\xb7 1h 38m");
+    snprintf(a.detail.doing, sizeof(a.detail.doing), "edit \xc2\xb7 src/auth/very/deep/path/session.ts");
+    snprintf(a.detail.prompt, sizeof(a.detail.prompt),
+             "fix the refresh-token race in session.ts and add a regression test for concurrent logins, then "
+             "run the whole suite and tell me what else breaks...");
+    snprintf(a.detail.subs, sizeof(a.detail.subs), "12 subagents");
+  } else {
+    return false;
+  }
+  uiAgentDetail(lcd, a, *tile, tile->hat, viaBle, true, 4000, batteryViewFromEnv(), link);
+  return true;
+}
+
 // Screens that are not payload cards. Selected with `@name` on the command
 // line; the grab goes to <prefix>-<name>.png. Returns false for an unknown name.
 bool renderSpecial(Display &lcd, const char *name) {
@@ -347,6 +383,8 @@ bool renderSpecial(Display &lcd, const char *name) {
     if (!agentsShot(lcd, name[6] ? name + 7 : "")) return false;
   } else if (!strcmp(name, "prompt") || !strncmp(name, "prompt-", 7)) {
     if (!promptShot(lcd, name[6] ? name + 7 : "")) return false;
+  } else if (!strcmp(name, "detail") || !strncmp(name, "detail-", 7)) {
+    if (!detailShot(lcd, name[6] ? name + 7 : "")) return false;
   } else {
     return false;
   }

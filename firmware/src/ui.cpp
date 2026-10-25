@@ -6,6 +6,7 @@
 #include "battery_util.h"
 #include "config.h"
 #include "critter.h"
+#include "detail_layout.h"
 #include "fonts_gen.h"
 #include "dev_editor.h"
 #include "editor_layout.h"
@@ -1737,6 +1738,120 @@ PromptLayout uiPromptLayout(const AgentPrompt &q, ButtonsOff off) {
   PromptLayout L;
   L.build(uiPromptMetrics(q, offReason(off) != nullptr), promptButtons(q));
   return L;
+}
+
+// --- the detail screen -------------------------------------------------------------
+// agents-deck's detail panel (docs/images/panel-detail-v2.png) condensed to
+// 240 x 280: black, the critter top-left beside the title, then what it is
+// doing, its context, the last prompt and the meta line. Every word is the
+// payload's `d` (or the tile's) or fixed copy.
+namespace {
+constexpr int DETAIL_ROW_Y = 44;  // `< back` and the status pill
+constexpr int DETAIL_X = 16, DETAIL_W = LCD_WIDTH - 2 * DETAIL_X;
+constexpr int DETAIL_PILL_RIGHT = 224, DETAIL_PILL_H = 16, DETAIL_PILL_PAD = 5, DETAIL_PILL_MAX_W = 120;
+constexpr int DETAIL_CELL = 3;
+constexpr int DETAIL_TITLE_X = 88, DETAIL_TITLE_W = 232 - DETAIL_TITLE_X, DETAIL_TITLE_Y = 60, DETAIL_TITLE_LINE_H = 20;
+constexpr int DETAIL_DOING_LABEL_Y = 122, DETAIL_DOING_Y = 136;
+constexpr int DETAIL_CTX_Y = 156, DETAIL_BAR_Y = 170, DETAIL_BAR_H = 4;
+constexpr int DETAIL_PROMPT_LABEL_Y = 182, DETAIL_PROMPT_Y = 196, DETAIL_PROMPT_LINE_H = 15;
+constexpr uint8_t DETAIL_PROMPT_LINES = 4;
+constexpr int DETAIL_META_Y = 266;
+
+// A small label (rm11, lower-case), its left edge at x; returns its width.
+int detailLabel(LovyanGFX *g, const char *text, int x, int y, uint16_t color) {
+  char buf[48];
+  lowerCopy(text, buf, sizeof(buf));
+  g->setFont(&V_RM11.font);
+  g->setTextDatum(middle_left);
+  g->setTextColor(color, BG);
+  g->drawString(buf, x, y);
+  return g->textWidth(buf);
+}
+
+// The status pill, right-aligned on the back row: rm11 in black on a filled
+// rect, cut with "..." to DETAIL_PILL_MAX_W.
+void detailPill(LovyanGFX *g, const char *text, uint16_t fill) {
+  if (!text || !text[0]) return;
+  char line[1][LINE_CAP];
+  g->setFont(&V_RM11.font);
+  if (!wrapText(g, text, DETAIL_PILL_MAX_W - 2 * DETAIL_PILL_PAD, 1, line)) return;
+  const int w = g->textWidth(line[0]) + 2 * DETAIL_PILL_PAD;
+  const int x = DETAIL_PILL_RIGHT - w;
+  g->fillRect(x, DETAIL_ROW_Y - DETAIL_PILL_H / 2, w, DETAIL_PILL_H, fill);
+  g->setTextDatum(middle_left);
+  g->setTextColor(BG, fill);
+  g->drawString(line[0], x + DETAIL_PILL_PAD, DETAIL_ROW_Y);
+}
+}  // namespace
+
+void uiAgentDetail(Display &lcd, const AgentsData &a, const AgentTile &tile, int16_t hat, bool viaBle,
+                   bool online, uint32_t ageMs, const BatteryView &bat, UiLink link) {
+  g_animating = false;
+  g_link = link;
+  LovyanGFX *g = target(lcd);
+  g->fillScreen(BG);
+  const uint32_t now = millis();
+  drawTopBar(g, online, ageMs, bat);
+
+  // `d` counts only when it is this agent's and came over BLE (the LAN variant
+  // never carries it).
+  const AgentDetail &d = a.detail;
+  const bool has = viaBle && d.present && !strcmp(d.id, tile.id);
+  const char *waitCopy = viaBle ? "loading..." : "details need Bluetooth";
+
+  // The back row: `< back` (DETAIL_BACK is its touch zone) and the status pill.
+  g->setFont(&V_RM13.font);
+  g->setTextDatum(middle_left);
+  g->setTextColor(INK, BG);
+  g->drawString("< back", DETAIL_X, DETAIL_ROW_Y);
+  const bool wait = tile.kind == AgentKind::Wait, hungry = tileHungry(tile);
+  detailPill(g, has && d.status[0] ? d.status : tile.line, wait || hungry ? ACCENT : INK);
+
+  // The critter in its pose and (shown) hat, centred in DETAIL_CRITTER,
+  // coloured as on its tile but on black.
+  const uint32_t body = wait || tile.kind == AgentKind::Run || hungry ? ACCENT_RGB
+                        : tile.kind == AgentKind::Err                 ? INK_RGB
+                                                                      : DIM_RGB;
+  const LayoutRect &cr = DETAIL_CRITTER;
+  drawCritter(g, poseFromName(tile.pose), hatFromCode(hat), now, cr.x + cr.w / 2 - TILE_CRIT_X * DETAIL_CELL,
+              cr.y + 25, DETAIL_CELL, CritterInks{body, BG_RGB});
+
+  // The title (rb18, two lines) and the subagents under it.
+  char lines[DETAIL_PROMPT_LINES][LINE_CAP];
+  g->setFont(&V_RB18.font);
+  const uint8_t nTitle = wrapText(g, has && d.title[0] ? d.title : tile.name, DETAIL_TITLE_W, 2, lines);
+  g->setTextDatum(top_left);
+  g->setTextColor(INK, BG);
+  for (uint8_t i = 0; i < nTitle; i++) g->drawString(lines[i], DETAIL_TITLE_X, DETAIL_TITLE_Y + i * DETAIL_TITLE_LINE_H);
+  if (has && d.subs[0])
+    drawLine(g, V_RM11, d.subs, DETAIL_TITLE_X, DETAIL_TITLE_Y + nTitle * DETAIL_TITLE_LINE_H + 6, DETAIL_TITLE_W,
+             ACCENT, BG, middle_left);
+
+  // Doing now: the last error, in the accent, wins over the tool.
+  detailLabel(g, "doing now", DETAIL_X, DETAIL_DOING_LABEL_Y, DIM);
+  const bool err = has && d.err[0];
+  drawLine(g, V_RM13, !has ? waitCopy : err ? d.err : d.doing, DETAIL_X, DETAIL_DOING_Y, DETAIL_W,
+           !has ? DIM : err ? ACCENT : INK, BG, middle_left);
+
+  // Context: the bridge's figures beside the label, a bar filled to the tile's x.
+  const int lw = detailLabel(g, "context", DETAIL_X, DETAIL_CTX_Y, DIM);
+  if (has && d.ctx[0])
+    drawLine(g, V_RM11, d.ctx, DETAIL_X + lw + 8, DETAIL_CTX_Y, DETAIL_W - lw - 8, DIM, BG, middle_left);
+  g->fillRect(DETAIL_X, DETAIL_BAR_Y, DETAIL_W, DETAIL_BAR_H, LINE);
+  const int fill = DETAIL_W * (tile.ctx > 100 ? 100 : tile.ctx) / 100;
+  if (fill > 0) g->fillRect(DETAIL_X, DETAIL_BAR_Y, fill, DETAIL_BAR_H, INK);
+
+  // The last prompt, wrapped to four lines.
+  detailLabel(g, "last prompt", DETAIL_X, DETAIL_PROMPT_LABEL_Y, DIM);
+  g->setFont(&V_RM13.font);
+  const uint8_t nPrompt = wrapText(g, has ? d.prompt : waitCopy, DETAIL_W, DETAIL_PROMPT_LINES, lines);
+  g->setTextDatum(middle_left);
+  g->setTextColor(has ? INK : DIM, BG);
+  for (uint8_t i = 0; i < nPrompt; i++) g->drawString(lines[i], DETAIL_X, DETAIL_PROMPT_Y + i * DETAIL_PROMPT_LINE_H);
+
+  // Model, folder, branch.
+  if (has && d.meta[0]) drawLine(g, V_RM11, d.meta, DETAIL_X, DETAIL_META_Y, DETAIL_W, DIM, BG, middle_left);
+  present(lcd);
 }
 
 // --- navigation ----------------------------------------------------------------

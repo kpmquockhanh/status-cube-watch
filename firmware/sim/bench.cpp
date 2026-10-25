@@ -39,6 +39,7 @@
 #include "../src/battery.h"
 #include "../src/ble.h"
 #include "../src/buzzer.h"
+#include "../src/detail_view.h"
 #include "../src/display.h"
 #include "../src/imu.h"
 #include "../src/net.h"
@@ -169,6 +170,9 @@ uint8_t g_endCard = 0;
 uint32_t g_start = 0;  // millis() when the scenario's clock starts (after setup)
 bool g_running = false;
 
+// `detail`: when the tile is tapped, back is tapped, and the tile again.
+constexpr uint32_t DETAIL_OPEN_MS = 2000, DETAIL_CLOSE_MS = 20000, DETAIL_REOPEN_MS = 22000;
+
 Stroke tapAt(uint32_t t, int x, int y) { return {t, 80, (int16_t)x, (int16_t)y, (int16_t)x, (int16_t)y}; }
 Stroke swipe(uint32_t t, int x0, int y0, int x1, int y1) {
   return {t, 220, (int16_t)x0, (int16_t)y0, (int16_t)x1, (int16_t)y1};
@@ -258,6 +262,15 @@ Scenario makeScenario(const std::string &name) {
     s.mustSleep = true;
     s.battery = true;
     s.agents = Scenario::AGENTS_DECK;
+  } else if (name == "detail") {
+    s.what = "Agents card: tap a working tile (0A), no d arrives (0A again every 5 s), back (0A 00), open again: sleeps at 2 min";
+    s.seconds = 150;
+    s.sleepMin = 2;
+    s.mustSleep = true;
+    s.agents = Scenario::AGENTS_DECK;
+    s.strokes.push_back(tapAt(DETAIL_OPEN_MS, 177, 100));   // tile 1, checkout-api, running
+    s.strokes.push_back(tapAt(DETAIL_CLOSE_MS, 40, 44));    // back
+    s.strokes.push_back(tapAt(DETAIL_REOPEN_MS, 177, 100));  // the same tile, left open
   } else if (name == "sleep") {
     s.what = "Mac gone: WiFi fetches fail, screen sleeps after the timeout (2 min)";
     s.seconds = 600;
@@ -549,8 +562,22 @@ bool bleSendAnswer(const char *, const char *, char) {
 }
 void bleSendNavPan(int16_t, int16_t) {}
 uint32_t g_details = 0;  // Control 0A sends
-bool bleSendDetail(const char *) {
+// Control 0A with an agent: the first few, in ms into the run; and 0A 00 (closed).
+constexpr int DETAIL_LOG = 16;
+uint32_t g_detailAt[DETAIL_LOG];
+uint32_t g_detailOpens = 0, g_detailCloses = 0;
+uint32_t g_detailCloseAt = 0;
+bool bleSendDetail(const char *agent) {
   g_details++;
+  if (!g_running) return true;
+  const uint32_t t = millis() - g_start;
+  if (agent && agent[0]) {
+    if (g_detailOpens < DETAIL_LOG) g_detailAt[g_detailOpens] = t;
+    g_detailOpens++;
+  } else {
+    g_detailCloses++;
+    g_detailCloseAt = t;
+  }
   return true;
 }
 uint32_t g_hats = 0;  // Control 0B sends
@@ -922,6 +949,28 @@ int main(int argc, char **argv) {
   if (S.agents == Scenario::AGENTS_RUNNING && g_attention != 0) {
     fprintf(stderr, "%s: %u attention beeps with no agent waiting\n", S.name, (unsigned)g_attention);
     return 1;
+  }
+  // The detail: one 0A as the tap lifts, again 5 s later while no `d` came,
+  // so four before back; back sends 0A 00 once; the reopen sends 0A at once.
+  if (!strcmp(S.name, "detail")) {
+    uint32_t before = 0, reopenAt = 0;
+    const uint32_t n = g_detailOpens < DETAIL_LOG ? g_detailOpens : DETAIL_LOG;
+    for (uint32_t i = 0; i < n; i++) {
+      if (g_detailAt[i] < DETAIL_CLOSE_MS) before++;
+      else if (!reopenAt) reopenAt = g_detailAt[i];
+    }
+    const bool firstOk = n >= 2 && g_detailAt[0] >= DETAIL_OPEN_MS && g_detailAt[0] < DETAIL_OPEN_MS + 300;
+    const bool resendOk = firstOk && g_detailAt[1] - g_detailAt[0] >= DETAIL_RESEND_MS &&
+                          g_detailAt[1] - g_detailAt[0] < DETAIL_RESEND_MS + 100;
+    const bool closeOk = g_detailCloses == 1 && g_detailCloseAt >= DETAIL_CLOSE_MS && g_detailCloseAt < DETAIL_CLOSE_MS + 300;
+    const bool reopenOk = reopenAt >= DETAIL_REOPEN_MS && reopenAt < DETAIL_REOPEN_MS + 300;
+    if (!firstOk || !resendOk || before != 4 || !closeOk || !reopenOk) {
+      fprintf(stderr, "%s: 0A sends at", S.name);
+      for (uint32_t i = 0; i < n; i++) fprintf(stderr, " %u", (unsigned)g_detailAt[i]);
+      fprintf(stderr, " ms (%u before back, expected 4); %u 0A 00 sends (expected 1), the last at %u ms\n",
+              (unsigned)before, (unsigned)g_detailCloses, (unsigned)g_detailCloseAt);
+      return 1;
+    }
   }
   if (S.mustSleep && g_backlight != 0) {
     fprintf(stderr, "%s: the screen was still on after %u s with nobody touching it\n", S.name, S.seconds);
