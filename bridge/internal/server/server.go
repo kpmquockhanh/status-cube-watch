@@ -101,6 +101,9 @@ type Server struct {
 	// full carries the Agents card's prompt and goes only to loopbackRequest;
 	// lan is everyone else's. Without agents they are the same payload.
 	full, lan atomic.Pointer[cards.Payload]
+	// fullAgents is the snapshot the full payload was built from, so
+	// ?detail=<id> finds its agent without touching the tracker.
+	fullAgents atomic.Pointer[[]agents.Agent]
 
 	debounce, syncEvery time.Duration
 
@@ -164,9 +167,11 @@ func (s *Server) publishLocked() {
 		return
 	}
 	o.Agents, o.ShowAgents = s.d.Agents.Snapshot(), true
+	snap := o.Agents
 	lan := cards.Build(s.in.events, o, now)
 	o.Full = true
 	full := cards.Build(s.in.events, o, now)
+	s.fullAgents.Store(&snap)
 	s.full.Store(&full)
 	s.lan.Store(&lan)
 }
@@ -443,8 +448,13 @@ func (s *Server) route(w http.ResponseWriter, r *http.Request) {
 	switch r.URL.Path {
 	case "/api/status":
 		p := s.lan.Load()
+		var detail *cards.Payload
 		if s.loopback(r) {
 			p = s.full.Load()
+			detail = s.withDetail(p, r.URL.Query().Get("detail"))
+		}
+		if detail != nil {
+			p = detail
 		}
 		// cards.Marshal is what the payload budget measured.
 		b, err := cards.Marshal(*p)
@@ -465,6 +475,28 @@ func (s *Server) route(w http.ResponseWriter, r *http.Request) {
 	default:
 		notFound(w)
 	}
+}
+
+// withDetail is the full payload with agent id's detail, or nil when id is
+// empty or matches no agent of the snapshot the payload was built from.
+func (s *Server) withDetail(full *cards.Payload, id string) *cards.Payload {
+	snap := s.fullAgents.Load()
+	if id == "" || snap == nil {
+		return nil
+	}
+	for _, a := range *snap {
+		if a.ID != id {
+			continue
+		}
+		auto := true
+		if s.d.Hats != nil {
+			_, overridden := s.d.Hats.Get(cmp.Or(a.Cwd, a.Folder))
+			auto = !overridden
+		}
+		p := cards.WithDetail(*full, a, auto, s.d.Now())
+		return &p
+	}
+	return nil
 }
 
 // postOnly answers 405 to anything but POST and reports whether to go on.

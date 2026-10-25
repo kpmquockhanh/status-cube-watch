@@ -43,6 +43,7 @@ type Card struct {
 	A    []Tile       `json:"a,omitempty"`  // Agents card: the agents
 	Q    *AgentPrompt `json:"q,omitempty"`  // Agents card: the longest-waiting prompt (Full only)
 	QCut int          `json:"qc,omitempty"` // Agents card: 1 = the payload budget dropped q (Full only)
+	D    *AgentDetail `json:"d,omitempty"`  // Agents card: one agent's detail (Full only, ?detail=<id>)
 }
 
 // Payload is what GET /api/status serves.
