@@ -9,6 +9,7 @@ final class BridgeSettingsWindow: NSObject, NSWindowDelegate {
 
     private let window: NSWindow
     private let extraCards = NSButton(checkboxWithTitle: "Show spend and token cards", target: nil, action: nil)
+    private let agents = NSButton(checkboxWithTitle: "Track Claude Code agents (Agents card)", target: nil, action: nil)
     private let source = NSPopUpButton(frame: .zero, pullsDown: false)
     private let adminKey = NSSecureTextField()
     private let oauthToken = NSSecureTextField()
@@ -30,6 +31,7 @@ final class BridgeSettingsWindow: NSObject, NSWindowDelegate {
         let grid = NSGridView(views: [
             [header("Usage")],
             [NSGridCell.emptyContentView, extraCards],
+            [NSGridCell.emptyContentView, agents],
             [label("Source"), source],
             [label("Admin API key"), adminKey],
             [label("Admin OAuth token"), oauthToken],
@@ -92,6 +94,7 @@ final class BridgeSettingsWindow: NSObject, NSWindowDelegate {
     func show(_ s: BridgeSettings, _ secrets: BridgeSecrets, note: String) {
         if !window.isVisible {
             extraCards.state = s.extraCards ? .on : .off
+            agents.state = s.agents ? .on : .off
             source.selectItem(at: BridgeSettings.Source.allCases.firstIndex(of: s.source) ?? 0)
             adminKey.stringValue = secrets.adminKey
             oauthToken.stringValue = secrets.oauthToken
@@ -117,6 +120,7 @@ final class BridgeSettingsWindow: NSObject, NSWindowDelegate {
         window.makeFirstResponder(nil)  // commit the field being typed in, through its formatter
         var s = BridgeSettings()
         s.extraCards = extraCards.state == .on
+        s.agents = agents.state == .on
         s.source = BridgeSettings.Source.allCases[source.indexOfSelectedItem]
         let r = refresh.stringValue.trimmingCharacters(in: .whitespaces)
         s.refreshSec = r.isEmpty ? nil : Int(r)

@@ -17,7 +17,7 @@ func load(env map[string]string, file string) (Config, []string) {
 
 func TestDefaults(t *testing.T) {
 	c, w := load(nil, "")
-	if c != (Config{Source: "local", Port: 8787, RefreshMs: 5000}) || len(w) != 0 {
+	if c != (Config{Source: "local", Port: 8787, RefreshMs: 5000, Agents: true}) || len(w) != 0 {
 		t.Fatalf("got %+v %v", c, w)
 	}
 }

@@ -9,6 +9,8 @@ public struct BridgeSettings: Codable, Equatable {
     public var source: Source = .local
     /// The spend/token cards after the rate-limit rings (CUBE_EXTRA_CARDS).
     public var extraCards = false
+    /// Track Claude Code agents: the Agents card and answering its prompts (CUBE_AGENTS).
+    public var agents = true
     /// Seconds between refreshes; nil = the bridge's default (5 s local, 60 s admin).
     public var refreshSec: Int?
     /// Listen on every interface, which a cube polling over WiFi needs; off = 127.0.0.1 only.
@@ -20,19 +22,20 @@ public struct BridgeSettings: Codable, Equatable {
     /// Every variable `environment` decides. The inherited ones are dropped first, so a value the
     /// settings leave unset (say `lan` on, no CUBE_HOST) is not filled in from the app's own environment.
     public static let managedKeys: Set<String> = [
-        "CUBE_SOURCE", "CUBE_EXTRA_CARDS", "CUBE_REFRESH_MS", "CUBE_HOST",
+        "CUBE_SOURCE", "CUBE_EXTRA_CARDS", "CUBE_AGENTS", "CUBE_REFRESH_MS", "CUBE_HOST",
         "ANTHROPIC_ADMIN_KEY", "ANTHROPIC_ADMIN_OAUTH_TOKEN", "CUBE_GMAIL_USER", "CUBE_GMAIL_PASSWORD",
     ]
 
     public init() {}
 
     // Missing keys keep their defaults, so settings saved by an older build still load.
-    private enum CodingKeys: String, CodingKey { case source, extraCards, refreshSec, lan, gmailUser }
+    private enum CodingKeys: String, CodingKey { case source, extraCards, agents, refreshSec, lan, gmailUser }
 
     public init(from decoder: Decoder) throws {
         let c = try decoder.container(keyedBy: CodingKeys.self)
         source = (try? c.decodeIfPresent(Source.self, forKey: .source)) ?? .local
         extraCards = (try? c.decodeIfPresent(Bool.self, forKey: .extraCards)) ?? false
+        agents = (try? c.decodeIfPresent(Bool.self, forKey: .agents)) ?? true
         refreshSec = try? c.decodeIfPresent(Int.self, forKey: .refreshSec)
         lan = (try? c.decodeIfPresent(Bool.self, forKey: .lan)) ?? true
         gmailUser = (try? c.decodeIfPresent(String.self, forKey: .gmailUser)) ?? ""
@@ -43,6 +46,7 @@ public struct BridgeSettings: Codable, Equatable {
         var env = inherited.filter { !Self.managedKeys.contains($0.key) }
         env["CUBE_SOURCE"] = source.rawValue
         env["CUBE_EXTRA_CARDS"] = extraCards ? "1" : "0"
+        env["CUBE_AGENTS"] = agents ? "1" : "0"
         if let r = refreshSec { env["CUBE_REFRESH_MS"] = String(r * 1000) }
         if !lan { env["CUBE_HOST"] = "127.0.0.1" }
         if !secrets.adminKey.isEmpty { env["ANTHROPIC_ADMIN_KEY"] = secrets.adminKey }
@@ -77,6 +81,7 @@ public struct BridgeSettings: Codable, Equatable {
         var secrets = BridgeSecrets()
         if let v = o["source"] as? String, let src = Source(rawValue: v) { s.source = src }
         if let v = o["extraCards"] { s.extraCards = truthy(v) }
+        if let v = o["agents"] { s.agents = truthy(v) }
         if let ms = (o["refreshMs"] as? NSNumber)?.doubleValue ?? Double(o["refreshMs"] as? String ?? ""),
            ms >= 1000, ms <= Double(refreshRange.upperBound) * 1000 {
             s.refreshSec = Int((ms / 1000).rounded())

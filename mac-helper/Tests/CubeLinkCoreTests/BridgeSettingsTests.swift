@@ -4,7 +4,7 @@ import Testing
 
 @Test func defaultsGiveTheBridgeItsOwnDefaults() {
     let env = BridgeSettings().environment(inherited: ["PATH": "/usr/bin", "HOME": "/Users/me"], secrets: BridgeSecrets())
-    #expect(env == ["PATH": "/usr/bin", "HOME": "/Users/me", "CUBE_SOURCE": "local", "CUBE_EXTRA_CARDS": "0"])
+    #expect(env == ["PATH": "/usr/bin", "HOME": "/Users/me", "CUBE_SOURCE": "local", "CUBE_EXTRA_CARDS": "0", "CUBE_AGENTS": "1"])
 }
 
 @Test func settingsReachTheBridgeAsItsEnvironmentVariables() {
@@ -15,7 +15,7 @@ import Testing
     s.lan = false
     s.gmailUser = "me@gmail.com"
     let env = s.environment(inherited: [:], secrets: BridgeSecrets(adminKey: "sk-ant-admin-x", gmailPassword: "abcd efgh"))
-    #expect(env == ["CUBE_SOURCE": "admin", "CUBE_EXTRA_CARDS": "1", "CUBE_REFRESH_MS": "90000",
+    #expect(env == ["CUBE_SOURCE": "admin", "CUBE_EXTRA_CARDS": "1", "CUBE_AGENTS": "1", "CUBE_REFRESH_MS": "90000",
                     "CUBE_HOST": "127.0.0.1", "ANTHROPIC_ADMIN_KEY": "sk-ant-admin-x",
                     "CUBE_GMAIL_USER": "me@gmail.com", "CUBE_GMAIL_PASSWORD": "abcd efgh"])
 }
@@ -25,7 +25,7 @@ import Testing
     let inherited = ["CUBE_HOST": "192.168.1.5", "CUBE_EXTRA_CARDS": "1", "ANTHROPIC_ADMIN_KEY": "old",
                      "CUBE_GMAIL_PASSWORD": "old", "CUBE_TRACE": "1"]
     let env = BridgeSettings().environment(inherited: inherited, secrets: BridgeSecrets())
-    #expect(env == ["CUBE_TRACE": "1", "CUBE_SOURCE": "local", "CUBE_EXTRA_CARDS": "0"])
+    #expect(env == ["CUBE_TRACE": "1", "CUBE_SOURCE": "local", "CUBE_EXTRA_CARDS": "0", "CUBE_AGENTS": "1"])
 }
 
 @Test func mailNeedsBothHalves() {

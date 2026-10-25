@@ -84,7 +84,7 @@ func Load(lookup func(string) (string, bool), file []byte, warn func(string)) Co
 		AdminKey:      secret("ANTHROPIC_ADMIN_KEY", f["adminKey"]),
 		OAuthToken:    secret("ANTHROPIC_ADMIN_OAUTH_TOKEN", f["oauthToken"]),
 		ExtraCards:    boolean(warn, "extraCards", env("CUBE_EXTRA_CARDS"), f["extraCards"]),
-		Agents:        boolean(warn, "agents", env("CUBE_AGENTS"), f["agents"]),
+		Agents:        booleanDefault(warn, "agents", true, env("CUBE_AGENTS"), f["agents"]),
 		GmailUser:     secret("CUBE_GMAIL_USER", gmail["user"]),
 		GmailPassword: secret("CUBE_GMAIL_PASSWORD", gmail["appPassword"]),
 	}
@@ -133,6 +133,11 @@ func num(warn func(string), name string, raw any, def, min, max float64, integer
 
 // boolean takes the first non-empty of raws (env first, then file).
 func boolean(warn func(string), name string, raws ...any) bool {
+	return booleanDefault(warn, name, false, raws...)
+}
+
+// booleanDefault is boolean with the answer for when every raw is unset or unusable.
+func booleanDefault(warn func(string), name string, def bool, raws ...any) bool {
 	for _, raw := range raws {
 		if raw == nil || raw == "" {
 			continue
@@ -150,5 +155,5 @@ func boolean(warn func(string), name string, raws ...any) bool {
 		j, _ := json.Marshal(raw)
 		warn(fmt.Sprintf("config: ignoring %s=%s (want 1/0 or true/false)", name, j))
 	}
-	return false
+	return def
 }
