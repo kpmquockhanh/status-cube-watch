@@ -1,4 +1,6 @@
 #pragma once
+#include "agent_view.h"
+#include "agents_layout.h"
 #include "battery_util.h"
 #include "device_settings.h"
 #include "display.h"
@@ -16,13 +18,20 @@ uint8_t uiVolumeIndex(const Payload &p);                    // the last index, w
 // Where the data on screen came from, shown as a small marker in the top bar.
 enum class UiLink : uint8_t { None, Ble, Wifi };
 
+// What main.cpp owns for the Agents card: how far its grid is scrolled
+// (agents_layout.h, ScrollY).
+struct AgentsUi {
+  int16_t gridScroll;
+};
+
 // Draws one card plus the shared chrome. Everything is composed into an
 // off-screen sprite, then only the rows that differ from the last frame are
 // sent (every screen below works the same way), so the panel never tears.
 // `vol`: the Volume card's state, or nullptr when the deck has no Volume card.
+// `agents`: the Agents card's grid scroll; nullptr = scrolled to the top.
 void uiRender(Display &lcd, const Payload &p, uint8_t index, bool online, uint32_t ageMs,
               const BatteryView &bat, UiLink link = UiLink::None,
-              const VolumeView *vol = nullptr);
+              const VolumeView *vol = nullptr, const AgentsUi *agents = nullptr);
 // True when the last uiRender left a ring or a colour part-way through its
 // transition, so the caller knows to keep drawing frames.
 bool uiAnimating();
@@ -63,6 +72,30 @@ void uiUnlock(Display &lcd, bool waiting);
 // `panX`/`panY`: where the rider has dragged the map (nav_pan.h); the frame is
 // shifted by that minus the pan it was built around.
 void uiNav(Display &lcd, const NavScene &s, bool phoneLost, const BatteryView &bat, int16_t panX = 0, int16_t panY = 0);
+
+// The prompt screen of a waiting agent, opened from its tile (agent_view.h
+// decides `screen` and `off`). Prompt: the tile's name over a column that
+// scrolls by `scroll` (agents_layout.h, PromptLayout): title, detail, context,
+// one button per option, the reason the buttons are off, BACK. `lit`: the
+// button whose answer was sent (-1 none). The other screens are the tile's
+// critter with two lines of fixed copy; `queuedName` is the name of the agent
+// to answer first (Queued only).
+struct PromptUi {
+  PromptScreen screen;
+  ButtonsOff off;
+  int8_t lit;
+  int16_t scroll;
+  const char *queuedName;
+};
+void uiAgentPrompt(Display &lcd, const AgentsData &a, const AgentTile &tile, const PromptUi &v,
+                   bool online, uint32_t ageMs, const BatteryView &bat, UiLink link);
+// What the prompt's text measures to with the real fonts, wrapped exactly as
+// uiAgentPrompt wraps it. `reason`: the buttons' state has a reason line
+// (Input, NotTmux, Locked, Sent, NoAnswer).
+PromptMetrics uiPromptMetrics(const AgentPrompt &q, bool reason);
+// The Prompt screen's layout as uiAgentPrompt draws it (an input prompt has no
+// option buttons): main.cpp hit-tests and sizes its scroll with this.
+PromptLayout uiPromptLayout(const AgentPrompt &q, ButtonsOff off);
 
 // Progress screen while an OTA image is arriving.
 void uiOta(Display &lcd, uint8_t percent);

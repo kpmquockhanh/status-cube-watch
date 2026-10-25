@@ -7,7 +7,8 @@
 //   ./build/cube-shot out @portal   # <out>-portal.png: a screen that is not a
 //                                   # payload card (see renderSpecial):
 //                                   # @portal, @ota, @ble-pair, @ble-wait, @waiting, @dev-edit,
-//                                   # @unlock|unlock-wait, @nav-turn|vn|long|longeta|reroute|offroute|arrived|lost|busy, @vol-56|muted|full|zero|fixed|noout|long|none|press|playing|paused
+//                                   # @unlock|unlock-wait, @nav-turn|vn|long|longeta|reroute|offroute|arrived|lost|busy, @vol-56|muted|full|zero|fixed|noout|long|none|press|playing|paused,
+//                                   # @agents, @agents-scroll, @prompt, @prompt-settle|sent|noanswer|tmux|locked|input|cut|long|wifi|queued|dropped
 //
 // Reads the payload JSON from the file named on the command line, or stdin.
 
@@ -183,6 +184,87 @@ bool navShot(Display &lcd, const char *name) {
   return true;
 }
 
+// A saved payload parsed into `out` (a Payload is too big for a stack).
+bool loadPayload(const char *file, Payload &out) {
+  JsonDocument doc;
+  char err[64] = "";
+  if (deserializeJson(doc, slurp(file)) != DeserializationError::Ok || !payloadFromJson(doc, out, err, sizeof(err))) {
+    fprintf(stderr, "bad payload %s: %s\n", file, err[0] ? err : "not JSON");
+    return false;
+  }
+  return true;
+}
+
+// The Agents card: fixtures/agents-full.json at the top, or ("scroll")
+// fixtures/agents-many.json's eight tiles scrolled to the end.
+bool agentsShot(Display &lcd, const char *state) {
+  static Payload p;
+  const bool scroll = !strcmp(state, "scroll");
+  if (!scroll && state[0]) return false;
+  if (!loadPayload(scroll ? "fixtures/agents-many.json" : "fixtures/agents-full.json", p)) return false;
+  const int16_t end = (int16_t)(agentsContentH(p.agents.nTiles) - AGENTS_VIEW_H);
+  const AgentsUi ui{scroll && end > 0 ? end : (int16_t)0};
+  uiRender(lcd, p, p.agents.card, true, 4000, batteryViewFromEnv(), linkFromEnv(), nullptr, &ui);
+  return true;
+}
+
+// The prompt screen of the waiting agent in fixtures/agents-full.json, in one
+// of AgentView's states (set here directly, not through AgentView).
+bool promptShot(Display &lcd, const char *state) {
+  static Payload p;
+  const char *file = !strcmp(state, "long")   ? "fixtures/agents-many.json"
+                     : !strcmp(state, "wifi") ? "fixtures/agents-lan.json"
+                                              : "fixtures/agents-full.json";
+  if (!loadPayload(file, p)) return false;
+  AgentsData &a = p.agents;
+  PromptUi v{PromptScreen::Prompt, ButtonsOff::No, -1, 0, nullptr};
+  const AgentTile *tile = &a.tiles[0];
+  UiLink link = linkFromEnv();
+  if (!strcmp(state, "")) {
+    // ready: settled, nothing sent
+  } else if (!strcmp(state, "settle")) {
+    v.off = ButtonsOff::Settling;
+  } else if (!strcmp(state, "sent")) {
+    v.off = ButtonsOff::Sent;
+    v.lit = 1;
+  } else if (!strcmp(state, "noanswer")) {
+    v.off = ButtonsOff::NoAnswer;
+    v.lit = 1;
+  } else if (!strcmp(state, "tmux")) {
+    a.prompt.notInTmux = true;
+    v.off = ButtonsOff::NotTmux;
+  } else if (!strcmp(state, "locked")) {
+    v.off = ButtonsOff::Locked;
+  } else if (!strcmp(state, "input")) {
+    a.prompt.kind = PromptKind::Input;
+    a.prompt.nOpts = 0;
+    snprintf(a.prompt.title, sizeof(a.prompt.title), "What should the branch be called?");
+    a.prompt.detail[0] = '\0';
+    v.off = ButtonsOff::Input;
+  } else if (!strcmp(state, "cut")) {
+    a.prompt.cut = true;
+    a.prompt.detail[0] = '\0';
+  } else if (!strcmp(state, "long")) {  // six options, scrolled to the end
+    v.scroll = (int16_t)(uiPromptLayout(a.prompt, v.off).contentH() - PROMPT_VIEW_H);
+  } else if (!strcmp(state, "wifi")) {
+    v.screen = PromptScreen::OverWifi;
+    link = UiLink::Wifi;
+  } else if (!strcmp(state, "queued")) {  // a second waiting tile while q is the first's
+    a.tiles[1].kind = AgentKind::Wait;
+    tile = &a.tiles[1];
+    v.screen = PromptScreen::Queued;
+    v.queuedName = a.tiles[0].name;
+  } else if (!strcmp(state, "dropped")) {
+    a.hasPrompt = false;
+    a.promptDropped = true;
+    v.screen = PromptScreen::Dropped;
+  } else {
+    return false;
+  }
+  uiAgentPrompt(lcd, a, *tile, v, true, 4000, batteryViewFromEnv(), link);
+  return true;
+}
+
 // Screens that are not payload cards. Selected with `@name` on the command
 // line; the grab goes to <prefix>-<name>.png. Returns false for an unknown name.
 bool renderSpecial(Display &lcd, const char *name) {
@@ -206,6 +288,10 @@ bool renderSpecial(Display &lcd, const char *name) {
     if (!navShot(lcd, name + 4)) return false;
   } else if (!strncmp(name, "vol-", 4)) {
     if (!volumeShot(lcd, name + 4)) return false;
+  } else if (!strcmp(name, "agents") || !strncmp(name, "agents-", 7)) {
+    if (!agentsShot(lcd, name[6] ? name + 7 : "")) return false;
+  } else if (!strcmp(name, "prompt") || !strncmp(name, "prompt-", 7)) {
+    if (!promptShot(lcd, name[6] ? name + 7 : "")) return false;
   } else {
     return false;
   }

@@ -216,10 +216,10 @@ size_t critterShapes(Pose pose, uint32_t ms, CritterRect *out, size_t cap) {
       }
       break;
     case Face::Compact:  // "> <"
-      line(o, f, 3.6f, 1.9f, 4.8f, 2.7f, 2);
-      line(o, f, 4.8f, 2.7f, 3.6f, 3.5f, 2);
-      line(o, f, 10.4f, 1.9f, 9.2f, 2.7f, 2);
-      line(o, f, 9.2f, 2.7f, 10.4f, 3.5f, 2);
+      line(o, f, 3.6f, 1.9f, 4.8f, 2.7f, 3);
+      line(o, f, 4.8f, 2.7f, 3.6f, 3.5f, 3);
+      line(o, f, 10.4f, 1.9f, 9.2f, 2.7f, 3);
+      line(o, f, 9.2f, 2.7f, 10.4f, 3.5f, 3);
       break;
     case Face::Exit:
       put(o, f, 4, 3, 1, 1, CritterInk::Body);

@@ -5,6 +5,7 @@
 #include "age_label.h"
 #include "battery_util.h"
 #include "config.h"
+#include "critter.h"
 #include "fonts_gen.h"
 #include "dev_editor.h"
 #include "editor_layout.h"
@@ -958,6 +959,342 @@ float editorSlidePos(uint32_t now) {
   return g_edOpening ? out : 1.0f - in;
 }
 
+// --- the Agents card -----------------------------------------------------------
+// A two-column grid of tiles that scrolls under the card's caption, one per
+// agent: its folder name, a pixel critter whose pose follows what it is doing
+// (critter.h), the bridge's status line and a context bar. A waiting tile is
+// solid orange, so it reads across the desk. agents_layout.h owns the geometry,
+// which main.cpp hit-tests with too.
+constexpr uint32_t TILE_BG = 0x121722;
+constexpr uint32_t TILE_WAIT = 0xFF8A5B;    // the accent
+constexpr uint32_t NEAR_BLACK = 0x0A0A0A;   // text and ink on orange
+constexpr uint32_t WAIT_TRACK = 0xDE7850;   // the context bar's track on orange: black at ~13%
+constexpr uint32_t BTN_BG = 0x1E2533;
+constexpr uint32_t CRIT_FLAG = 0xE8E4DC, CRIT_ACCENT = 0xFF4D00;
+constexpr int TILE_R = 12, TILE_PAD = 8;
+constexpr int CRIT_CELL = 3;        // px per critter cell on a tile
+constexpr int NOTICE_CELL = 5;      // and on a prompt screen with no prompt to show
+constexpr float CRIT_CENTRE_X = 9;  // the middle of the 0..18 sprite box, in cells
+constexpr int SCROLL_BAR_W = 3;
+
+struct CritterInks {
+  uint16_t body, cut;
+};
+
+// The critter for `pose` at `ms` with its cell (0, 0) at (ox, oy), `cell` px a
+// cell. Edges are rounded to whole pixels, and every shape keeps at least one.
+void drawCritter(LovyanGFX *g, Pose pose, uint32_t ms, float ox, float oy, int cell, const CritterInks &k) {
+  static CritterRect r[CRITTER_MAX_RECTS];  // 1.3 KB: off the loop's stack
+  const size_t n = critterShapes(pose, ms, r, CRITTER_MAX_RECTS);
+  for (size_t i = 0; i < n; i++) {
+    const int x0 = (int)lroundf(ox + r[i].x * cell), y0 = (int)lroundf(oy + r[i].y * cell);
+    int x1 = (int)lroundf(ox + (r[i].x + r[i].w) * cell), y1 = (int)lroundf(oy + (r[i].y + r[i].h) * cell);
+    if (x1 <= x0) x1 = x0 + 1;
+    if (y1 <= y0) y1 = y0 + 1;
+    const uint16_t c = r[i].ink == CritterInk::Body   ? k.body
+                       : r[i].ink == CritterInk::Cut  ? k.cut
+                       : r[i].ink == CritterInk::Flag ? to565(CRIT_FLAG)
+                                                      : to565(CRIT_ACCENT);
+    g->fillRect(x0, y0, x1 - x0, y1 - y0, c);
+  }
+}
+
+// --- wrapping ------------------------------------------------------------------
+constexpr size_t LINE_CAP = 64;  // more than any line 200 px can hold
+
+// `text` cut until it and a trailing "..." fit `maxW` in the font already set.
+void ellipsize(LovyanGFX *g, const char *text, int maxW, char *out) {
+  size_t k = strlen(text);
+  if (k > LINE_CAP - 4) k = LINE_CAP - 4;
+  for (;; k--) {
+    size_t e = k;
+    while (e > 0 && text[e - 1] == ' ') e--;
+    memcpy(out, text, e);
+    memcpy(out + e, "...", 4);
+    if (k == 0 || g->textWidth(out) <= maxW) return;
+  }
+}
+
+// Up to `maxLines` lines of `text`, each no wider than `maxW` in the font
+// already set, broken at spaces (a word wider than a line is cut where it must
+// be). When text remains after the last line, that line ends in "..." instead.
+// Returns the line count. uiPromptMetrics counts with this same function, so
+// what is drawn and what main.cpp hit-tests cannot disagree.
+uint8_t wrapText(LovyanGFX *g, const char *text, int maxW, uint8_t maxLines, char (*out)[LINE_CAP]) {
+  uint8_t n = 0;
+  const char *p = text;
+  char buf[LINE_CAP];
+  while (n < maxLines) {
+    while (*p == ' ') p++;
+    if (!*p) break;
+    // The longest run from p that fits.
+    const size_t len = strlen(p);
+    size_t fit = 0;
+    for (size_t k = 1; k <= len && k < LINE_CAP; k++) {
+      memcpy(buf, p, k);
+      buf[k] = '\0';
+      if (g->textWidth(buf) > maxW) break;
+      fit = k;
+    }
+    if (fit == len) {
+      memcpy(out[n++], p, len + 1);
+      break;
+    }
+    if (n + 1 == maxLines) {
+      ellipsize(g, p, maxW, out[n++]);
+      break;
+    }
+    if (fit == 0) fit = 1;  // not even one letter fits: never stall
+    // End the line at the last space that fits, else cut the word.
+    size_t cut = fit;
+    if (p[fit] != ' ') {
+      size_t s = fit;
+      while (s > 0 && p[s] != ' ') s--;
+      if (s > 0) cut = s;
+    }
+    size_t e = cut;
+    while (e > 0 && p[e - 1] == ' ') e--;
+    memcpy(out[n], p, e);
+    out[n++][e] = '\0';
+    p += cut;
+  }
+  return n;
+}
+
+// The caps labels are measured as they are drawn: upper case.
+void upper(const char *src, char *dst, size_t cap) {
+  size_t i = 0;
+  for (; src[i] && i < cap - 1; i++) dst[i] = (char)toupper((unsigned char)src[i]);
+  dst[i] = '\0';
+}
+
+// One line of `text` in `font`, cut with "..." to `maxW`, drawn at (x, y).
+void drawLine(LovyanGFX *g, Vlw &font, const char *text, int x, int y, int maxW, uint16_t fg, uint16_t bg,
+              textdatum_t datum) {
+  char line[1][LINE_CAP];
+  g->setFont(&font.font);
+  if (!wrapText(g, text, maxW, 1, line)) return;
+  g->setTextDatum(datum);
+  g->setTextColor(fg, bg);
+  g->drawString(line[0], x, y);
+}
+
+// A thin thumb at the right edge when the content is taller than its view.
+void drawScrollBar(LovyanGFX *g, int x, int viewY, int viewH, int contentH, int scroll) {
+  if (contentH <= viewH) return;
+  const int maxOff = contentH - viewH;
+  int h = viewH * viewH / contentH;
+  if (h < 16) h = 16;
+  const int off = scroll < 0 ? 0 : scroll > maxOff ? maxOff : scroll;
+  g->fillSmoothRoundRect(x, viewY + (viewH - h) * off / maxOff, SCROLL_BAR_W, h, 1, MUTED);
+}
+
+// --- the grid --------------------------------------------------------------------
+void drawTile(LovyanGFX *g, const AgentTile &t, const LayoutRect &r, uint32_t now) {
+  const bool wait = t.kind == AgentKind::Wait, gone = t.kind == AgentKind::Exit;
+  const uint16_t bg = to565(wait ? TILE_WAIT : TILE_BG);
+  const uint16_t dark = to565(NEAR_BLACK);
+  g->fillSmoothRoundRect(r.x, r.y, r.w, r.h, TILE_R, bg);
+
+  // The name, clear of the unseen dot; it may come closer to the right edge
+  // than the rest, as the name is what tells tiles apart.
+  const int nameW = r.w - TILE_PAD - (t.unseen ? 14 : 4);
+  drawLine(g, V_S12, t.name, r.x + TILE_PAD, r.y + 6, nameW, wait ? dark : gone ? DIM : INK, bg, top_left);
+  if (t.unseen) g->fillSmoothCircle(r.x + r.w - TILE_PAD - 2, r.y + 13, 2, wait ? dark : g_palette[ACC_ACCENT]);
+
+  // The critter, its sprite box centred. An errored agent's body is red.
+  const uint16_t body = wait                       ? BG
+                        : gone                     ? DIM
+                        : t.kind == AgentKind::Err ? g_palette[ACC_RED]
+                                                   : INK;
+  drawCritter(g, poseFromName(t.pose), now, r.x + r.w / 2 - CRIT_CENTRE_X * CRIT_CELL, r.y + 36, CRIT_CELL,
+              CritterInks{body, bg});
+
+  drawLine(g, V_S12, t.line, r.x + TILE_PAD, r.y + 58, r.w - 2 * TILE_PAD, wait ? dark : DIM, bg, top_left);
+
+  // Context used, along the bottom.
+  const int bx = r.x + TILE_PAD, bw = r.w - 2 * TILE_PAD, by = r.y + r.h - 9;
+  g->fillSmoothRoundRect(bx, by, bw, 4, 2, to565(wait ? WAIT_TRACK : RING_TRACK));
+  int fill = bw * (t.ctx > 100 ? 100 : t.ctx) / 100;
+  if (t.ctx > 0 && fill < 4) fill = 4;
+  if (fill > 0) g->fillSmoothRoundRect(bx, by, fill, 4, 2, wait ? dark : gone ? MUTED : g_palette[ACC_BLUE]);
+}
+
+constexpr int AGENTS_CAPTION_Y = 44;
+
+void drawAgentsCard(LovyanGFX *g, const Card &card, const AgentsData &a, int16_t scroll, bool online,
+                    uint32_t ageMs, const BatteryView &bat) {
+  drawTopBar(g, online, ageMs, bat);
+  if (card.sub1[0]) drawCaps(g, card.sub1, LCD_WIDTH / 2, AGENTS_CAPTION_Y, g_palette[card.color % 7], middle_center);
+
+  // Animation time is the clock: main.cpp redraws once a second, so a critter
+  // steps then instead of holding the CPU at 60 fps (cpu_policy.h).
+  const uint32_t now = millis();
+  g->setClipRect(0, AGENTS_VIEW_Y, LCD_WIDTH, AGENTS_VIEW_H);
+  for (uint8_t i = 0; i < a.nTiles; i++) {
+    const LayoutRect r = agentsTileRect(i, scroll);
+    if (r.y + r.h <= AGENTS_VIEW_Y || r.y >= AGENTS_VIEW_Y + AGENTS_VIEW_H) continue;
+    drawTile(g, a.tiles[i], r, now);
+  }
+  g->clearClipRect();
+  drawScrollBar(g, TILE_COL1_X + TILE_W + 4, AGENTS_VIEW_Y, AGENTS_VIEW_H, agentsContentH(a.nTiles), scroll);
+}
+
+// --- the prompt screen -------------------------------------------------------------
+constexpr int PROMPT_X = 20, PROMPT_W = LCD_WIDTH - 2 * PROMPT_X;
+constexpr int PROMPT_HEADER_Y = 44;
+constexpr int DETAIL_PAD_X = 8;
+constexpr int BTN_R = 12, KEY_R = 9;
+constexpr int KEY_CX = PROMPT_X + 17, LABEL_X = PROMPT_X + 34;
+constexpr uint8_t TITLE_MAX_LINES = 2, DETAIL_MAX_LINES = 3;
+
+// The prompt's strings as they will be drawn, already wrapped.
+struct PromptText {
+  char title[TITLE_MAX_LINES][LINE_CAP];
+  char detail[DETAIL_MAX_LINES][LINE_CAP];
+  char context[1][LINE_CAP];
+  uint8_t nTitle, nDetail;
+  bool hasContext;
+};
+
+void promptText(LovyanGFX *g, const AgentPrompt &q, PromptText &t) {
+  g->setFont(&V_B18.font);
+  t.nTitle = wrapText(g, q.title, PROMPT_W, TITLE_MAX_LINES, t.title);
+  g->setFont(&V_S12.font);
+  if (q.cut) {
+    snprintf(t.detail[0], LINE_CAP, "(detail cut)");
+    t.nDetail = 1;
+  } else {
+    t.nDetail = wrapText(g, q.detail, PROMPT_W - 2 * DETAIL_PAD_X, DETAIL_MAX_LINES, t.detail);
+  }
+  char caps[48];
+  upper(q.context, caps, sizeof(caps));
+  t.hasContext = wrapText(g, caps, PROMPT_W, 1, t.context) > 0;
+}
+
+// The states whose buttons say why they are off, on a line of their own.
+const char *offReason(ButtonsOff off) {
+  switch (off) {
+    case ButtonsOff::Input: return "answer at the terminal";
+    case ButtonsOff::NotTmux: return "not in tmux";
+    case ButtonsOff::Locked: return "unlock Mac first";
+    case ButtonsOff::Sent: return "sending...";
+    case ButtonsOff::NoAnswer: return "no answer from Mac";
+    default: return nullptr;
+  }
+}
+
+// An input prompt wants typed text: the cube offers no buttons for it.
+uint8_t promptButtons(const AgentPrompt &q) { return q.kind == PromptKind::Input ? 0 : q.nOpts; }
+
+PromptMetrics metricsOf(const PromptText &t, bool reason) {
+  PromptMetrics m;
+  m.titleLines = t.nTitle;
+  m.detailLines = t.nDetail;
+  m.context = t.hasContext;
+  m.reason = reason;
+  return m;
+}
+
+// One answer: the key in a small circle, then the label. Off: greyed, with the
+// key in MUTED and the label one step lighter (MUTED on FAINT is too faint to
+// read the choices by). `lit`: the answer that was sent, outlined.
+void drawOption(LovyanGFX *g, int y, const PromptOpt &o, bool first, bool enabled, bool lit) {
+  const uint16_t acc = g_palette[ACC_ACCENT];
+  const uint16_t bg = !enabled ? FAINT : first ? acc : to565(BTN_BG);
+  const uint16_t fg = !enabled ? MUTED : first ? to565(NEAR_BLACK) : INK;
+  const uint16_t text = enabled ? fg : DIM;
+  g->fillSmoothRoundRect(PROMPT_X, y, PROMPT_W, PROMPT_BTN_H, BTN_R, bg);
+  if (lit) {
+    const uint16_t ring = bg == acc ? INK : acc;
+    g->drawRoundRect(PROMPT_X, y, PROMPT_W, PROMPT_BTN_H, BTN_R, ring);
+    g->drawRoundRect(PROMPT_X + 1, y + 1, PROMPT_W - 2, PROMPT_BTN_H - 2, BTN_R - 1, ring);
+  }
+  const int cy = y + PROMPT_BTN_H / 2;
+  g->fillSmoothCircle(KEY_CX, cy, KEY_R, fg);
+  const char key[2] = {o.key, '\0'};
+  g->setFont(&V_S12.font);
+  g->setTextDatum(middle_center);
+  g->setTextColor(enabled ? bg : INK, fg);
+  g->drawString(key, KEY_CX, cy);
+  drawLine(g, V_S12, o.label, LABEL_X, cy, PROMPT_X + PROMPT_W - 10 - LABEL_X, text, bg, middle_left);
+}
+
+void drawBackButton(LovyanGFX *g, int y) {
+  const uint16_t bg = to565(BTN_BG);
+  g->fillSmoothRoundRect(PROMPT_X, y, PROMPT_W, PROMPT_BTN_H, BTN_R, bg);
+  g->setFont(&V_S12.font);
+  g->setTextDatum(middle_center);
+  g->setTextColor(INK, bg);
+  g->drawString("BACK", LCD_WIDTH / 2, y + PROMPT_BTN_H / 2);
+}
+
+// The column under the header, in PromptLayout's blocks, `scroll` px up.
+void drawPromptColumn(LovyanGFX *g, const AgentPrompt &q, const PromptUi &v) {
+  PromptText t;
+  promptText(g, q, t);
+  const char *reason = offReason(v.off);
+  PromptLayout L;
+  L.build(metricsOf(t, reason != nullptr), promptButtons(q));
+  const int y0 = PROMPT_VIEW_Y - v.scroll;
+
+  g->setClipRect(0, PROMPT_VIEW_Y, LCD_WIDTH, PROMPT_VIEW_H);
+  g->setFont(&V_B18.font);
+  g->setTextDatum(top_left);
+  g->setTextColor(INK, BG);
+  for (uint8_t i = 0; i < t.nTitle; i++) g->drawString(t.title[i], PROMPT_X, y0 + i * PROMPT_TITLE_LINE_H);
+  int y = y0 + t.nTitle * PROMPT_TITLE_LINE_H;
+
+  if (t.nDetail) {
+    y += PROMPT_BLOCK_GAP;
+    const int h = t.nDetail * PROMPT_DETAIL_LINE_H + PROMPT_DETAIL_PAD;
+    const uint16_t bg = to565(TILE_BG);
+    g->fillSmoothRoundRect(PROMPT_X, y, PROMPT_W, h, 8, bg);
+    g->setFont(&V_S12.font);
+    g->setTextDatum(top_left);
+    g->setTextColor(q.cut ? DIM : INK, bg);
+    for (uint8_t i = 0; i < t.nDetail; i++)
+      g->drawString(t.detail[i], PROMPT_X + DETAIL_PAD_X, y + PROMPT_DETAIL_PAD / 2 + i * PROMPT_DETAIL_LINE_H);
+    y += h;
+  }
+  if (t.hasContext) {
+    y += PROMPT_BLOCK_GAP;
+    g->setFont(&V_S12.font);
+    g->setTextDatum(middle_left);
+    g->setTextColor(DIM, BG);
+    g->drawString(t.context[0], PROMPT_X, y + PROMPT_CONTEXT_H / 2);
+  }
+
+  // NoAnswer lets a tap through again, so its buttons look live.
+  const bool enabled = v.off == ButtonsOff::No || v.off == ButtonsOff::NoAnswer;
+  for (uint8_t i = 0; i < promptButtons(q); i++)
+    drawOption(g, y0 + L.buttonY(i), q.opts[i], i == 0, enabled, i == v.lit);
+  if (reason)
+    drawCaps(g, reason, LCD_WIDTH / 2, y0 + L.backY() - PROMPT_BLOCK_GAP - PROMPT_REASON_H / 2, DIM, middle_center);
+  drawBackButton(g, y0 + L.backY());
+  g->clearClipRect();
+  drawScrollBar(g, PROMPT_X + PROMPT_W + 6, PROMPT_VIEW_Y, PROMPT_VIEW_H, L.contentH(), v.scroll);
+}
+
+// No prompt to answer here: the waiting critter, large, over two lines of copy.
+void drawPromptNotice(LovyanGFX *g, const char *big, const char *small, uint32_t now) {
+  drawCritter(g, Pose::Wait, now, LCD_WIDTH / 2 - CRIT_CENTRE_X * NOTICE_CELL, 106, NOTICE_CELL,
+              CritterInks{g_palette[ACC_ACCENT], BG});
+  g->setFont(&V_B24.font);
+  if (g->textWidth(big) > PROMPT_W) g->setFont(&V_B18.font);
+  g->setTextDatum(middle_center);
+  g->setTextColor(INK, BG);
+  g->drawString(big, LCD_WIDTH / 2, 178);
+  // A long agent name in "answer <name> first" takes a second line.
+  char caps[48], lines[2][LINE_CAP];
+  upper(small, caps, sizeof(caps));
+  g->setFont(&V_S12.font);
+  const uint8_t n = wrapText(g, caps, PROMPT_W, 2, lines);
+  g->setTextDatum(middle_center);
+  g->setTextColor(DIM, BG);
+  for (uint8_t i = 0; i < n; i++) g->drawString(lines[i], LCD_WIDTH / 2, 208 + i * 18);
+}
+
 }  // namespace
 
 void uiBegin(Display &) {
@@ -1012,7 +1349,7 @@ uint8_t uiDeckSize(const Payload &p, bool volume) { return uiVolumeIndex(p) + (v
 uint8_t uiVolumeIndex(const Payload &p) { return hasCards(p) ? p.nCards : 1; }
 
 void uiRender(Display &lcd, const Payload &p, uint8_t index, bool online, uint32_t ageMs,
-              const BatteryView &bat, UiLink link, const VolumeView *vol) {
+              const BatteryView &bat, UiLink link, const VolumeView *vol, const AgentsUi *agents) {
   g_animating = false;
   g_link = link;
 
@@ -1028,7 +1365,9 @@ void uiRender(Display &lcd, const Payload &p, uint8_t index, bool online, uint32
     drawWaitingCard(g, online, ageMs, bat);
   } else {
     const Card &card = p.cards[i];
-    if (card.gauge >= GAUGE_BLANK && card.gauge2 >= GAUGE_BLANK) {
+    if (card.agents && p.agents.present) {
+      drawAgentsCard(g, card, p.agents, agents ? agents->gridScroll : 0, online, ageMs, bat);
+    } else if (card.gauge >= GAUGE_BLANK && card.gauge2 >= GAUGE_BLANK) {
       drawDualCard(g, card, g_anim[i], g_anim2[i], millis(), online, ageMs, bat);
     } else if (card.gauge >= GAUGE_BLANK) {
       // VALUE_MAX_W is what fits between the ring's inner edges at the value's
@@ -1179,6 +1518,49 @@ void uiUnlock(Display &lcd, bool waiting) {
 
   drawCaps(g, "Swipe for the cards", CX, 256, MUTED, middle_center);
   present(lcd);
+}
+
+void uiAgentPrompt(Display &lcd, const AgentsData &a, const AgentTile &tile, const PromptUi &v,
+                   bool online, uint32_t ageMs, const BatteryView &bat, UiLink link) {
+  g_animating = false;
+  g_link = link;
+  LovyanGFX *g = target(lcd);
+  g->fillScreen(BG);
+  drawTopBar(g, online, ageMs, bat);
+  char name[24];
+  upper(tile.name, name, sizeof(name));
+  drawLine(g, V_S12, name, PROMPT_X, PROMPT_HEADER_Y, PROMPT_W, g_palette[ACC_ACCENT], BG, middle_left);
+
+  // The fixed copy of each screen (agent_view.h decides which).
+  const uint32_t now = millis();
+  char queued[48];
+  if (v.screen == PromptScreen::Prompt && a.hasPrompt) {
+    drawPromptColumn(g, a.prompt, v);
+  } else if (v.screen == PromptScreen::OverWifi) {
+    drawPromptNotice(g, "needs you", "open on Bluetooth", now);
+  } else if (v.screen == PromptScreen::Queued && v.queuedName && v.queuedName[0]) {
+    snprintf(queued, sizeof(queued), "answer %s first", v.queuedName);
+    drawPromptNotice(g, "needs you", queued, now);
+  } else if (v.screen == PromptScreen::Dropped) {
+    drawPromptNotice(g, "too long for the cube", "answer at the terminal", now);
+  } else {
+    drawPromptNotice(g, "needs you", "answer at the terminal", now);
+  }
+  present(lcd);
+}
+
+PromptMetrics uiPromptMetrics(const AgentPrompt &q, bool reason) {
+  // Measured on the sprite object whether or not its buffer exists: the
+  // fonts, not the target, decide the widths.
+  PromptText t;
+  promptText(&g_canvas, q, t);
+  return metricsOf(t, reason);
+}
+
+PromptLayout uiPromptLayout(const AgentPrompt &q, ButtonsOff off) {
+  PromptLayout L;
+  L.build(uiPromptMetrics(q, offReason(off) != nullptr), promptButtons(q));
+  return L;
 }
 
 // --- navigation ----------------------------------------------------------------
