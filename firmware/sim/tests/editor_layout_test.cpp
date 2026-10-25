@@ -19,6 +19,23 @@ void testTargetsAreBigEnough() {
   CHECK(editorDoneBtn().y + editorDoneBtn().h <= 280);  // fits the panel
 }
 
+// The RESET / DONE pills (drawn 4 px inside their touch zones, ui.cpp) stay
+// inside the glass: its bottom corners are rounded with LCD_CORNER_R = 40.
+void testBarClearsRoundedCorners() {
+  constexpr int R = 40, W = 240, H = 280, INSET = 4;
+  const EditRect bars[] = {editorResetBtn(), editorDoneBtn()};
+  for (const EditRect &b : bars) {
+    const int bottom = b.y + b.h - INSET - 1;
+    const int xs[] = {b.x, b.x + b.w - 1};
+    for (int x : xs) {
+      const int cx = x < W / 2 ? R : W - 1 - R;  // centre of that corner's arc
+      const int cy = H - 1 - R;
+      const int dx = x - cx, dy = bottom - cy;
+      if ((x < W / 2 ? dx < 0 : dx > 0) && dy > 0) CHECK(dx * dx + dy * dy <= R * R);
+    }
+  }
+}
+
 // The lead (label, value, a switch) and the two steppers share a row without
 // overlapping, left to right, inside the panel.
 void testRowLayout() {
@@ -81,6 +98,7 @@ void testRowBoundaries() {
 
 int main() {
   testTargetsAreBigEnough();
+  testBarClearsRoundedCorners();
   testRowLayout();
   testHitEveryButton();
   testMissesDoNothing();

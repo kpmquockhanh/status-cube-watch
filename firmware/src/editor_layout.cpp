@@ -9,8 +9,13 @@ constexpr int MARGIN = 10;
 constexpr int MINUS_X = 140;
 constexpr int PLUS_X = MINUS_X + BTN_W;
 constexpr int PANEL_W = 240;
-constexpr int BAR_Y = 232;
+// The bar sits clear of the glass's rounded bottom corners (LCD_CORNER_R 40):
+// its pills end at y 264, where the corner arc is 8 px in, and start 16 px in.
+constexpr int BAR_Y = 224;
 constexpr int BAR_H = 44;
+constexpr int BAR_MARGIN = 16;
+constexpr int BAR_GAP = 8;
+constexpr int BAR_BTN_W = (PANEL_W - 2 * BAR_MARGIN - BAR_GAP) / 2;
 
 }  // namespace
 
@@ -26,8 +31,8 @@ EditRect editorMinus(int row) {
 EditRect editorPlus(int row) {
   return EditRect{PLUS_X, (int16_t)(ROW_Y0 + row * ROW_H), BTN_W, ROW_H};
 }
-EditRect editorResetBtn() { return EditRect{MARGIN, BAR_Y, 108, BAR_H}; }
-EditRect editorDoneBtn() { return EditRect{122, BAR_Y, 108, BAR_H}; }
+EditRect editorResetBtn() { return EditRect{BAR_MARGIN, BAR_Y, BAR_BTN_W, BAR_H}; }
+EditRect editorDoneBtn() { return EditRect{BAR_MARGIN + BAR_BTN_W + BAR_GAP, BAR_Y, BAR_BTN_W, BAR_H}; }
 
 EditHit editorHit(int16_t x, int16_t y) {
   for (int r = 0; r < EDIT_ROWS; r++) {

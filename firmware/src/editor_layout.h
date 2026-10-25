@@ -9,7 +9,7 @@
 //   y= 0..46    handle + icon/title
 //   y=46..222   four rows of 44 px:  LABEL            ( - ) ( + )
 //                                    value
-//   y=232..276  [ RESET ]  [ DONE ]
+//   y=224..268  [ RESET ]  [ DONE ]   (inset from the rounded corners)
 constexpr int EDIT_ROWS = 4;
 
 struct EditRect {
