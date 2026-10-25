@@ -8,7 +8,9 @@
 // CUBE_VOLUME (only while bonded) is what the Mac reports for the Volume card,
 // once: a level 0..100, `muted` (56, muted), `fixed` (an HDMI output), or
 // `none` / unset (no Volume write: the card shows NO MAC). CUBE_LOCKED=1 adds
-// the Mac-locked flag, so the unlock prompt shows; a tap logs [ble] (sim) unlock.
+// the Mac-locked flags (bits 5 and 6), so the unlock prompt shows (a tap logs
+// [ble] (sim) unlock) and a prompt's buttons say the Mac must be unlocked first.
+// The payload comes from the bridge, or from CUBE_PAYLOAD (see net_sim.cpp).
 // CUBE_NAV=<sample> (nav_samples.h: turn vn long longeta reroute offroute arrived lost
 // busy) is a bonded iPhone sending that frame every 200 ms; CUBE_NAV_STOP_MS=<n>
 // stops it n ms after start, as a phone dropping out. CUBE_PAIRING=1 opens the
@@ -160,6 +162,7 @@ bool bleTakeVolume(MacVolume &out) {
     v.level = (uint8_t)constrain(atoi(e), 0, 100);
   }
   v.macLocked = locked;
+  v.screenLocked = locked;
   sent = true;
   out = v;
   return true;

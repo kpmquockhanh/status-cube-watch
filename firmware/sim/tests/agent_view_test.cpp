@@ -132,6 +132,21 @@ void noAnswerAllowsRetry() {
   CHECK(v.buttonsOff(1000 + ANSWER_WAIT_MS + 1) == ButtonsOff::Sent);
 }
 
+// bleSendAnswer said no (no Mac subscribed): NoAnswer at once, not after the
+// wait, and the buttons are live again. A later tap waits as usual.
+void sendFailedIsNoAnswerAtOnce() {
+  base();
+  AgentView v;
+  openAt(v, 0);
+  CHECK(v.tap(1, 1000));
+  v.answerFailed();
+  CHECK(v.buttonsOff(1000) == ButtonsOff::NoAnswer);
+  CHECK(v.tick(1000));
+  CHECK(v.tap(0, 1100));
+  CHECK(v.buttonsOff(1100) == ButtonsOff::Sent);
+  CHECK(v.buttonsOff(1100 + ANSWER_WAIT_MS) == ButtonsOff::NoAnswer);
+}
+
 void inputHasNoButtons() {
   base();
   g.prompt.kind = PromptKind::Input;
@@ -295,6 +310,7 @@ int main() {
   newIdResettles();
   oneTapOneSend();
   noAnswerAllowsRetry();
+  sendFailedIsNoAnswerAtOnce();
   inputHasNoButtons();
   notTmuxAndLocked();
   closesWhenAnswered();

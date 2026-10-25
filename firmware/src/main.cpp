@@ -2,9 +2,14 @@
 //
 // Polls the host bridge for a small pre-formatted JSON payload and renders it
 // as a swipeable deck of cards. Swipe left/right to change card; the deck can
-// also auto-advance (the rotate setting).
+// also auto-advance (the rotate setting). On the Agents card a tap on a waiting
+// agent opens its prompt, whose buttons answer it over BLE.
 
 #include <Arduino.h>
+#include <string.h>
+#include "agent_alert.h"
+#include "agent_view.h"
+#include "agents_layout.h"
 #include "battery.h"
 #ifdef BATTERY_LOG
 #include "battery_log.h"
@@ -76,6 +81,32 @@ bool volumeShown() { return bleMacBonded(); }
 uint8_t deckSize() { return uiDeckSize(payload, deckVolume); }
 bool onVolumeCard() { return deckVolume && cardIndex == uiVolumeIndex(payload); }
 DeckSpot deckSpot() { return onVolumeCard() ? DeckSpot::Volume : DeckSpot::Payload; }
+
+// The Agents card (agents_layout.h, agent_view.h, agent_alert.h). Its grid
+// scrolls under a vertical drag; a tap on a waiting tile opens that agent's
+// prompt screen, drawn instead of the deck until BACK or a swipe right.
+ScrollY gridScroll;
+AgentView agentView;
+ScrollY promptScroll;
+// What uiAgentPrompt draws now, for hit-testing and the column's scroll range.
+// Building it measures the text, so it is rebuilt only when what it depends on
+// changed (a payload, the view's state).
+PromptLayout promptLayout;
+bool promptLayoutStale = true;
+AgentAlert agentAlert;
+bool payloadViaBle = false;  // the payload came over BLE: only such a prompt is shown or answered
+bool macLockedNow = false;   // the Mac's screen is locked (Volume bits 5/6): the buttons are off
+bool lastBleLive = false;    // the transport the view last saw, to update it when the link changes
+bool touchOnGrid = false;    // the finger now down landed in a grid that scrolls (latched at landing)
+// A tap on the prompt screen waits for this pass's payload and Volume intake,
+// so it is checked against the prompt the view knows about now, not the one a
+// moment ago (a new prompt id restarts the settle time first). -1 = none.
+int16_t promptTapY = -1;
+bool promptDrawn = false;  // the last frame drawn was a prompt with its buttons (bench)
+bool onAgentsCard() {
+  return payload.agents.present && !onVolumeCard() && cardIndex < payload.nCards && cardIndex == payload.agents.card;
+}
+bool gridScrolls() { return agentsContentH(payload.agents.nTiles) > AGENTS_VIEW_H; }
 
 TransportPolicy policy;
 bool wifiUp = false;           // netStart() called and not yet netStop()
@@ -247,6 +278,96 @@ void deviceEditorGesture(Gesture g) {
   }
 }
 
+// After every payload, link change and Volume update (and an open): the view
+// closes itself when its agent stopped waiting, so this may return to the grid.
+void updateAgentView(uint32_t now) {
+  if (!agentView.isOpen()) return;
+  if (agentView.update(payload.agents, payloadViaBle, macLockedNow, now)) {
+    promptLayoutStale = true;
+    dirty = true;
+  }
+  if (!agentView.isOpen()) {  // back on the grid: as closeAgentView
+    promptScroll.reset();
+    promptTapY = -1;
+    lastRotate = now;
+  }
+}
+
+const PromptLayout &currentPromptLayout(uint32_t now) {
+  if (promptLayoutStale) {
+    promptLayout = PromptLayout{};
+    if (agentView.screen() == PromptScreen::Prompt && payload.agents.hasPrompt) {
+      promptLayout = uiPromptLayout(payload.agents.prompt, agentView.buttonsOff(now));
+    }
+    promptScroll.setRange(promptLayout.contentH(), PROMPT_VIEW_H);
+    promptLayoutStale = false;
+  }
+  return promptLayout;
+}
+
+void openAgentView(const char *agent, uint32_t now) {
+  agentView.open(agent, now);
+  promptScroll.reset();
+  promptLayoutStale = true;
+  updateAgentView(now);
+  dirty = true;
+}
+
+void closeAgentView(uint32_t now) {
+  agentView.close();
+  promptScroll.reset();
+  promptTapY = -1;
+  lastRotate = now;  // auto-advance, held while it was open, starts over
+  dirty = true;
+}
+
+// The prompt screen: a vertical drag scrolls its column, a swipe right closes
+// it, a tap is routed later in the pass (routePromptTap). The other swipes do
+// nothing, so the display panel does not open over it.
+void promptGesture(Gesture g, uint32_t now) {
+  switch (g) {
+    case Gesture::DragStart:
+      currentPromptLayout(now);  // the scroll range
+      promptScroll.grab(gestures.startY());
+      if (promptScroll.drag(gestures.lastY())) dirty = true;
+      break;
+    case Gesture::Drag:
+      if (promptScroll.drag(gestures.lastY())) dirty = true;
+      break;
+    case Gesture::DragEnd:
+      promptScroll.release();
+      break;
+    case Gesture::Tap:
+      promptTapY = gestures.startY();
+      break;
+    case Gesture::SwipePrev:
+      closeAgentView(now);
+      break;
+    default:
+      break;
+  }
+}
+
+// A tap on an answer button sends Control 09 when the view allows it (settled,
+// not locked, not already answered); BACK closes the screen.
+void routePromptTap(uint32_t now) {
+  if (promptTapY < 0) return;
+  const int16_t y = promptTapY;
+  promptTapY = -1;
+  if (!agentView.isOpen() || agentView.screen() != PromptScreen::Prompt || !payload.agents.hasPrompt) return;
+  const int hit = currentPromptLayout(now).buttonAt(y, promptScroll.offset());
+  if (hit == PROMPT_HIT_BACK) {
+    closeAgentView(now);
+    return;
+  }
+  if (hit < 0 || !agentView.tap((uint8_t)hit, now)) return;
+  const AgentPrompt &q = payload.agents.prompt;
+  // No Mac to send to: say so now rather than after the answer wait.
+  if (!bleSendAnswer(q.agent, q.id, q.opts[hit].key)) agentView.answerFailed();
+  promptLayoutStale = true;  // the reason line appears
+  dirty = true;
+}
+
 void pollTouch() {
   int16_t x = 0, y = 0;
   const bool down = touch.read(x, y);
@@ -266,21 +387,32 @@ void pollTouch() {
   if (down) unlock.touch(now);
   // The unlock prompt covers the deck: a tap there is for it alone.
   const bool onUnlock = !editing && !navSession.active() && !pairingMsgUp() && unlock.screen(now) != UnlockScreen::Hidden;
+  // An open prompt screen covers the deck, below the unlock prompt.
+  const bool onPrompt = agentView.isOpen() && !editing && !onUnlock && !navSession.active() && !pairingMsgUp();
   // On the Volume card a vertical move is the volume, not a swipe (gesture.h).
   // Whether it is the slider's touch is decided where the finger landed, so a touch that began on
   // another card never reaches it; the latch clears on the lift pass, after the gesture is routed.
+  // On the Agents card a vertical move scrolls the grid, but only for a touch
+  // that lands in the grid and only when the grid is taller than its view: a
+  // swipe down from the caption, or on a grid that fits, still opens the
+  // display panel.
   if (landing) {
-    touchOnVolume = onVolumeCard() && !editing && !onUnlock && !navSession.active() && !pairingMsgUp();
+    const bool deckUp = !editing && !onUnlock && !onPrompt && !navSession.active() && !pairingMsgUp();
+    touchOnVolume = onVolumeCard() && deckUp;
     touchOnVolumeRow = touchOnVolume && volumeInRow(y);
+    touchOnGrid = onAgentsCard() && deckUp && gridScrolls() && y >= AGENTS_VIEW_Y && y < AGENTS_VIEW_Y + AGENTS_VIEW_H;
   }
   const bool onVolume = touchOnVolume && onVolumeCard() && !editing;
   const bool onVolumeRow = onVolume && touchOnVolumeRow;
-  if (!down) touchOnVolume = touchOnVolumeRow = false;
+  const bool onGrid = touchOnGrid && onAgentsCard() && !editing && !onPrompt;
+  if (!down) touchOnVolume = touchOnVolumeRow = touchOnGrid = false;
   // In the button row the tracker stays in tap mode: a press that drifts a few
   // pixels is still a Tap (TAP_MAX_PX), not a drag of the slider. On the map a
   // move either way drags it.
   const bool onMap = navSession.active() && bleState() != BleState::Pairing && navScene.state != NavState::Arrived;
-  const DragMode drag = onMap ? DragMode::Free : (onVolume && !onVolumeRow ? DragMode::Vertical : DragMode::Off);
+  const DragMode drag = onMap ? DragMode::Free
+                       : ((onVolume && !onVolumeRow) || onPrompt || onGrid) ? DragMode::Vertical
+                                                                             : DragMode::Off;
   const Gesture gesture = gestures.update(down, x, y, now, drag);
   // The deck left the card under a dragging finger (the bond went): let go, so
   // the last level is still sent.
@@ -339,6 +471,38 @@ void pollTouch() {
       dirty = true;
     }
     return;
+  }
+  if (onPrompt) {
+    promptGesture(gesture, now);
+    return;
+  }
+  if (onAgentsCard() && !onVolume) {
+    switch (gesture) {
+      case Gesture::DragStart:
+        if (!onGrid) break;
+        gridScroll.grab(gestures.startY());
+        gridScroll.drag(gestures.lastY());
+        lastRotate = now;  // touching the card holds off auto-advance, as on Volume
+        dirty = true;
+        break;
+      case Gesture::Drag:
+        if (onGrid && gridScroll.drag(gestures.lastY())) {
+          lastRotate = now;
+          dirty = true;
+        }
+        break;
+      case Gesture::DragEnd:
+        gridScroll.release();
+        break;
+      case Gesture::Tap: {  // only a waiting agent has a prompt to open
+        const AgentsData &a = payload.agents;
+        const int i = agentsTileAt(gestures.startX(), gestures.startY(), a.nTiles, gridScroll.offset());
+        if (i >= 0 && a.tiles[i].kind == AgentKind::Wait) openAgentView(a.tiles[i].id, now);
+        break;
+      }
+      default:
+        break;
+    }
   }
   if (onVolume) {
     bool acted = false;
@@ -524,7 +688,10 @@ void loop() {
     dirty = true;
   }
   const DeckSpot was = deckSpot();
-  if (bleTake(payload)) gotData = true;
+  if (bleTake(payload)) {
+    gotData = true;
+    payloadViaBle = true;
+  }
   // Navigation frames from the iPhone, drained every pass so the hand-over buffer stays fresh.
   const bool navFrame = bleTakeNav(navScene);
   if (navFrame) {
@@ -571,6 +738,10 @@ void loop() {
   if (bleTakeVolume(macVol)) {
     volSlider.fromMac(macVol, now);
     unlock.fromMac(macVol.known && macVol.macLocked, now);  // unknown = the link dropped
+    // Locked at all (bit 6), whether or not it unlocks for the cube: nobody at
+    // the desk answers for it. Unknown = the link dropped; no BLE payload is fresh then either.
+    macLockedNow = macVol.known && (macVol.macLocked || macVol.screenLocked);
+    updateAgentView(now);
     dirty = true;
   }
   if (unlock.tick(now)) dirty = true;
@@ -587,7 +758,10 @@ void loop() {
     netRequest();  // runs on its own task; netTake() hands over the result on a later pass
   }
   const NetFetch fetched = netTake(payload);
-  if (fetched == NetFetch::Ok) gotData = true;
+  if (fetched == NetFetch::Ok) {
+    gotData = true;
+    payloadViaBle = false;  // the LAN variant: never prompt text
+  }
   if (fetched == NetFetch::Failed) Serial.printf("[net] fetch failed: %s\n", netLastError());
   if (fetched != NetFetch::None) dirty = true;
   if (gotData) {
@@ -601,11 +775,43 @@ void loop() {
     }
     // The deck may have changed size: keep the viewer's card under them.
     cardIndex = deckKeepIndex(was, cardIndex, deckSize(), deckVolume);
+    agentAlert.update(payload.agents);
+    promptLayoutStale = true;  // the prompt's text may have changed
+    updateAgentView(now);
+    dirty = true;
+  }
+  if (td.bleLive != lastBleLive) {
+    lastBleLive = td.bleLive;
+    updateAgentView(now);
+  }
+  if (agentView.tick(now)) {  // the settle or the answer wait ran out
+    promptLayoutStale = true;
+    dirty = true;
+  }
+  // Only now, with this pass's payload and lock state in the view.
+  routePromptTap(now);
+  // The grid starts at its top whenever the deck comes back to the card.
+  if (onAgentsCard()) gridScroll.setRange(agentsContentH(payload.agents.nTiles), AGENTS_VIEW_H);
+  else gridScroll.reset();
+
+  // An agent started waiting: wake, jump to its prompt and beep, once per
+  // prompt (agent_alert.h). Held while something else owns the screen or a
+  // finger is down; it fires when that ends.
+  char alertAgent[16];
+  const bool alertBlocked = navSession.active() || editing || touchDown || bleState() == BleState::Pairing ||
+                            pairingMsgUp() || waitingToPair() || unlock.screen(now) != UnlockScreen::Hidden;
+  if (agentAlert.take(alertBlocked, alertAgent, sizeof(alertAgent))) {
+    Serial.printf("[agents] %s is waiting\n", alertAgent);
+    idle.wake(now);  // the screen comes on below, through the usual wake
+    cardIndex = payload.agents.card;
+    gridScroll.reset();
+    if (!agentView.isOpen() || strcmp(agentView.agent(), alertAgent) != 0) openAgentView(alertAgent, now);
+    buzzerPlay(Sound::Attention);  // silent at SOUND off
     dirty = true;
   }
 
   if (!blePairingOpen()) pairMsgDismissed = false;
-  if (rotateMs() > 0 && !editing && !navSession.active() && !touchDown && !volSlider.held() && now - lastRotate >= rotateMs()) {
+  if (rotateMs() > 0 && !editing && !navSession.active() && !agentView.isOpen() && !touchDown && !volSlider.held() && now - lastRotate >= rotateMs()) {
     step(1);
   }
 
@@ -648,6 +854,11 @@ void loop() {
     const bool editorUp = editing && !uiEditorSliding();
     const bool navOn = navSession.active();
     const UnlockScreen us = editing ? UnlockScreen::Hidden : unlock.screen(now);
+    const bool online = td.bleLive || netOnline();
+    const UiLink link = td.bleLive ? UiLink::Ble : (wifiUp && netOnline() ? UiLink::Wifi : UiLink::None);
+    // The open prompt's agent (update() closed the view if its tile went).
+    const AgentTile *promptTile = agentView.isOpen() ? agentsTile(payload.agents, agentView.agent()) : nullptr;
+    promptDrawn = false;
     if (pairing) uiBlePair(lcd, blePasskey());  // the code must be seen
     else if (navOn) {
       const uint32_t t0 = millis();
@@ -658,12 +869,19 @@ void loop() {
     else if (waiting) uiBlePair(lcd, 0);
     else if (editorUp) uiDeviceEditor(lcd, editDevice);
     else if (us != UnlockScreen::Hidden) uiUnlock(lcd, us == UnlockScreen::Waiting);
-    else {
+    else if (promptTile) {
+      const AgentsData &a = payload.agents;
+      const AgentTile *first = a.hasPrompt ? agentsTile(a, a.prompt.agent) : nullptr;
+      currentPromptLayout(now);  // keeps the column's scroll range current
+      const PromptUi pv{agentView.screen(), agentView.buttonsOff(now), agentView.sentButton(), promptScroll.offset(),
+                        first ? first->name : ""};
+      uiAgentPrompt(lcd, a, *promptTile, pv, online, age, bv, link);
+      promptDrawn = pv.screen == PromptScreen::Prompt;
+    } else {
       VolumeView vv = volSlider.view();
       vv.pressed = mediaPressed;
-      uiRender(lcd, payload, cardIndex, td.bleLive || netOnline(), age, bv,
-               td.bleLive ? UiLink::Ble : (wifiUp && netOnline() ? UiLink::Wifi : UiLink::None),
-               deckVolume ? &vv : nullptr);
+      const AgentsUi au{gridScroll.offset()};
+      uiRender(lcd, payload, cardIndex, online, age, bv, link, deckVolume ? &vv : nullptr, &au);
     }
     lastDraw = now;
     dirty = false;
@@ -680,7 +898,9 @@ void loop() {
 }
 
 #ifdef SIM_BENCH
-// The bench checks that a ride leaves the deck where it was, and that WiFi stays off during it.
+// The bench checks that a ride leaves the deck where it was, that WiFi stays off during it, and
+// that an agent alert leaves the prompt on screen.
 uint8_t benchCardIndex() { return cardIndex; }
 bool benchNavActive() { return navSession.active(); }
+bool benchPromptOpen() { return promptDrawn; }
 #endif

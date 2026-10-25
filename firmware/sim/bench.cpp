@@ -16,7 +16,7 @@
 // backlight LEDs are not in that figure; the backlight is reported on its own
 // as a duty cycle.
 //
-//   ./build/cube-bench <desk|linked|browse|editor|sleep|volume|nav|ride|render> [slowdown]
+//   ./build/cube-bench <desk|linked|browse|editor|sleep|volume|nav|ride|agents|alert|render> [slowdown]
 
 #include <ArduinoJson.h>
 
@@ -52,6 +52,7 @@ Display *g_simDisplay = nullptr;
 
 uint8_t benchCardIndex();  // main.cpp
 bool benchNavActive();     // main.cpp
+bool benchPromptOpen();    // main.cpp
 
 namespace {
 
@@ -136,6 +137,9 @@ struct Scenario {
   uint8_t sleepMin;
   bool mustSleep;
   uint16_t rotateSec;  // auto-advance, 0 = off
+  // The Agents card after the usage card: AGENTS_RUNNING is four working
+  // agents; AGENTS_ALERT the same until ALERT_AT_MS, then one waits on a prompt.
+  enum : uint8_t { AGENTS_NONE, AGENTS_RUNNING, AGENTS_ALERT } agents;
   std::vector<Stroke> strokes;
 };
 
@@ -201,6 +205,18 @@ Scenario makeScenario(const std::string &name) {
     s.seconds = 600;
     s.nav = "busy";
     s.bleLive = false;
+  } else if (name == "agents") {
+    s.what = "Agents grid, 4 agents at work (lines, poses, context move every 5 s): the screen still sleeps (2 min)";
+    s.seconds = 600;
+    s.sleepMin = 2;
+    s.mustSleep = true;
+    s.agents = Scenario::AGENTS_RUNNING;
+    s.strokes.push_back(swipe(6000, 190, 150, 50, 150));  // swipe left: usage -> Agents, once a payload is in
+  } else if (name == "alert") {
+    s.what = "asleep on the usage card; at 300 s an agent waits on a prompt: wake, jump to it, one beep, a tap answers";
+    s.seconds = 330;
+    s.sleepMin = 2;
+    s.agents = Scenario::AGENTS_ALERT;
   } else if (name == "sleep") {
     s.what = "Mac gone: WiFi fetches fail, screen sleeps after the timeout (2 min)";
     s.seconds = 600;
@@ -215,13 +231,49 @@ Scenario makeScenario(const std::string &name) {
   return s;
 }
 
+constexpr uint32_t ALERT_AT_MS = 300000;
+
+// The scenario's Agents card (none for most): four agents at work, whose lines,
+// poses and context move every 5 s as the bridge's would; for `alert`, from
+// ALERT_AT_MS the first one waits on a prompt.
+std::string agentsJson(uint32_t sinceStartMs) {
+  if (S.agents == Scenario::AGENTS_NONE) return "";
+  static const char *const names[4] = {"infra-network", "checkout-api", "docs-site", "claude-status..."};
+  static const char *const poses[5] = {"bash", "read", "write", "think", "web"};
+  const bool waiting = S.agents == Scenario::AGENTS_ALERT && sinceStartMs >= ALERT_AT_MS;
+  const uint32_t tick = S.agents == Scenario::AGENTS_RUNNING ? sinceStartMs / 5000 : 0;
+  std::string a;
+  for (int i = 0; i < 4; i++) {
+    char t[160];
+    if (i == 0 && waiting) {
+      snprintf(t, sizeof(t), "{\"i\":\"l00001\",\"n\":\"%s\",\"l\":\"needs you\",\"k\":\"wait\",\"p\":\"wait\",\"x\":12}",
+               names[i]);
+    } else {
+      snprintf(t, sizeof(t), "{\"i\":\"l0000%d\",\"n\":\"%s\",\"l\":\"Bash %u\",\"k\":\"run\",\"p\":\"%s\",\"x\":%u}",
+               i + 1, names[i], (unsigned)(tick % 100), poses[(tick + i) % 5], (unsigned)((tick * 7 + i * 13) % 100));
+    }
+    if (i) a += ",";
+    a += t;
+  }
+  std::string card = std::string(",{\"t\":\"AGENTS\",\"v\":\"4\",\"s1\":\"") + (waiting ? "1 NEEDS YOU" : "4 WORKING") +
+                     "\",\"s2\":\"\",\"c\":\"" + (waiting ? "amber" : "green") + "\",\"a\":[" + a + "]";
+  if (waiting) {
+    card += ",\"q\":{\"i\":\"l00001\",\"p\":\"p1abc-1\",\"k\":\"permission\",\"t\":\"Run this command?\","
+            "\"d\":\"terraform apply -target=module.staging_net\",\"c\":\"~/code/infra-network\","
+            "\"o\":[{\"k\":\"1\",\"l\":\"Yes\"},{\"k\":\"2\",\"l\":\"Yes, and don't ask again\"},{\"k\":\"3\",\"l\":\"No\"}]}";
+  }
+  return card + "}";
+}
+
 // The usage card from fixtures/usage.json, with the countdown running down a
-// minute at a time and the 5h percentage creeping up, as the bridge sends it.
+// minute at a time and the 5h percentage creeping up, as the bridge sends it,
+// then the scenario's Agents card.
 std::string payloadJson(uint32_t nowMs) {
+  const std::string agents = agentsJson(g_running ? nowMs - g_start : 0);
   static std::string cache;
   static int cachedMin = -1;
   const int min = (int)(nowMs / 60000);
-  if (min == cachedMin) return cache;
+  if (min == cachedMin) return cache + agents + "]}";
   cachedMin = min;
   const int left = 249 - min > 0 ? 249 - min : 0;
   const int g = 14 + min / 3;
@@ -232,10 +284,10 @@ std::string payloadJson(uint32_t nowMs) {
            "{\"v\":1,\"ts\":0,\"src\":\"oauth\",\"cards\":[{\"t\":\"CLAUDE\",\"v\":\"%s\","
            "\"s1\":\"to reset\",\"s2\":\"\",\"c\":\"green\",\"g\":%d,\"c2\":\"green\",\"g2\":53,"
            "\"rows\":[{\"k\":\"5H\",\"p\":\"%d%%\",\"r\":\"%s\"},{\"k\":\"7D\",\"p\":\"53%%\",\"r\":\"1d 1h\"}],"
-           "\"m\":\"12\",\"mc\":\"amber\"}]}",
+           "\"m\":\"12\",\"mc\":\"amber\"}",
            reset, g, g, reset);
   cache = buf;
-  return cache;
+  return cache + agents + "]}";
 }
 
 bool parsePayload(const std::string &json, Payload &out) {
@@ -511,7 +563,10 @@ BatteryView batteryView() { return batteryViewFromEnv(); }
 // Silent. A tone is LEDC hardware time, not CPU, so the model charges nothing for it.
 bool buzzerBegin() { return true; }
 void buzzerSetLevel(uint8_t) {}
-void buzzerPlay(Sound) {}
+uint32_t g_attention = 0;  // Sound::Attention plays: the agent alert
+void buzzerPlay(Sound s) {
+  if (s == Sound::Attention) g_attention++;
+}
 void buzzerUpdate(uint32_t) {}
 
 // --- running ---------------------------------------------------------------------
@@ -528,6 +583,17 @@ void runScenario() {
     Settings w = settings();
     snprintf(w.ssid, sizeof(w.ssid), "bench");
     settingsSave(w);
+  }
+  // The alert's prompt is answered with a tap on its first button, well after
+  // the settle time; where that button sits is what uiAgentPrompt draws.
+  if (S.agents == Scenario::AGENTS_ALERT) {
+    static Payload p;
+    g_running = true;  // agentsJson counts from the start: build the payload of ALERT_AT_MS
+    g_start = millis() - ALERT_AT_MS;
+    parsePayload(payloadJson(millis()), p);
+    g_running = false;
+    const PromptLayout L = uiPromptLayout(p.agents.prompt, ButtonsOff::No);
+    S.strokes.push_back(tapAt(ALERT_AT_MS + 15000, 120, PROMPT_VIEW_Y + L.buttonY(0) + PROMPT_BTN_H / 2));
   }
   resetCounters();
   g_start = millis();
@@ -691,6 +757,19 @@ int main(int argc, char **argv) {
   if (S.nav && (g_wifiRideStarts || g_wifiRidePasses)) {
     fprintf(stderr, "%s: WiFi came up %u times during the ride (%llu passes with it on)\n", S.name,
             (unsigned)g_wifiRideStarts, (unsigned long long)g_wifiRidePasses);
+    return 1;
+  }
+  // The alert: the screen woke for the prompt, it beeped once (the Mac resends
+  // the same prompt every 5 s), the prompt is what is drawn, and the one tap on
+  // its first button sent one answer.
+  if (S.agents == Scenario::AGENTS_ALERT &&
+      (g_backlight == 0 || g_attention != 1 || !benchPromptOpen() || g_answers != 1)) {
+    fprintf(stderr, "%s: at the end the screen was %s, %u attention beeps (expected 1), prompt drawn=%d, %u answers (expected 1)\n",
+            S.name, g_backlight ? "on" : "off", (unsigned)g_attention, (int)benchPromptOpen(), (unsigned)g_answers);
+    return 1;
+  }
+  if (S.agents == Scenario::AGENTS_RUNNING && g_attention != 0) {
+    fprintf(stderr, "%s: %u attention beeps with no agent waiting\n", S.name, (unsigned)g_attention);
     return 1;
   }
   if (S.mustSleep && g_backlight != 0) {

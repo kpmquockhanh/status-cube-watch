@@ -89,7 +89,7 @@ BENCH_SRCS := ../src/main.cpp ../src/ui.cpp ../src/payload.cpp ../src/gesture.cp
               ../src/editor_layout.cpp ../src/dev_editor.cpp ../src/settings_json.cpp ../src/critter.cpp \
               settings_sim.cpp portal_sim.cpp ota_sim.cpp bench.cpp
 BENCH_OBJ  := $(addprefix build/bench/,$(notdir $(BENCH_SRCS:.cpp=.o)))
-BENCH_RUNS ?= desk linked browse editor sleep volume nav ride
+BENCH_RUNS ?= desk linked browse editor sleep volume nav ride agents alert
 
 build/bench/%.o: %.cpp
 	@mkdir -p $(dir $@)

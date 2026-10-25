@@ -9,9 +9,12 @@
 #include <atomic>
 #include <cctype>
 #include <cstdlib>
+#include <fstream>
+#include <sstream>
 #include <string>
 #include <thread>
 
+#include <Arduino.h>
 #include <ArduinoJson.h>
 
 #include "../src/config.h"
@@ -62,6 +65,31 @@ bool parseUrl(const std::string &url, Url &out) {
 std::string bridgeUrl() {
   const char *env = getenv("CUBE_BRIDGE_URL");
   return env && *env ? env : BRIDGE_URL;
+}
+
+// CUBE_PAYLOAD=<file> stands in for the bridge: every fetch reads that JSON.
+// CUBE_PAYLOAD2=<file> with CUBE_PAYLOAD2_MS=<n> switches to the second file n
+// ms after start, as a prompt arriving while the cube shows the first.
+// Returns nullptr when CUBE_PAYLOAD is unset (fetch from the bridge).
+const char *payloadFile() {
+  const char *first = getenv("CUBE_PAYLOAD");
+  if (!first || !*first) return nullptr;
+  const char *second = getenv("CUBE_PAYLOAD2");
+  const char *ms = getenv("CUBE_PAYLOAD2_MS");
+  if (second && *second && millis() >= (uint32_t)(ms ? atol(ms) : 0)) return second;
+  return first;
+}
+
+bool readFile(const char *path, std::string &body, const Err &err) {
+  std::ifstream f(path);
+  if (!f) {
+    err.set("CUBE_PAYLOAD unreadable");
+    return false;
+  }
+  std::ostringstream ss;
+  ss << f.rdbuf();
+  body = ss.str();
+  return true;
 }
 
 bool httpGet(const Url &u, std::string &body, const Err &err) {
@@ -146,7 +174,8 @@ bool httpGet(const Url &u, std::string &body, const Err &err) {
 }  // namespace
 
 bool netBegin() {
-  Serial.printf("[net] simulator -> %s\n", bridgeUrl().c_str());
+  if (payloadFile()) Serial.printf("[net] simulator -> file %s\n", payloadFile());
+  else Serial.printf("[net] simulator -> %s\n", bridgeUrl().c_str());
   g_online = true;
   return true;
 }
@@ -171,15 +200,18 @@ const char *netLastError() { return g_error; }
 // calls it directly for the payloads it pretends arrived over BLE.
 bool simFetch(Payload &out, char *errBuf, size_t errLen) {
   const Err err{errBuf, errLen};
-  Url u;
-  if (!parseUrl(bridgeUrl(), u)) {
-    err.set("bad BRIDGE_URL");
-    return false;
-  }
-
   std::string body;
-  if (!httpGet(u, body, err)) {
-    return false;
+  if (const char *file = payloadFile()) {
+    if (!readFile(file, body, err)) return false;
+  } else {
+    Url u;
+    if (!parseUrl(bridgeUrl(), u)) {
+      err.set("bad BRIDGE_URL");
+      return false;
+    }
+    if (!httpGet(u, body, err)) {
+      return false;
+    }
   }
 
   JsonDocument doc;

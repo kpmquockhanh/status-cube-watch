@@ -103,7 +103,9 @@ class AgentView {
     if (kind_ == PromptKind::Input) return ButtonsOff::Input;
     if (notInTmux_) return ButtonsOff::NotTmux;
     if (macLocked_) return ButtonsOff::Locked;
-    if (answeredShown()) return (uint32_t)(now - sentAt_) < ANSWER_WAIT_MS ? ButtonsOff::Sent : ButtonsOff::NoAnswer;
+    if (answeredShown()) {
+      return !failed_ && (uint32_t)(now - sentAt_) < ANSWER_WAIT_MS ? ButtonsOff::Sent : ButtonsOff::NoAnswer;
+    }
     if ((uint32_t)(now - shownAt_) < PROMPT_SETTLE_MS) return ButtonsOff::Settling;
     return ButtonsOff::No;
   }
@@ -118,9 +120,14 @@ class AgentView {
     sent_ = true;
     sentAt_ = now;
     sentBtn_ = (int8_t)i;
+    failed_ = false;
     lastOff_ = ButtonsOff::Sent;  // the caller redraws after a tap itself
     return true;
   }
+
+  // The tap's Control 09 could not go out (no Mac on the link): no answer is
+  // coming, so the buttons show NoAnswer now instead of after ANSWER_WAIT_MS.
+  void answerFailed() { failed_ = true; }
 
   int8_t sentButton() const { return answeredShown() ? sentBtn_ : (int8_t)-1; }
 
@@ -152,6 +159,7 @@ class AgentView {
   uint32_t shownAt_ = 0;
   char sentId_[16] = {0};
   bool sent_ = false;
+  bool failed_ = false;  // the last tap's send failed
   uint32_t sentAt_ = 0;
   int8_t sentBtn_ = -1;
   PromptScreen lastScreen_ = PromptScreen::None;
