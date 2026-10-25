@@ -1,0 +1,11 @@
+{"v":1,"ts":0,"src":"oauth","cards":[
+ {"t":"CLAUDE","v":"4h 09m","s1":"to reset","s2":"","c":"green","g":14,"c2":"green","g2":53,
+  "rows":[{"k":"5H","p":"14%","r":"4h 09m"},{"k":"7D","p":"53%","r":"1d 1h"}],"m":"12","mc":"amber"},
+ {"t":"AGENTS","v":"5","s1":"1 NEEDS YOU","s2":"","c":"amber",
+  "a":[
+   {"i":"l00001","n":"infra-network","l":"needs you","k":"wait","p":"ask","x":12},
+   {"i":"l00002","n":"checkout-api","l":"Edit +3","k":"run","p":"write","x":41,"u":1},
+   {"i":"l00003","n":"claude-status...","l":"Bash","k":"run","p":"bash","x":8},
+   {"i":"l00004","n":"docs-site","l":"idle 12m","k":"idle","p":"hungry","x":3},
+   {"i":"l00005","n":"old-thing","l":"exited","k":"exit","p":"sleep","x":0}]}
+]}

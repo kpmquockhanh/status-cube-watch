@@ -11,8 +11,80 @@ Accent accentFromName(const char *name) {
   return ACC_INK;
 }
 
+namespace {
+
+AgentKind kindFromName(const char *k) {
+  if (!strcmp(k, "run")) return AgentKind::Run;
+  if (!strcmp(k, "wait")) return AgentKind::Wait;
+  if (!strcmp(k, "err")) return AgentKind::Err;
+  if (!strcmp(k, "exit")) return AgentKind::Exit;
+  if (!strcmp(k, "start")) return AgentKind::Start;
+  return AgentKind::Idle;
+}
+
+PromptKind promptKindFromName(const char *k) {
+  if (!strcmp(k, "permission")) return PromptKind::Permission;
+  if (!strcmp(k, "question")) return PromptKind::Question;
+  return PromptKind::Input;
+}
+
+// A prompt needs both ids to be answerable; one without them is treated as
+// absent rather than drawn with buttons that could not be sent.
+bool parsePrompt(JsonObjectConst q, AgentPrompt &pr) {
+  strlcpy(pr.agent, q["i"] | "", sizeof(pr.agent));
+  strlcpy(pr.id, q["p"] | "", sizeof(pr.id));
+  if (!pr.agent[0] || !pr.id[0]) return false;
+  pr.kind = promptKindFromName(q["k"] | "");
+  strlcpy(pr.title, q["t"] | "", sizeof(pr.title));
+  strlcpy(pr.detail, q["d"] | "", sizeof(pr.detail));
+  strlcpy(pr.context, q["c"] | "", sizeof(pr.context));
+  pr.notInTmux = !strcmp(q["x"] | "", "tmux");
+  pr.cut = (q["cut"] | 0) != 0;
+  for (JsonObjectConst o : q["o"].as<JsonArrayConst>()) {
+    if (pr.nOpts >= PROMPT_OPTS) break;
+    const char *k = o["k"] | "";
+    if (!k[0] || k[1] || k[0] < '1' || k[0] > '9') continue;  // one digit 1-9 only
+    PromptOpt &opt = pr.opts[pr.nOpts++];
+    opt.key = k[0];
+    strlcpy(opt.label, o["l"] | "", sizeof(opt.label));
+  }
+  return true;
+}
+
+void parseAgents(JsonObjectConst c, uint8_t cardIndex, AgentsData &a) {
+  a.present = true;
+  a.card = cardIndex;
+  for (JsonObjectConst t : c["a"].as<JsonArrayConst>()) {
+    if (a.nTiles >= AGENT_TILES) break;
+    AgentTile &tile = a.tiles[a.nTiles++];
+    strlcpy(tile.id, t["i"] | "", sizeof(tile.id));
+    strlcpy(tile.name, t["n"] | "", sizeof(tile.name));
+    strlcpy(tile.line, t["l"] | "", sizeof(tile.line));
+    strlcpy(tile.pose, t["p"] | "", sizeof(tile.pose));
+    tile.kind = kindFromName(t["k"] | "");
+    const int x = t["x"] | 0;
+    tile.ctx = x < 0 ? 0 : (x > 100 ? 100 : (uint8_t)x);
+    tile.unseen = (t["u"] | 0) != 0;
+  }
+  if (c["q"].is<JsonObjectConst>()) a.hasPrompt = parsePrompt(c["q"], a.prompt);
+  a.promptDropped = !a.hasPrompt && (c["qc"] | 0) != 0;
+}
+
+}  // namespace
+
+const AgentTile *agentsTile(const AgentsData &a, const char *id) {
+  if (!a.present || !id) return nullptr;
+  for (uint8_t i = 0; i < a.nTiles; i++)
+    if (!strcmp(a.tiles[i].id, id)) return &a.tiles[i];
+  return nullptr;
+}
+
 bool payloadFromJson(const JsonDocument &doc, Payload &out, char *err, size_t errLen) {
-  Payload p{};
+  // Parsed in place: a Payload on a task stack would overflow it. A failure
+  // leaves `out` cleared (valid false); callers that keep the last good one
+  // parse into scratch and copy on success.
+  Payload &p = out;
+  memset(&p, 0, sizeof(p));
   // The top-level `ts` and `src` are for people reading /api/status; nothing
   // on the cube needs them, so they are not stored.
   for (JsonObjectConst c : doc["cards"].as<JsonArrayConst>()) {
@@ -40,6 +112,11 @@ bool payloadFromJson(const JsonDocument &doc, Payload &out, char *err, size_t er
     }
     strlcpy(card.mail, c["m"] | "", sizeof(card.mail));
     card.mailColor = accentFromName(c["mc"] | "ink");
+    // Only the first Agents card counts; a second one is a plain card.
+    if (c["a"].is<JsonArrayConst>() && !p.agents.present) {
+      card.agents = true;
+      parseAgents(c, p.nCards - 1, p.agents);
+    }
   }
   if (p.nCards == 0) {
     strlcpy(err, "no cards in payload", errLen);
@@ -47,6 +124,5 @@ bool payloadFromJson(const JsonDocument &doc, Payload &out, char *err, size_t er
   }
 
   p.valid = true;
-  out = p;
   return true;
 }

@@ -116,8 +116,9 @@ TESTS := build/portal_util_test build/gesture_test build/deck_test \
          build/ble_bonds_test build/age_label_test build/cpu_policy_test build/readings_key_test \
          build/ble_conn_test build/touch_gate_test build/melody_test \
          build/volume_frame_test build/volume_slider_test build/unlock_prompt_test \
-         build/nav_frame_test build/nav_session_test build/nav_pan_test build/utf8_fit_test
+         build/nav_frame_test build/nav_session_test build/nav_pan_test build/utf8_fit_test build/payload_test
 
+build/payload_test: ../src/payload.cpp
 build/gesture_test: ../src/gesture.cpp
 build/editor_layout_test: ../src/editor_layout.cpp
 build/dev_editor_test: ../src/dev_editor.cpp ../src/editor_layout.cpp

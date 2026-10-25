@@ -189,13 +189,13 @@ bool simFetch(Payload &out, char *errBuf, size_t errLen) {
     return false;
   }
 
-  Payload p{};
-  if (!payloadFromJson(doc, p, errBuf, errLen)) {
+  static Payload scratch;  // too big for a stack; `out` keeps its last good value on failure
+  if (!payloadFromJson(doc, scratch, errBuf, errLen)) {
     return false;
   }
 
   errBuf[0] = '\0';
-  out = p;
+  out = scratch;
   return true;
 }
 

@@ -241,10 +241,10 @@ std::string payloadJson(uint32_t nowMs) {
 bool parsePayload(const std::string &json, Payload &out) {
   JsonDocument doc;
   if (deserializeJson(doc, json)) return false;
-  Payload p{};
+  static Payload scratch;
   char err[64];
-  if (!payloadFromJson(doc, p, err, sizeof(err))) return false;
-  out = p;
+  if (!payloadFromJson(doc, scratch, err, sizeof(err))) return false;
+  out = scratch;
   return true;
 }
 
@@ -590,7 +590,7 @@ void runRender() {
   Display lcd;
   lcd.init();
   uiBegin(lcd);
-  Payload p{};
+  static Payload p;
   parsePayload(payloadJson(0), p);
   const BatteryView bv = batteryView();
   VolumeSlider volume;

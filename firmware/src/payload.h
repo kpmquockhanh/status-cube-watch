@@ -39,17 +39,70 @@ struct Card {
   // Unread-mail badge in the gap of the rings; empty = no badge.
   char mail[8];
   uint8_t mailColor;
+  // True for the Agents card (the bridge's `a` array): the tiles and prompt
+  // live in Payload::agents, not here.
+  bool agents;
 };
 
+// The Agents card. Field sizes are the bridge's maxima (agents.go) plus a NUL.
+constexpr uint8_t AGENT_TILES = 8, PROMPT_OPTS = 6;
+
+enum class AgentKind : uint8_t { Run, Wait, Idle, Err, Exit, Start };  // unknown -> Idle
+enum class PromptKind : uint8_t { Permission, Question, Input };       // unknown -> Input (no buttons)
+
+struct AgentTile {
+  char id[16];
+  char name[17];
+  char line[17];
+  char pose[9];
+  AgentKind kind;
+  uint8_t ctx;   // context used, 0-100
+  bool unseen;   // finished a turn nobody looked at
+};
+
+struct PromptOpt {
+  char key;  // '1'..'9'
+  char label[41];
+};
+
+struct AgentPrompt {
+  char agent[16];
+  char id[16];
+  PromptKind kind;
+  char title[41];
+  char detail[121];
+  char context[41];
+  uint8_t nOpts;
+  PromptOpt opts[PROMPT_OPTS];
+  bool notInTmux;  // `x` = "tmux": cannot be answered from here
+  bool cut;        // the bridge's budget dropped the detail
+};
+
+struct AgentsData {
+  bool present;
+  uint8_t card;  // index of the Agents card in Payload::cards
+  uint8_t nTiles;
+  AgentTile tiles[AGENT_TILES];
+  bool hasPrompt;       // `q` arrived (full variant only) and passed validation
+  bool promptDropped;   // `qc`: the budget dropped it
+  AgentPrompt prompt;
+};
+
+// Roughly 3 KB: never a local variable (loop and fetch task stacks are 8 KB).
 struct Payload {
   Card cards[MAX_CARDS];
   uint8_t nCards;
   bool valid;
+  AgentsData agents;
 };
+
+// The tile with this agent id, or nullptr.
+const AgentTile *agentsTile(const AgentsData &a, const char *id);
 
 Accent accentFromName(const char *name);
 
 // Maps the bridge's JSON onto a Payload. Shared by the firmware and the
 // desktop simulator so both exercise exactly the same parsing and defaults.
-// Returns false and writes a short reason into `err` if the payload is unusable.
+// Clears and fills `out` in place (it is too big for a stack); on failure
+// `out.valid` is false. Returns false and writes a short reason into `err` if the payload is unusable.
 bool payloadFromJson(const JsonDocument &doc, Payload &out, char *err, size_t errLen);

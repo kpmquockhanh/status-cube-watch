@@ -2,12 +2,14 @@ package cards
 
 import (
 	"encoding/json"
+	"fmt"
 	"os"
 	"reflect"
 	"testing"
 	"time"
 	_ "time/tzdata" // the golden cases need Asia/Ho_Chi_Minh on any machine
 
+	"claude-status-cube/bridge/internal/agents"
 	"claude-status-cube/bridge/internal/limits"
 	"claude-status-cube/bridge/internal/mail"
 	"claude-status-cube/bridge/internal/sources"
@@ -124,6 +126,24 @@ func TestGolden(t *testing.T) {
 				t.Errorf("%s / %s:\n got  %s\n want %s", file, c.Name, got, compact(c.Want))
 			}
 		}
+	}
+}
+
+// The firmware keeps at most MAX_CARDS = 8 cards and drops the rest silently,
+// so the longest deck the bridge can build must fit, Agents card included.
+func TestBuildCardCountFitsFirmware(t *testing.T) {
+	const firmwareMaxCards = 8
+	var list []agents.Agent
+	for i := range 8 {
+		list = append(list, agent(fmt.Sprintf("a%05d", i), fmt.Sprintf("proj%d", i), agents.Running, time.Minute))
+	}
+	o := Opts{Error: "boom", ExtraCards: true, Agents: list, ShowAgents: true, Full: true}
+	p := Build(budgetEvents(), o, agentsNow)
+	if len(p.Cards) > firmwareMaxCards {
+		t.Fatalf("%d cards, the firmware keeps %d", len(p.Cards), firmwareMaxCards)
+	}
+	if agentsCard(t, p) == nil {
+		t.Errorf("no Agents card in %d cards", len(p.Cards))
 	}
 }
 

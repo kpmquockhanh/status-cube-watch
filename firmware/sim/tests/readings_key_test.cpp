@@ -106,9 +106,65 @@ void testUnterminatedBufferStaysInBounds() {
   CHECK(readingsKey(p) == k);
 }
 
+// A deck with an Agents card (index 2) of two tiles and a prompt.
+Payload agentsDeck() {
+  Payload p = deck();
+  p.nCards = 3;
+  p.cards[2] = p.cards[1];
+  strcpy(p.cards[2].title, "AGENTS");
+  p.cards[2].agents = true;
+  AgentsData &a = p.agents;
+  a.present = true;
+  a.card = 2;
+  a.nTiles = 2;
+  strcpy(a.tiles[0].id, "a1");
+  a.tiles[0].kind = AgentKind::Wait;
+  strcpy(a.tiles[1].id, "a2");
+  a.tiles[1].kind = AgentKind::Run;
+  strcpy(a.tiles[1].line, "Edit +3");
+  strcpy(a.tiles[1].pose, "write");
+  a.hasPrompt = true;
+  strcpy(a.prompt.id, "p1");
+  return p;
+}
+
+void testReadingsIgnoreAgentChurn() {  // clocks and activity lines change by themselves
+  const uint32_t k = readingsKey(agentsDeck());
+  Payload p = agentsDeck();
+  strcpy(p.agents.tiles[1].line, "Edit +4");
+  strcpy(p.agents.tiles[1].pose, "bash");
+  p.agents.tiles[1].ctx = 77;
+  p.agents.tiles[1].unseen = true;
+  strcpy(p.agents.prompt.title, "another title");
+  CHECK(readingsKey(p) == k);
+}
+
+void testReadingsSeeAgentChange() {
+  const uint32_t k = readingsKey(agentsDeck());
+  Payload p = agentsDeck();
+  p.agents.tiles[1].kind = AgentKind::Idle;
+  CHECK(readingsKey(p) != k);
+  p = agentsDeck();
+  p.agents.nTiles = 1;
+  CHECK(readingsKey(p) != k);
+  p = agentsDeck();
+  strcpy(p.agents.prompt.id, "p2");
+  CHECK(readingsKey(p) != k);
+  p = agentsDeck();
+  p.agents.hasPrompt = false;
+  CHECK(readingsKey(p) != k);
+  p.agents.promptDropped = true;
+  CHECK(readingsKey(p) != readingsKey(agentsDeck()));
+  p = agentsDeck();
+  strcpy(p.agents.tiles[0].id, "zz");
+  CHECK(readingsKey(p) != k);
+}
+
 }  // namespace
 
 int main() {
+  testReadingsIgnoreAgentChurn();
+  testReadingsSeeAgentChange();
   testSamePayloadSameKey();
   testClockTextIsIgnored();
   testGaugesCount();

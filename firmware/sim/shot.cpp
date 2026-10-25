@@ -111,7 +111,7 @@ bool grab(Display &lcd, const char *path) {
 
 // The deck with no payload yet (bridge down, no Mac): the waiting card alone.
 void waitingShot(Display &lcd) {
-  const Payload none{};
+  static const Payload none{};
   for (int frame = 0; frame < 400; frame++) {
     uiRender(lcd, none, 0, false, 4000, batteryViewFromEnv(), linkFromEnv());
     if (!uiAnimating()) break;
@@ -163,7 +163,7 @@ bool volumeShot(Display &lcd, const char *state) {
   s.fromMac(m, 0);
   VolumeView vv = s.view();
   vv.pressed = pressed;
-  const Payload none{};
+  static const Payload none{};
   for (int frame = 0; frame < 400; frame++) {
     uiRender(lcd, none, uiVolumeIndex(none), true, 4000, batteryViewFromEnv(), linkFromEnv(), &vv);
     if (!uiAnimating()) break;
@@ -237,7 +237,7 @@ int render(bool *running) {
   }
 
   JsonDocument doc;
-  Payload payload{};
+  static Payload payload;
   const std::string text = slurp(g_json);
   char err[64] = "";
   if (deserializeJson(doc, text) != DeserializationError::Ok ||

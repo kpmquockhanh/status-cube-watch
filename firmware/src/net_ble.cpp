@@ -772,13 +772,15 @@ bool bleTake(Payload &out) {
     Serial.printf("[ble] json: %s\n", err.c_str());
     return false;
   }
-  Payload p{};
+  // Static scratch: a Payload is too big for the loop's stack, and a rejected
+  // one must not overwrite the caller's last good payload.
+  static Payload scratch;
   char why[64] = "";
-  if (!payloadFromJson(doc, p, why, sizeof(why))) {
+  if (!payloadFromJson(doc, scratch, why, sizeof(why))) {
     Serial.printf("[ble] payload rejected: %s\n", why);
     return false;
   }
-  out = p;
+  out = scratch;
   const uint32_t now = millis();
   g_lastGood = now ? now : 1;  // 0 means "never"
   return true;

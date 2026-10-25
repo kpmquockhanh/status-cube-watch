@@ -12,6 +12,13 @@
 // sub-line and legend row, which carry countdowns, projections and "active 3m
 // ago". All of those change with the clock alone and would keep the screen
 // awake. Accents follow the gauges, so they add nothing.
+//
+// The Agents part: how many tiles, each one's id and kind, which prompt is
+// open and whether the bridge dropped it. A new prompt, an agent starting or
+// finishing, or one turning from running to waiting is something to look at.
+// Left out: a tile's status line, pose, context and unseen flag, which move
+// as an agent works (and the pose follows the clock), and the prompt's text,
+// which its id already stands for.
 
 #include <stddef.h>
 #include <stdint.h>
@@ -40,5 +47,14 @@ inline uint32_t readingsKey(const Payload &p) {
     if (c.gauge == GAUGE_NONE) h = mixStr(h, c.value, sizeof(c.value));
     h = mixStr(h, c.mail, sizeof(c.mail));
   }
+  const AgentsData &a = p.agents;
+  h = mix(h, a.present);
+  h = mix(h, a.nTiles);
+  for (uint8_t i = 0; i < a.nTiles && i < AGENT_TILES; i++) {
+    h = mixStr(h, a.tiles[i].id, sizeof(a.tiles[i].id));
+    h = mix(h, (uint8_t)a.tiles[i].kind);
+  }
+  h = mixStr(h, a.hasPrompt ? a.prompt.id : "", sizeof(a.prompt.id));
+  h = mix(h, a.promptDropped);
   return h;
 }
