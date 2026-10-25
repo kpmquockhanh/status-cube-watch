@@ -242,7 +242,7 @@ function paintAgents(card, color) {
       `<div class="n">${esc(t.n)}</div><div class="crit"></div>${t.u ? '<span class="u"></span>' : ''}` +
       `<div class="l">${esc(t.l)}</div><div class="bar"><i style="width:${x}%"></i></div></div>`;
   }).join('');
-  const open = promptAgent && tiles.find((t) => t.i === promptAgent && t.k === 'wait');
+  const open = promptAgent && tiles.find((t) => String(t.i) === promptAgent && t.k === 'wait');
   if (promptAgent && !open) promptAgent = null; // gone or no longer waiting: close, as AgentView does
   if (!open) return;
   device.classList.add('prompting');
@@ -255,8 +255,8 @@ function paintAgents(card, color) {
     prompt.innerHTML = card.qc ? notice('too long for the cube', 'answer at the terminal') : notice('needs you', 'open on Bluetooth');
     return;
   }
-  if (q.i !== open.i) {
-    const other = tiles.find((t) => t.i === q.i);
+  if (String(q.i) !== String(open.i)) {
+    const other = tiles.find((t) => String(t.i) === String(q.i));
     prompt.innerHTML = notice('needs you', `answer ${esc(other ? other.n : 'the other agent')} first`);
     return;
   }
