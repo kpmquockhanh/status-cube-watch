@@ -14,23 +14,37 @@
 
 namespace {
 
-// --- palette -------------------------------------------------------------
-// Kept as RGB888 as well as 565 because the threshold crossfade interpolates
-// in 888 and converts once per frame; matches bridge/preview.html and the
-// design canvas so the mock, the simulator and the panel all agree.
+// --- theme ---------------------------------------------------------------
+// agents-deck's look (github.com/brushknight/agents-deck): a near-black ground,
+// warm ink, one orange accent, hairline panels with square corners, Roboto Mono
+// for names and values and Share Tech Mono for the small labels. The navigation
+// screens keep their own look (the nav section below).
+//
+// The payload's accent names, as RGB888 as well as 565 because the threshold
+// crossfade interpolates in 888 and converts once per frame; matches
+// bridge/preview.html so the mock, the simulator and the panel all agree.
 constexpr uint32_t RGB888[7] = {
-    0xE7ECF5,  // ink
-    0xFF8A5B,  // accent
-    0x5B9DFF,  // blue
-    0x46D08A,  // green
-    0xF5C451,  // amber
-    0xB18CFF,  // violet
-    0xFF6B6B,  // red
+    0xE8E4DC,  // ink
+    0xFF4D00,  // accent
+    0x6F8FD8,  // blue
+    0x6DBE6A,  // green
+    0xE8B94A,  // amber (agents-deck's yellow)
+    0xA68BD8,  // violet (agents-deck's purple)
+    0xFF4D00,  // red: agents-deck has one alarm colour, the accent
 };
 
+constexpr uint32_t BG_RGB = 0x0A0A0A;
+constexpr uint32_t PANEL_RGB = 0x141412;  // a lifted surface: the display panel
+constexpr uint32_t DIM_RGB = 0x7A776F;    // secondary text
+constexpr uint32_t LINE_RGB = 0x262622;   // hairlines, tracks, idle buttons
+constexpr uint32_t MUTED_RGB = 0x4A4842;  // a disabled glyph on LINE
+constexpr uint32_t EMPTY_RGB = 0x0B0B0B;  // an empty slot
+
 uint16_t g_palette[7];
-uint16_t DIM, FAINT, MUTED, INK, PANEL, ACC_DEV;
-constexpr uint16_t BG = 0x0000;
+uint16_t BG, PANEL, INK, DIM, LINE, ACCENT, EMPTY;
+// FAINT is LINE under its older name (the Agents card and prompt still use it
+// until they are restyled); MUTED a disabled glyph; ACC_DEV the panel's accent.
+uint16_t FAINT, MUTED, ACC_DEV;
 
 LGFX_Sprite g_canvas;
 bool g_sprite = false;
@@ -176,14 +190,19 @@ void present(Display &lcd) {
 }
 
 // --- text ----------------------------------------------------------------
-// Anti-aliased VLW fonts (Inter, rasterised by tools/gen_fonts.py). The built-in
+// Anti-aliased VLW fonts (rasterised by tools/gen_fonts.py). The built-in
 // Adafruit-GFX and Font0 faces are 1-bit and show stair-steps on this panel.
 // Each font is parsed once in uiBegin; the glyph bitmaps stay in flash.
 struct Vlw {
   lgfx::PointerWrapper data;
   lgfx::VLWfont font;
 };
-Vlw V_B44, V_B36, V_B30, V_B24, V_B18, V_S12, V_R17;
+// The theme: Share Tech Mono (RM) for labels, Roboto Mono Bold (RB) for names,
+// titles and values.
+Vlw V_RM11, V_RM13, V_RB14, V_RB18, V_RB24, V_RB30, V_RB40;
+// Inter: the navigation screens, and the Agents card and prompt until they
+// are restyled.
+Vlw V_B30, V_B24, V_B18, V_S12;
 // Navigation strings can carry Vietnamese letters: separate fonts so the shared
 // ones stay pixel-identical (accented glyphs raise a font's line height).
 Vlw V_B18V, V_S12V;
@@ -194,7 +213,7 @@ void loadVlw(Vlw &v, const uint8_t *blob, size_t len) {
 }
 
 // Tried largest first; the middle of a ring only has ~130x42px to give.
-Vlw *const VALUE_FONTS[] = {&V_B44, &V_B36, &V_B30, &V_B24, &V_B18};
+Vlw *const VALUE_FONTS[] = {&V_RB40, &V_RB30, &V_RB24, &V_RB18};
 
 typedef Vlw *ValueFont;
 
@@ -242,31 +261,37 @@ void drawFitted(LovyanGFX *g, const char *text, int cx, int cy, int maxW, int ma
 
 // The design sets its small labels in uppercase. No tracking, but the
 // uppercasing is most of the effect and costs a stack buffer.
+// `bg` is what the text sits on (BG unless on a panel).
 void drawCaps(LovyanGFX *g, const char *text, int x, int y, uint16_t color,
-              textdatum_t datum) {
+              textdatum_t datum, uint16_t bg) {
   char buf[48];
   size_t i = 0;
   for (; text[i] && i < sizeof(buf) - 1; i++) buf[i] = toupper((unsigned char)text[i]);
   buf[i] = '\0';
-  g->setFont(&V_S12.font);
+  g->setFont(&V_RM13.font);
   g->setTextDatum(datum);
-  g->setTextColor(color, BG);
+  g->setTextColor(color, bg);
   g->drawString(buf, x, y);
 }
 
+void drawCaps(LovyanGFX *g, const char *text, int x, int y, uint16_t color, textdatum_t datum) {
+  drawCaps(g, text, x, y, color, datum, BG);
+}
+
 int capsWidth(LovyanGFX *g, const char *text) {
-  g->setFont(&V_S12.font);
+  g->setFont(&V_RM13.font);
   return g->textWidth(text);
 }
 
 // --- chrome --------------------------------------------------------------
+// Page dots: small squares.
 void drawDots(LovyanGFX *g, uint8_t n, uint8_t active) {
   constexpr int Y = LCD_HEIGHT - 12;
   const int spacing = 11;
   const int total = (n - 1) * spacing;
   for (uint8_t i = 0; i < n; i++) {
     const int x = LCD_WIDTH / 2 - total / 2 + i * spacing;
-    g->fillCircle(x, Y, 2, i == active ? INK : FAINT);
+    g->fillRect(x - 2, Y - 2, 4, 4, i == active ? INK : LINE);
   }
 }
 
@@ -279,7 +304,7 @@ UiLink g_link = UiLink::None;
 void drawBattery(LovyanGFX *g, int leftX, int y, const BatteryView &bat) {
   const uint16_t col = bat.pct >= 40   ? g_palette[ACC_GREEN]
                        : bat.pct >= 15 ? g_palette[ACC_AMBER]
-                                       : g_palette[ACC_RED];
+                                       : ACCENT;
   constexpr int BODY_W = 14, BODY_H = 8, NUB_W = 2, GAP = 4;
   g->drawRect(leftX, y - BODY_H / 2, BODY_W, BODY_H, DIM);
   g->fillRect(leftX + BODY_W, y - 2, NUB_W, 5, DIM);
@@ -290,7 +315,7 @@ void drawBattery(LovyanGFX *g, int leftX, int y, const BatteryView &bat) {
 
   char txt[8];
   snprintf(txt, sizeof(txt), "%u%%", (unsigned)bat.pct);
-  g->setFont(&V_S12.font);
+  g->setFont(&V_RM13.font);
   g->setTextDatum(middle_left);
   g->setTextColor(col, BG);
   const int textX = leftX + BODY_W + NUB_W + GAP;
@@ -310,12 +335,13 @@ void drawTopBar(LovyanGFX *g, bool online, uint32_t ageMs, const BatteryView &ba
   const uint32_t s = ageMs / 1000;
   ageLabel(right, sizeof(right), online, s);
 
-  const uint16_t col = online && s < 30 ? g_palette[ACC_GREEN] : g_palette[ACC_RED];
-  g->setFont(&V_S12.font);
+  // Fresh: ink; stale or offline: the accent.
+  const uint16_t col = online && s < 30 ? INK : ACCENT;
+  g->setFont(&V_RM13.font);
   g->setTextDatum(middle_right);
   g->setTextColor(col, BG);
   g->drawString(right, LCD_WIDTH - 46, Y);
-  g->fillCircle(LCD_WIDTH - 36, Y, 3, col);
+  g->fillRect(LCD_WIDTH - 39, Y - 3, 6, 6, col);
 
   drawBattery(g, LEFT_X, Y, bat);
 
@@ -326,7 +352,7 @@ void drawTopBar(LovyanGFX *g, bool online, uint32_t ageMs, const BatteryView &ba
   if (g->textWidth("OFF") > ageW) ageW = g->textWidth("OFF");
   const int linkRight = LCD_WIDTH - 46 - ageW - 8;
   if (online && g_link != UiLink::None) {
-    g->setFont(&V_S12.font);
+    g->setFont(&V_RM13.font);
     g->setTextDatum(middle_right);
     g->setTextColor(DIM, BG);
     g->drawString(g_link == UiLink::Ble ? "BLE" : "WIFI", linkRight, Y);
@@ -350,7 +376,7 @@ struct RingPx {
   int16_t d;       // degrees clockwise from the arc start, x16
   uint8_t covNo;   // the same coverage with the notches left out, for rings without thresholds
 };
-constexpr uint32_t RING_TRACK = 0x2A3242;
+constexpr uint32_t RING_TRACK = LINE_RGB;
 
 // One precomputed ring: its radii and the pixels they cover.
 struct RingTable {
@@ -364,10 +390,10 @@ RingTable g_ringInner = {RING2_R_OUT, RING2_R_IN, nullptr, 0};
 
 float clamp01(float v) { return v < 0.0f ? 0.0f : (v > 1.0f ? 1.0f : v); }
 
+// `rgb` at coverage `scale` over the background, as byte-swapped 565.
 uint16_t pack565(uint32_t rgb, float scale) {
-  return __builtin_bswap16(lgfx::color565((uint8_t)(((rgb >> 16) & 0xFF) * scale),
-                                          (uint8_t)(((rgb >> 8) & 0xFF) * scale),
-                                          (uint8_t)((rgb & 0xFF) * scale)));
+  const uint32_t c = lerpRgb(BG_RGB, rgb, scale);
+  return __builtin_bswap16(lgfx::color565((c >> 16) & 0xFF, (c >> 8) & 0xFF, c & 0xFF));
 }
 
 // The bare track at each coverage, for rings drawn without notches: their
@@ -502,7 +528,7 @@ void drawGaugeCard(LovyanGFX *g, const Card &card, uint32_t rgb,
   drawRing(g, g_ringOuter, a.shown, shownRgb, hasReading, true);
 
   // Inside the ring, in the size the whole deck agreed on.
-  drawIn(g, valueFont, card.value, RING_CX, VALUE_CY, hasReading ? INK : FAINT);
+  drawIn(g, valueFont, card.value, RING_CX, VALUE_CY, hasReading ? INK : MUTED);
   if (card.sub1[0]) drawCaps(g, card.sub1, RING_CX, CAPTION_Y, DIM, top_center);
 
   // In the gap at the bottom: "14%  OF 5H LIMIT", laid out as one centred run
@@ -510,13 +536,13 @@ void drawGaugeCard(LovyanGFX *g, const Card &card, uint32_t rgb,
   if (hasReading) {
     char pct[8];
     snprintf(pct, sizeof(pct), "%d%%", (int)lroundf(a.shown));
-    g->setFont(&V_B18.font);
+    g->setFont(&V_RB18.font);
     const int wPct = g->textWidth(pct);
     const int wLab = card.sub2[0] ? capsWidth(g, card.sub2) : 0;
     const int gap = wLab ? 6 : 0;
     const int x0 = RING_CX - (wPct + gap + wLab) / 2;
 
-    g->setFont(&V_B18.font);
+    g->setFont(&V_RB18.font);
     g->setTextDatum(middle_left);
     g->setTextColor(to565(shownRgb), BG);
     g->drawString(pct, x0, PCT_Y);
@@ -543,15 +569,15 @@ constexpr int ROW_LEFT = 34;
 constexpr int ROW_RIGHT = LCD_WIDTH - 34;
 
 void drawEnvelope(LovyanGFX *g, int x, int y, uint16_t col) {
-  g->drawRoundRect(x, y, 16, 11, 2, col);
+  g->drawRect(x, y, 16, 11, col);
   g->drawLine(x + 2, y + 2, x + 8, y + 6, col);  // flap
   g->drawLine(x + 13, y + 2, x + 8, y + 6, col);
 }
 
 void drawLegendRow(LovyanGFX *g, const LegendRow &row, int y, uint32_t swatch) {
-  g->fillRoundRect(ROW_LEFT, y - 3, 7, 7, 2, to565(swatch));
+  g->fillRect(ROW_LEFT, y - 3, 7, 7, to565(swatch));
   drawCaps(g, row.key, ROW_LEFT + 13, y, DIM, middle_left);
-  g->setFont(&V_B18.font);
+  g->setFont(&V_RB18.font);
   g->setTextDatum(middle_left);
   g->setTextColor(INK, BG);
   g->drawString(row.pct, ROW_LEFT + 38, y);
@@ -571,12 +597,12 @@ void drawDualCard(LovyanGFX *g, const Card &card, GaugeAnim &outer, GaugeAnim &i
   drawRing(g, g_ringInner, inner.shown, rgb2, has2, true);
 
   const ValueFont vf = fitFont(g, card.value, DUAL_VALUE_MAX_W, DUAL_VALUE_MAX_H);
-  drawIn(g, vf, card.value, RING_CX, DUAL_VALUE_CY, has1 ? INK : FAINT);
+  drawIn(g, vf, card.value, RING_CX, DUAL_VALUE_CY, has1 ? INK : MUTED);
   if (card.sub1[0]) drawCaps(g, card.sub1, RING_CX, DUAL_CAPTION_Y, DIM, top_center);
 
   if (card.mail[0]) {
     const uint16_t col = to565(RGB888[card.mailColor % 7]);
-    g->setFont(&V_B18.font);
+    g->setFont(&V_RB18.font);
     const int run = 16 + 6 + g->textWidth(card.mail);
     const int x0 = RING_CX - run / 2;
     drawEnvelope(g, x0, MAIL_CY - 5, col);
@@ -599,7 +625,7 @@ void drawTextCard(LovyanGFX *g, const Payload &p, const Card &card, uint16_t col
   drawCaps(g, card.title, LCD_WIDTH / 2, 60, DIM, top_center);
   drawFitted(g, card.value, LCD_WIDTH / 2, 145, LCD_WIDTH - 20, 96, color);
 
-  g->setFont(&V_R17.font);
+  g->setFont(&V_RB14.font);
   g->setTextDatum(top_center);
   g->setTextColor(INK, BG);
   g->drawString(card.sub1, LCD_WIDTH / 2, 202);
@@ -612,7 +638,7 @@ void drawTextCard(LovyanGFX *g, const Payload &p, const Card &card, uint16_t col
 // no Mac yet), so the deck is never empty.
 void drawWaitingCard(LovyanGFX *g, bool online, uint32_t ageMs, const BatteryView &bat) {
   drawTopBar(g, online, ageMs, bat);
-  g->setFont(&V_B24.font);
+  g->setFont(&V_RB24.font);
   g->setTextDatum(middle_center);
   g->setTextColor(INK, BG);
   g->drawString("No data yet", LCD_WIDTH / 2, LCD_HEIGHT / 2 - 10);
@@ -625,8 +651,8 @@ void drawWaitingCard(LovyanGFX *g, bool online, uint32_t ageMs, const BatteryVie
 // fills from the bottom; under both a full-width row of the previous /
 // play-pause / next media keys. A tap on the number mutes.
 // volume_slider.h owns the geometry, shared with the hit-testing.
-constexpr uint32_t VOL_FILL = 0xE8ECF2;  // live: near-white, the one bright thing on the card
-constexpr uint32_t VOL_OFF = 0x4A5366;   // muted, or an output that sets its own level (HDMI)
+constexpr uint32_t VOL_FILL = 0xE8E4DC;  // live: ink, the one bright thing on the card
+constexpr uint32_t VOL_OFF = MUTED_RGB;  // muted, or an output that sets its own level (HDMI)
 constexpr int VOL_COL_X = 24;            // the left column
 constexpr int VOL_TEXT_MAX_W = VOL_BAR_X - VOL_COL_X - 16;
 constexpr int VOL_NAME_Y = 62;
@@ -659,7 +685,7 @@ void volumeLabel(LovyanGFX *g, const char *name, char *l1, char *l2, size_t cap)
   l1[n] = '\0';
   l2[0] = '\0';
   if (!n) snprintf(l1, cap, "MAC VOLUME");
-  g->setFont(&V_S12.font);
+  g->setFont(&V_RM13.font);
   if (g->textWidth(l1) <= VOL_TEXT_MAX_W) return;
   // The last space whose prefix fits ends the first line.
   for (size_t i = strlen(l1); i > 0; i--) {
@@ -708,15 +734,16 @@ void drawPlayPause(LovyanGFX *g, int cx, int cy, int8_t playing, uint16_t col) {
   }
 }
 
-// The button row: previous, play/pause (on a disc: the main action) and next,
-// one per equal zone. A pressed button lights its disc for VOLUME_PRESS_MS.
+// The button row: previous, play/pause (on a square: the main action) and next,
+// one per equal zone. A pressed button lights its square for VOLUME_PRESS_MS.
 void drawVolumeRow(LovyanGFX *g, const VolumeView &v) {
-  constexpr int DISC_R = 27;
+  constexpr int DISC_R = 27;  // half the square's side
   const uint16_t ink = v.state != VolState::NoMac ? INK : MUTED;
   const int8_t p = v.pressed;
-  if (p == (int8_t)MediaKey::Previous) g->fillSmoothCircle(VOL_PREV_CX, VOL_ROW_Y, DISC_R, FAINT);
-  if (p == (int8_t)MediaKey::Next) g->fillSmoothCircle(VOL_NEXT_CX, VOL_ROW_Y, DISC_R, FAINT);
-  g->fillSmoothCircle(VOL_PLAY_CX, VOL_ROW_Y, DISC_R, p == (int8_t)MediaKey::PlayPause ? MUTED : FAINT);
+  if (p == (int8_t)MediaKey::Previous) g->fillRect(VOL_PREV_CX - DISC_R, VOL_ROW_Y - DISC_R, 2 * DISC_R, 2 * DISC_R, LINE);
+  if (p == (int8_t)MediaKey::Next) g->fillRect(VOL_NEXT_CX - DISC_R, VOL_ROW_Y - DISC_R, 2 * DISC_R, 2 * DISC_R, LINE);
+  g->fillRect(VOL_PLAY_CX - DISC_R, VOL_ROW_Y - DISC_R, 2 * DISC_R, 2 * DISC_R,
+              p == (int8_t)MediaKey::PlayPause ? MUTED : LINE);
   drawSkip(g, VOL_PREV_CX, VOL_ROW_Y, -1, ink);
   drawPlayPause(g, VOL_PLAY_CX, VOL_ROW_Y, v.playing, ink);
   drawSkip(g, VOL_NEXT_CX, VOL_ROW_Y, 1, ink);
@@ -744,17 +771,14 @@ void drawVolumeCard(LovyanGFX *g, const VolumeView &v, bool online, uint32_t age
   const int edge = volumeFillTop(shown);
   const int bottom = VOL_BAR_Y + VOL_BAR_H;
 
-  g->fillSmoothRoundRect(VOL_BAR_X, VOL_BAR_Y, VOL_BAR_W, VOL_BAR_H, VOL_BAR_R, to565(RING_TRACK));
-  if (edge < bottom) {
-    // The same capsule clipped to below the edge: round ends at any level.
-    g->setClipRect(VOL_BAR_X, edge, VOL_BAR_W, bottom - edge);
-    g->fillSmoothRoundRect(VOL_BAR_X, VOL_BAR_Y, VOL_BAR_W, VOL_BAR_H, VOL_BAR_R, to565(shownRgb));
-    g->clearClipRect();
-  }
+  // A square bar (volume_slider.h's VOL_BAR_R is no longer drawn): the track, then
+  // the fill from the bottom up to the edge.
+  g->fillRect(VOL_BAR_X, VOL_BAR_Y, VOL_BAR_W, VOL_BAR_H, LINE);
+  if (edge < bottom) g->fillRect(VOL_BAR_X, edge, VOL_BAR_W, bottom - edge, to565(shownRgb));
 
   char l1[32], l2[32];
   volumeLabel(g, v.name, l1, l2, sizeof(l1));
-  g->setFont(&V_S12.font);
+  g->setFont(&V_RM13.font);
   g->setTextDatum(baseline_left);
   g->setTextColor(DIM, BG);
   g->drawString(l1, VOL_COL_X, VOL_NAME_Y);
@@ -763,12 +787,12 @@ void drawVolumeCard(LovyanGFX *g, const VolumeView &v, bool online, uint32_t age
   char num[8];
   if (live) snprintf(num, sizeof(num), "%u", (unsigned)v.level);
   else snprintf(num, sizeof(num), "--");
-  g->setFont(&V_B44.font);
+  g->setFont(&V_RB40.font);
   g->setTextColor(live && !v.muted ? INK : MUTED, BG);
   g->drawString(num, VOL_COL_X, VOL_NUM_Y);
   if (live) {
     const int w = g->textWidth(num);
-    g->setFont(&V_B18.font);
+    g->setFont(&V_RB18.font);
     g->setTextColor(v.muted ? MUTED : DIM, BG);
     g->drawString("%", VOL_COL_X + w + 2, VOL_NUM_Y);
   }
@@ -785,16 +809,15 @@ void drawVolumeCard(LovyanGFX *g, const VolumeView &v, bool online, uint32_t age
 }
 
 // --- the settings sheets -----------------------------------------------------
-// The display panel drops from the top as a sheet: a lifted background with
-// rounded corners on its bottom edge, a grab handle there, an icon + title,
-// hairline-divided rows of  LABEL over value ... ( - ) ( + ),  and a RESET / DONE
+// The display panel drops from the top as a sheet: a lifted, square-cornered
+// panel with a grab handle at its bottom edge, an icon + title,
+// hairline-divided rows of  LABEL over value ... [ - ] [ + ],  and a RESET / DONE
 // bar. Geometry comes from editor_layout.cpp so drawing and hit-testing agree.
 constexpr int STEP_R = 17;      // stepper circle radius, centred in its touch zone
 constexpr int ROW_PAD = 14;     // side inset of the labels and dividers
 constexpr int SW_W = 36;        // a row's on/off switch, right-aligned in the row's lead
 constexpr int SW_H = 20;
 constexpr int SW_GAP = 10;      // between the switch and the minus button
-constexpr int SHEET_R = LCD_CORNER_R;  // matches the glass, so the sheet sits flush at rest
 
 // What one row shows. `meterPct` -1 = no meter; `sw` -1 = no switch, else off/on.
 // A stepper that would not change anything (at a limit, or the row is off) is
@@ -810,17 +833,17 @@ struct SheetRow {
 void drawStepper(LovyanGFX *g, const EditRect &zone, int yOff, bool plus, bool enabled) {
   const int cx = zone.x + zone.w / 2;
   const int cy = zone.y + zone.h / 2 + yOff;
-  g->fillSmoothCircle(cx, cy, STEP_R, FAINT);
+  g->fillRect(cx - STEP_R, cy - STEP_R, 2 * STEP_R + 1, 2 * STEP_R + 1, LINE);
   const uint16_t ink = enabled ? INK : MUTED;
   g->fillRect(cx - 6, cy - 1, 13, 3, ink);
   if (plus) g->fillRect(cx - 1, cy - 6, 3, 13, ink);
 }
 
 void drawSwitch(LovyanGFX *g, int x, int cy, bool on, uint16_t accent) {
-  constexpr int KNOB_R = SW_H / 2 - 3;
-  g->fillSmoothRoundRect(x, cy - SW_H / 2, SW_W, SW_H, SW_H / 2, on ? accent : FAINT);
-  const int kx = on ? x + SW_W - SW_H / 2 : x + SW_H / 2;
-  g->fillSmoothCircle(kx, cy, KNOB_R, on ? INK : DIM);
+  constexpr int KNOB = SW_H - 6;
+  g->fillRect(x, cy - SW_H / 2, SW_W, SW_H, on ? accent : LINE);
+  const int kx = on ? x + SW_W - 3 - KNOB : x + 3;
+  g->fillRect(kx, cy - KNOB / 2, KNOB, KNOB, on ? INK : DIM);
 }
 
 // "15 min" as a bold number and a small unit on one baseline; a value with no
@@ -830,13 +853,13 @@ void drawSheetValue(LovyanGFX *g, const char *value, int x, int baseline, uint16
   size_t n = 0;
   for (; value[n] && value[n] != ' ' && n < sizeof(num) - 1; n++) num[n] = value[n];
   num[n] = '\0';
-  g->setFont(&V_B18.font);
+  g->setFont(&V_RB18.font);
   g->setTextDatum(baseline_left);
   g->setTextColor(color, PANEL);
   g->drawString(num, x, baseline);
   if (value[n] == ' ') {
     const int w = g->textWidth(num);
-    g->setFont(&V_S12.font);
+    g->setFont(&V_RM13.font);
     g->setTextColor(DIM, PANEL);
     g->drawString(value + n + 1, x + w + 3, baseline);
   }
@@ -849,15 +872,15 @@ void drawSheetRow(LovyanGFX *g, int r, const SheetRow &row, uint16_t accent, int
   const EditRect box = editorRow(r);
   const int top = box.y + yOff;
   const int cy = top + box.h / 2;
-  if (r > 0) g->drawFastHLine(ROW_PAD, top, LCD_WIDTH - 2 * ROW_PAD, FAINT);
-  drawCaps(g, row.label, ROW_PAD, cy - 5, DIM, baseline_left);
+  if (r > 0) g->drawFastHLine(ROW_PAD, top, LCD_WIDTH - 2 * ROW_PAD, LINE);
+  drawCaps(g, row.label, ROW_PAD, cy - 5, DIM, baseline_left, PANEL);
   const bool on = row.sw != 0;
   drawSheetValue(g, row.value, ROW_PAD, cy + 14, on ? INK : DIM);
   if (row.meterPct >= 0) {
     constexpr int MX = ROW_PAD + 54, MW = 56;  // clear of "100%"
-    g->fillSmoothRoundRect(MX, cy + 7, MW, 4, 2, FAINT);
+    g->fillRect(MX, cy + 7, MW, 4, LINE);
     const int fill = MW * row.meterPct / 100;
-    if (fill > 0) g->fillSmoothRoundRect(MX, cy + 7, fill < 4 ? 4 : fill, 4, 2, accent);
+    if (fill > 0) g->fillRect(MX, cy + 7, fill, 4, accent);
   }
   if (row.sw >= 0) {
     const EditRect lead = editorLead(r);
@@ -872,24 +895,24 @@ void drawSheetBar(LovyanGFX *g, uint16_t accent, int yOff) {
   const EditRect reset = editorResetBtn();
   const EditRect done = editorDoneBtn();
   const int h = reset.h - 2 * INSET;
-  g->fillSmoothRoundRect(reset.x, reset.y + INSET + yOff, reset.w, h, h / 2, FAINT);
-  g->fillSmoothRoundRect(done.x, done.y + INSET + yOff, done.w, h, h / 2, accent);
-  g->setFont(&V_B18.font);
+  g->fillRect(reset.x, reset.y + INSET + yOff, reset.w, h, LINE);
+  g->fillRect(done.x, done.y + INSET + yOff, done.w, h, accent);
+  g->setFont(&V_RB18.font);
   g->setTextDatum(middle_center);
-  g->setTextColor(INK, FAINT);
+  g->setTextColor(INK, LINE);
   g->drawString("RESET", reset.x + reset.w / 2, reset.y + reset.h / 2 + yOff);
   g->setTextColor(BG, accent);
   g->drawString("DONE", done.x + done.w / 2, done.y + done.h / 2 + yOff);
 }
 
 // The sheet body, `yOff` px from its resting place so it can slide (negative:
-// still partly above the screen). The outline is only drawn while sliding: at
-// rest the sheet is the whole screen and the glass supplies the corners, so an
-// arc of our own radius could only disagree with the bezel.
+// still partly above the screen). Square: at rest the sheet is the whole screen
+// and the glass supplies the corners; the bottom hairline is only drawn while
+// sliding.
 void drawSheetFrame(LovyanGFX *g, int yOff) {
-  g->fillRoundRect(0, yOff - SHEET_R - 2, LCD_WIDTH, LCD_HEIGHT + SHEET_R + 2, SHEET_R, PANEL);
-  if (yOff) g->drawRoundRect(0, yOff - SHEET_R - 2, LCD_WIDTH, LCD_HEIGHT + SHEET_R + 2, SHEET_R, FAINT);
-  g->fillRoundRect(LCD_WIDTH / 2 - 16, yOff + LCD_HEIGHT - 8, 32, 4, 2, FAINT);
+  g->fillRect(0, yOff, LCD_WIDTH, LCD_HEIGHT, PANEL);
+  if (yOff) g->drawFastHLine(0, yOff + LCD_HEIGHT - 1, LCD_WIDTH, LINE);
+  g->fillRect(LCD_WIDTH / 2 - 16, yOff + LCD_HEIGHT - 8, 32, 4, LINE);
 }
 
 // The title with a sun icon in front.
@@ -902,7 +925,7 @@ void drawSheetTitle(LovyanGFX *g, const char *title, uint16_t accent, int yOff) 
     g->drawLine(IX + (int)lroundf(cosf(a) * 6.5f), cy + (int)lroundf(sinf(a) * 6.5f),
                 IX + (int)lroundf(cosf(a) * 8.5f), cy + (int)lroundf(sinf(a) * 8.5f), accent);
   }
-  g->setFont(&V_B18.font);
+  g->setFont(&V_RB18.font);
   g->setTextDatum(middle_left);
   g->setTextColor(accent, PANEL);
   char buf[16];
@@ -1298,23 +1321,31 @@ void drawPromptNotice(LovyanGFX *g, const char *big, const char *small, uint32_t
 
 void uiBegin(Display &) {
   for (int i = 0; i < 7; i++) g_palette[i] = to565(RGB888[i]);
+  BG = to565(BG_RGB);
+  PANEL = to565(PANEL_RGB);
   INK = g_palette[ACC_INK];
-  DIM = to565(0x7C8598);
-  FAINT = to565(0x2A3242);
-  MUTED = to565(0x4A5366);  // a disabled glyph on FAINT
-  PANEL = BG;  // drawCaps paints text on BG, so the sheet shares it
-  ACC_DEV = to565(0x4DA3FF);   // sky
+  DIM = to565(DIM_RGB);
+  LINE = to565(LINE_RGB);
+  ACCENT = g_palette[ACC_ACCENT];
+  EMPTY = to565(EMPTY_RGB);
+  FAINT = LINE;
+  MUTED = to565(MUTED_RGB);
+  ACC_DEV = ACCENT;
 
   // 240x280x16bpp is 134 KB. It fits in internal RAM on an S3 and is much
   // faster there than in PSRAM, so try internal first and fall back to
   // drawing straight to the panel if the allocation fails.
-  loadVlw(V_B44, font_b44, sizeof(font_b44));
-  loadVlw(V_B36, font_b36, sizeof(font_b36));
+  loadVlw(V_RM11, font_rm11, sizeof(font_rm11));
+  loadVlw(V_RM13, font_rm13, sizeof(font_rm13));
+  loadVlw(V_RB14, font_rb14, sizeof(font_rb14));
+  loadVlw(V_RB18, font_rb18, sizeof(font_rb18));
+  loadVlw(V_RB24, font_rb24, sizeof(font_rb24));
+  loadVlw(V_RB30, font_rb30, sizeof(font_rb30));
+  loadVlw(V_RB40, font_rb40, sizeof(font_rb40));
   loadVlw(V_B30, font_b30, sizeof(font_b30));
   loadVlw(V_B24, font_b24, sizeof(font_b24));
   loadVlw(V_B18, font_b18, sizeof(font_b18));
   loadVlw(V_S12, font_s12, sizeof(font_s12));
-  loadVlw(V_R17, font_r17, sizeof(font_r17));
   loadVlw(V_B18V, font_b18v, sizeof(font_b18v));
   loadVlw(V_S12V, font_s12v, sizeof(font_s12v));
 
@@ -1417,10 +1448,10 @@ void uiMessage(Display &lcd, const char *title, const char *body) {
   LovyanGFX *g = target(lcd);
   g->fillScreen(BG);
   g->setTextDatum(middle_center);
-  g->setFont(&V_B24.font);
-  g->setTextColor(g_palette[ACC_ACCENT], BG);
+  g->setFont(&V_RB24.font);
+  g->setTextColor(ACCENT, BG);
   g->drawString(title, LCD_WIDTH / 2, LCD_HEIGHT / 2 - 16);
-  g->setFont(&V_S12.font);
+  g->setFont(&V_RM13.font);
   g->setTextColor(DIM, BG);
   g->drawString(body, LCD_WIDTH / 2, LCD_HEIGHT / 2 + 12);
   present(lcd);
@@ -1430,7 +1461,7 @@ void uiPortal(Display &lcd, const char *apName, const char *apIp, const char *la
   LovyanGFX *g = target(lcd);
   g->fillScreen(BG);
 
-  drawCaps(g, "WiFi setup", LCD_WIDTH / 2, 30, g_palette[ACC_ACCENT], middle_center);
+  drawCaps(g, "WiFi setup", LCD_WIDTH / 2, 30, ACCENT, middle_center);
 
   // A WiFi QR: phones offer to join the (open) network when it is scanned.
   // Version 3 is 29 modules, so 116px is a whole 4px per module. The white
@@ -1440,16 +1471,16 @@ void uiPortal(Display &lcd, const char *apName, const char *apIp, const char *la
   constexpr int QR = 116;
   const int qx = (LCD_WIDTH - QR) / 2;
   const int qy = 50;
-  g->fillRoundRect(qx - 6, qy - 6, QR + 12, QR + 12, 6, (uint16_t)0xFFFF);
+  g->fillRect(qx - 6, qy - 6, QR + 12, QR + 12, (uint16_t)0xFFFF);
   g->qrcode(join, qx, qy, QR, 3);
 
-  g->setFont(&V_B18.font);
+  g->setFont(&V_RB18.font);
   g->setTextDatum(middle_center);
   g->setTextColor(INK, BG);
   g->drawString(apName, LCD_WIDTH / 2, 190);
 
   drawCaps(g, "Join, then open", LCD_WIDTH / 2, 214, DIM, middle_center);
-  g->setFont(&V_S12.font);
+  g->setFont(&V_RM13.font);
   g->setTextColor(DIM, BG);
   g->drawString(apIp, LCD_WIDTH / 2, 234);
   if (lanIp && lanIp[0]) {
@@ -1465,24 +1496,24 @@ void uiBlePair(Display &lcd, uint32_t passkey) {
   g_animating = false;  // a static screen: a sweep cut short must not keep main.cpp drawing
   LovyanGFX *g = target(lcd);
   g->fillScreen(BG);
-  drawCaps(g, "Pair with Mac", LCD_WIDTH / 2, 40, g_palette[ACC_ACCENT], middle_center);
+  drawCaps(g, "Pair with Mac", LCD_WIDTH / 2, 40, ACCENT, middle_center);
 
   g->setTextDatum(middle_center);
   if (passkey) {
     char code[8];
     snprintf(code, sizeof(code), "%06u", (unsigned)passkey);
-    g->setFont(&V_B24.font);
+    g->setFont(&V_RB30.font);
     g->setTextColor(INK, BG);
     g->drawString(code, LCD_WIDTH / 2, 118);
     drawCaps(g, "Type this on your Mac", LCD_WIDTH / 2, 156, DIM, middle_center);
   } else {
-    g->setFont(&V_B18.font);
+    g->setFont(&V_RB18.font);
     g->setTextColor(INK, BG);
     g->drawString("Waiting for a Mac", LCD_WIDTH / 2, 112);
     drawCaps(g, "Open Claude Cube Link", LCD_WIDTH / 2, 150, DIM, middle_center);
   }
 
-  g->setFont(&V_S12.font);
+  g->setFont(&V_RM13.font);
   g->setTextColor(DIM, BG);
   g->drawString("Stuck? Forget Claude Cube", LCD_WIDTH / 2, 226);
   g->drawString("in Mac Bluetooth settings", LCD_WIDTH / 2, 244);
@@ -1494,7 +1525,7 @@ void uiUnlock(Display &lcd, bool waiting) {
   g_animating = false;
   LovyanGFX *g = target(lcd);
   g->fillScreen(BG);
-  const uint16_t col = waiting ? DIM : g_palette[ACC_ACCENT];
+  const uint16_t col = waiting ? DIM : ACCENT;
 
   // A padlock: the shackle is a ring with its lower half cut away, plus legs
   // down into the body. While waiting it is lifted and the right leg is free.
@@ -1505,12 +1536,12 @@ void uiUnlock(Display &lcd, bool waiting) {
   g->fillRect(CX - 25, sy, 50, 26, BG);
   g->fillRect(CX - 24, sy, 8, BODY_Y - sy, col);
   if (!waiting) g->fillRect(CX + 16, sy, 8, BODY_Y - sy, col);
-  g->fillSmoothRoundRect(CX - BODY_W / 2, BODY_Y, BODY_W, BODY_H, 9, col);
+  g->fillRect(CX - BODY_W / 2, BODY_Y, BODY_W, BODY_H, col);
   g->fillSmoothCircle(CX, BODY_Y + 20, 6, BG);
   g->fillRect(CX - 2, BODY_Y + 22, 5, 14, BG);
 
   g->setTextDatum(middle_center);
-  g->setFont(&V_B24.font);
+  g->setFont(&V_RB24.font);
   g->setTextColor(INK, BG);
   g->drawString(waiting ? "Unlocking" : "Tap to unlock", CX, 186);
   drawCaps(g, waiting ? "Check your Mac" : "Your Mac is locked", CX, 214, DIM, middle_center);
@@ -1563,7 +1594,18 @@ PromptLayout uiPromptLayout(const AgentPrompt &q, ButtonsOff off) {
 }
 
 // --- navigation ----------------------------------------------------------------
+// The ride keeps its own look: the colours below shadow the theme's inside
+// `nav`, and the map uses the Inter fonts.
 namespace {
+namespace nav {
+
+const uint16_t BG = 0x0000;
+const uint16_t INK = to565(0xE7ECF5);
+const uint16_t DIM = to565(0x7C8598);
+const uint16_t MUTED = to565(0x4A5366);
+const uint16_t AMBER = to565(0xF5C451);
+const uint16_t RED = to565(0xFF6B6B);
+const uint16_t ACCENT = to565(0xFF8A5B);
 
 constexpr uint32_t NAV_STREET_RGB[4] = {0x59606F, 0x4A5263, 0x3A4152, 0x2A3040};
 constexpr int NAV_STREET_W[4] = {7, 5, 3, 2};
@@ -1717,7 +1759,7 @@ void drawNavBottom(LovyanGFX *g, const NavScene &s) {
 
 void drawNavArrived(LovyanGFX *g, const NavScene &s) {
   const int cx = LCD_WIDTH / 2, cy = 92;
-  const uint16_t acc = g_palette[ACC_ACCENT];
+  const uint16_t acc = ACCENT;
   g->fillSmoothCircle(cx, cy, 50, acc);
   g->fillSmoothCircle(cx, cy, 42, BG);
   const NavPoint chk[3] = {{(int16_t)(cx - 20), (int16_t)(cy + 2)}, {(int16_t)(cx - 6), (int16_t)(cy + 16)}, {(int16_t)(cx + 22), (int16_t)(cy - 16)}};
@@ -1745,14 +1787,11 @@ void drawNavArrived(LovyanGFX *g, const NavScene &s) {
   }
 }
 
-}  // namespace
-
-void uiNav(Display &lcd, const NavScene &s, bool phoneLost, const BatteryView &bat, int16_t panX, int16_t panY) {
-  g_animating = false;
+void draw(Display &lcd, const NavScene &s, bool phoneLost, const BatteryView &bat, int16_t panX, int16_t panY) {
   LovyanGFX *g = target(lcd);
   g->fillScreen(BG);
   const bool lowBat = !bat.onUsb && bat.pct < 15;
-  const uint16_t amber = g_palette[ACC_AMBER];
+  const uint16_t amber = AMBER;
 
   if (s.state == NavState::Arrived) {
     drawNavArrived(g, s);
@@ -1826,10 +1865,18 @@ void uiNav(Display &lcd, const NavScene &s, bool phoneLost, const BatteryView &b
     const bool arrived = s.state == NavState::Arrived;
     g->setFont(&V_S12V.font);
     g->setTextDatum(middle_right);
-    g->setTextColor(g_palette[ACC_RED], arrived ? BG : to565(0x0B0D12));
+    g->setTextColor(RED, arrived ? BG : to565(0x0B0D12));
     g->drawString(txt, 232, phoneLost && !arrived ? 28 : 12);
   }
   present(lcd);
+}
+
+}  // namespace nav
+}  // namespace
+
+void uiNav(Display &lcd, const NavScene &s, bool phoneLost, const BatteryView &bat, int16_t panX, int16_t panY) {
+  g_animating = false;
+  nav::draw(lcd, s, phoneLost, bat, panX, panY);
 }
 
 void uiOta(Display &lcd, uint8_t percent) {
@@ -1837,17 +1884,16 @@ void uiOta(Display &lcd, uint8_t percent) {
   g->fillScreen(BG);
 
   constexpr int W = 160, H = 8, X = (LCD_WIDTH - W) / 2, Y = 150;
-  drawCaps(g, "Updating", LCD_WIDTH / 2, 100, g_palette[ACC_ACCENT], middle_center);
+  drawCaps(g, "Updating", LCD_WIDTH / 2, 100, ACCENT, middle_center);
 
-  g->fillRoundRect(X, Y, W, H, H / 2, FAINT);
+  g->fillRect(X, Y, W, H, LINE);
   const int pct = percent > 100 ? 100 : percent;
   const int fill = W * pct / 100;
-  // Never narrower than the bar is tall, or the rounded ends degenerate.
-  if (fill > 0) g->fillRoundRect(X, Y, fill < H ? H : fill, H, H / 2, g_palette[ACC_ACCENT]);
+  if (fill > 0) g->fillRect(X, Y, fill, H, ACCENT);
 
   char buf[8];
   snprintf(buf, sizeof(buf), "%d%%", pct);
-  g->setFont(&V_B24.font);
+  g->setFont(&V_RB24.font);
   g->setTextDatum(middle_center);
   g->setTextColor(INK, BG);
   g->drawString(buf, LCD_WIDTH / 2, 190);

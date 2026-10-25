@@ -10,7 +10,7 @@ onto the sprite. Output: ../src/fonts_gen.h (arrays loaded by ui.cpp).
 
 Pillow is pinned (tools/requirements.txt): its rasteriser moves glyph boxes and
 ascent by a pixel between releases. 11.3.0 reproduces the committed b24, b18,
-s12 and r17 byte-for-byte; no release reproduces b44, b36 and b30, so those
+s12, b18v and s12v byte-for-byte; no release reproduces b44, b36 and b30, so those
 (FROZEN) are copied unchanged from the existing fonts_gen.h instead of redrawn.
 """
 import re
@@ -26,7 +26,7 @@ OUT = HERE.parent / "src" / "fonts_gen.h"
 # name, weight, pixel size, font file (Roboto Mono: one weight axis; Share Tech Mono: static)
 FONTS = [
     ("b44", 700, 44, INTER), ("b36", 700, 36, INTER), ("b30", 700, 30, INTER), ("b24", 700, 24, INTER),
-    ("b18", 700, 18, INTER), ("s12", 600, 13, INTER), ("r17", 400, 17, INTER),
+    ("b18", 700, 18, INTER), ("s12", 600, 13, INTER),
     # Vietnamese street names: same faces as b18/s12 plus the letters below. They
     # are separate fonts because LovyanGFX takes a VLW's line height from its
     # tallest glyph, so stacked accents in b18/s12 would shift every ASCII
