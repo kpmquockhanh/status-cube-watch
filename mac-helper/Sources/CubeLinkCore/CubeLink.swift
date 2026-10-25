@@ -17,6 +17,10 @@ public final class CubeLink: NSObject, CBCentralManagerDelegate, CBPeripheralDel
     public var onUnlock: (() -> Void)?
     /// The user tapped an answer on the cube (Control 09, fw_rev 10): agent id, prompt id, option key.
     public var onAnswer: ((String, String, Character) -> Void)?
+    /// The cube opened or closed an agent's detail screen (Control 0A, fw_rev 11); nil = closed.
+    public var onDetail: ((String?) -> Void)?
+    /// The cube picked a hat for an agent's folder (Control 0B, fw_rev 11).
+    public var onHat: ((String, HatChoice) -> Void)?
     /// The link became ready (Control subscribed). The Volume state is written from here.
     public var onReady: (() -> Void)?
     /// The cube's settings, read once the link is ready and again after every write. Nil while
@@ -337,6 +341,10 @@ public final class CubeLink: NSObject, CBCentralManagerDelegate, CBPeripheralDel
                 onUnlock?()
             case .answer(let agent, let prompt, let key):
                 onAnswer?(agent, prompt, key)
+            case .detail(let agent):
+                onDetail?(agent)
+            case .hat(let agent, let hat):
+                onHat?(agent, hat)
             case .settings(let r):
                 onSettingsResult?(r)
                 if r != .okReboot { refreshSettings() }

@@ -81,6 +81,24 @@ struct AgentPrompt {
   bool cut;        // the bridge's budget dropped the detail
 };
 
+// The agent the detail screen asked for (`d`, full variant only, and only while
+// the Mac polls with ?detail=). Every string is the bridge's, cut by it to a
+// BYTE maximum (UTF-8, on a rune boundary) that fits here with its NUL;
+// `status`, `doing`, `ctx` and `meta` may carry " · " (U+00B7, two bytes).
+struct AgentDetail {
+  bool present;   // `d` was an object with an id
+  char id[16];
+  char title[41];
+  char status[25];
+  char doing[49];
+  char ctx[25];
+  char prompt[161];  // the last prompt; "" when absent
+  char meta[49];     // model · folder · branch
+  char err[61];      // the last error; "" when none
+  char subs[17];     // "3 subagents"; "" when none
+  bool hatAuto;      // `ha`: the folder's hat is the automatic one
+};
+
 struct AgentsData {
   bool present;
   uint8_t card;  // index of the Agents card in Payload::cards
@@ -89,6 +107,7 @@ struct AgentsData {
   bool hasPrompt;       // `q` arrived (full variant only) and passed validation
   bool promptDropped;   // `qc`: the budget dropped it
   AgentPrompt prompt;
+  AgentDetail detail;
 };
 
 // Roughly 3 KB: never a local variable (loop and fetch task stacks are 8 KB).

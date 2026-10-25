@@ -71,6 +71,16 @@ void bleSendUnlock();
 // not encodable, no Mac link is subscribed to Control, or the message does not fit that
 // link's MTU - 3. True means queued to the radio, not that the Mac acted. No retry.
 bool bleSendAnswer(const char *agent, const char *prompt, char key);
+// Tells the Mac which agent the detail screen shows: Control `0A` (fw_rev 11, detail_frame.h),
+// nullptr or "" = the screen closed. The Mac then polls the bridge with ?detail=<agent> and the
+// payload's Agents card carries `d`. Mac link only; false, with a `[ble] detail dropped: <reason>`
+// line, on a bad id, no Mac subscribed to Control, or past the link's MTU - 3. No retry here:
+// DetailView::sendDue paces the resend.
+bool bleSendDetail(const char *agent);
+// Sets the agent's folder hat: Control `0B` (fw_rev 11, detail_frame.h), `hat` 0..103 (shape * 8
+// + colour), HAT_NONE or HAT_AUTO. Mac link only; false, with a `[ble] hat dropped: <reason>` line,
+// as for bleSendDetail. Fire and forget: the next payload's tile `h` shows the result.
+bool bleSendHat(const char *agent, uint8_t hat);
 // Tells the iPhone where the dragged map is: Control `08 <x> <y>` (fw_rev 9, nav_pan.h).
 // Fire and forget; the Mac ignores it.
 void bleSendNavPan(int16_t x, int16_t y);

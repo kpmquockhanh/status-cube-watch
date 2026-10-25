@@ -285,7 +285,7 @@ void testAssembler() {
   const Bytes over2 = chunk(8, 1, 2, Bytes(1, 1));
   CHECK(d.feed(over2.data(), over2.size()) == FrameResult::Bad);  // 8193 > 8192
 
-  CHECK(BLE_FW_REV == 10);  // 10: Control 09 (answers) and Volume bit 6; 9: Control 08 and version-2 frames
+  CHECK(BLE_FW_REV == 11);  // 11: Control 0A/0B (agent detail, hat); 10: Control 09 (answers) and Volume bit 6; 9: Control 08 and version-2 frames
 }
 
 }  // namespace

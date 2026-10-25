@@ -89,7 +89,7 @@ BENCH_SRCS := ../src/main.cpp ../src/ui.cpp ../src/payload.cpp ../src/gesture.cp
               ../src/editor_layout.cpp ../src/dev_editor.cpp ../src/settings_json.cpp ../src/critter.cpp ../src/hat_art.cpp \
               settings_sim.cpp portal_sim.cpp ota_sim.cpp bench.cpp
 BENCH_OBJ  := $(addprefix build/bench/,$(notdir $(BENCH_SRCS:.cpp=.o)))
-BENCH_RUNS ?= desk linked browse editor sleep volume nav ride agents alert handover agents-usb agents-battery
+BENCH_RUNS ?= desk linked browse editor sleep volume nav ride agents alert handover detail detail-ride agents-usb agents-battery
 
 build/bench/%.o: %.cpp
 	@mkdir -p $(dir $@)
@@ -116,11 +116,13 @@ TESTS := build/portal_util_test build/gesture_test build/deck_test \
          build/ble_bonds_test build/age_label_test build/cpu_policy_test build/readings_key_test \
          build/ble_conn_test build/touch_gate_test build/melody_test \
          build/volume_frame_test build/volume_slider_test build/unlock_prompt_test \
-         build/nav_frame_test build/nav_session_test build/nav_pan_test build/utf8_fit_test build/payload_test build/critter_test build/agents_layout_test build/agent_view_test build/agent_alert_test build/answer_frame_test build/anim_pacer_test
+         build/nav_frame_test build/nav_session_test build/nav_pan_test build/utf8_fit_test build/payload_test build/critter_test build/agents_layout_test build/agent_view_test build/agent_alert_test build/answer_frame_test build/anim_pacer_test \
+         build/detail_frame_test build/detail_view_test build/detail_layout_test build/hat_picker_layout_test
 
 build/payload_test: ../src/payload.cpp
 build/agent_view_test: ../src/payload.cpp
 build/agent_alert_test: ../src/payload.cpp
+build/detail_view_test: ../src/payload.cpp
 build/critter_test: ../src/critter.cpp ../src/hat_art.cpp
 build/gesture_test: ../src/gesture.cpp
 build/editor_layout_test: ../src/editor_layout.cpp

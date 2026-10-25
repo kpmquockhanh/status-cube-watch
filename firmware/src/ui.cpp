@@ -6,6 +6,8 @@
 #include "battery_util.h"
 #include "config.h"
 #include "critter.h"
+#include "detail_layout.h"
+#include "hat_picker_layout.h"
 #include "fonts_gen.h"
 #include "dev_editor.h"
 #include "editor_layout.h"
@@ -1737,6 +1739,201 @@ PromptLayout uiPromptLayout(const AgentPrompt &q, ButtonsOff off) {
   PromptLayout L;
   L.build(uiPromptMetrics(q, offReason(off) != nullptr), promptButtons(q));
   return L;
+}
+
+// --- the detail screen -------------------------------------------------------------
+// agents-deck's detail panel (docs/images/panel-detail-v2.png) condensed to
+// 240 x 280: black, the critter top-left beside the title, then what it is
+// doing, its context, the last prompt and the meta line. Every word is the
+// payload's `d` (or the tile's) or fixed copy.
+namespace {
+constexpr int DETAIL_ROW_Y = 44;  // `< back` and the status pill
+constexpr int DETAIL_X = 16, DETAIL_W = LCD_WIDTH - 2 * DETAIL_X;
+constexpr int DETAIL_PILL_RIGHT = 224, DETAIL_PILL_H = 16, DETAIL_PILL_PAD = 5, DETAIL_PILL_MAX_W = 120;
+constexpr int DETAIL_CELL = 3;
+constexpr int DETAIL_TITLE_X = 88, DETAIL_TITLE_W = 232 - DETAIL_TITLE_X, DETAIL_TITLE_Y = 60, DETAIL_TITLE_LINE_H = 20;
+constexpr int DETAIL_DOING_LABEL_Y = 122, DETAIL_DOING_Y = 136;
+constexpr int DETAIL_CTX_Y = 156, DETAIL_BAR_Y = 170, DETAIL_BAR_H = 4;
+constexpr int DETAIL_PROMPT_LABEL_Y = 182, DETAIL_PROMPT_Y = 196, DETAIL_PROMPT_LINE_H = 15;
+constexpr uint8_t DETAIL_PROMPT_LINES = 4;
+constexpr int DETAIL_META_Y = 266;
+
+// A small label (rm11, lower-case), its left edge at x; returns its width.
+int detailLabel(LovyanGFX *g, const char *text, int x, int y, uint16_t color) {
+  char buf[48];
+  lowerCopy(text, buf, sizeof(buf));
+  g->setFont(&V_RM11.font);
+  g->setTextDatum(middle_left);
+  g->setTextColor(color, BG);
+  g->drawString(buf, x, y);
+  return g->textWidth(buf);
+}
+
+// The status pill, right-aligned on the back row: rm11 in black on a filled
+// rect, cut with "..." to DETAIL_PILL_MAX_W.
+void detailPill(LovyanGFX *g, const char *text, uint16_t fill) {
+  if (!text || !text[0]) return;
+  char line[1][LINE_CAP];
+  g->setFont(&V_RM11.font);
+  if (!wrapText(g, text, DETAIL_PILL_MAX_W - 2 * DETAIL_PILL_PAD, 1, line)) return;
+  const int w = g->textWidth(line[0]) + 2 * DETAIL_PILL_PAD;
+  const int x = DETAIL_PILL_RIGHT - w;
+  g->fillRect(x, DETAIL_ROW_Y - DETAIL_PILL_H / 2, w, DETAIL_PILL_H, fill);
+  g->setTextDatum(middle_left);
+  g->setTextColor(BG, fill);
+  g->drawString(line[0], x + DETAIL_PILL_PAD, DETAIL_ROW_Y);
+}
+}  // namespace
+
+void uiAgentDetail(Display &lcd, const AgentsData &a, const AgentTile &tile, int16_t hat, bool viaBle,
+                   bool online, uint32_t ageMs, const BatteryView &bat, UiLink link) {
+  g_animating = false;
+  g_link = link;
+  LovyanGFX *g = target(lcd);
+  g->fillScreen(BG);
+  const uint32_t now = millis();
+  drawTopBar(g, online, ageMs, bat);
+
+  // `d` counts only when it is this agent's and came over BLE (the LAN variant
+  // never carries it).
+  const AgentDetail &d = a.detail;
+  const bool has = viaBle && d.present && !strcmp(d.id, tile.id);
+  const char *waitCopy = viaBle ? "loading..." : "details need Bluetooth";
+
+  // The back row: `< back` (DETAIL_BACK is its touch zone) and the status pill.
+  g->setFont(&V_RM13.font);
+  g->setTextDatum(middle_left);
+  g->setTextColor(INK, BG);
+  g->drawString("< back", DETAIL_X, DETAIL_ROW_Y);
+  const bool wait = tile.kind == AgentKind::Wait, hungry = tileHungry(tile);
+  detailPill(g, has && d.status[0] ? d.status : tile.line, wait || hungry ? ACCENT : INK);
+
+  // The critter in its pose and (shown) hat, centred in DETAIL_CRITTER,
+  // coloured as on its tile but on black.
+  const uint32_t body = wait || tile.kind == AgentKind::Run || hungry ? ACCENT_RGB
+                        : tile.kind == AgentKind::Err                 ? INK_RGB
+                                                                      : DIM_RGB;
+  const LayoutRect &cr = DETAIL_CRITTER;
+  drawCritter(g, poseFromName(tile.pose), hatFromCode(hat), now, cr.x + cr.w / 2 - TILE_CRIT_X * DETAIL_CELL,
+              cr.y + 23, DETAIL_CELL, CritterInks{body, BG_RGB});
+
+  // The title (rb18, two lines) and the subagents under it.
+  char lines[DETAIL_PROMPT_LINES][LINE_CAP];
+  g->setFont(&V_RB18.font);
+  const uint8_t nTitle = wrapText(g, has && d.title[0] ? d.title : tile.name, DETAIL_TITLE_W, 2, lines);
+  g->setTextDatum(top_left);
+  g->setTextColor(INK, BG);
+  for (uint8_t i = 0; i < nTitle; i++) g->drawString(lines[i], DETAIL_TITLE_X, DETAIL_TITLE_Y + i * DETAIL_TITLE_LINE_H);
+  if (has && d.subs[0])
+    drawLine(g, V_RM11, d.subs, DETAIL_TITLE_X, DETAIL_TITLE_Y + nTitle * DETAIL_TITLE_LINE_H + 6, DETAIL_TITLE_W,
+             ACCENT, BG, middle_left);
+
+  // Doing now: the last error, in the accent, wins over the tool.
+  detailLabel(g, "doing now", DETAIL_X, DETAIL_DOING_LABEL_Y, DIM);
+  const bool err = has && d.err[0];
+  drawLine(g, V_RM13, !has ? waitCopy : err ? d.err : d.doing, DETAIL_X, DETAIL_DOING_Y, DETAIL_W,
+           !has ? DIM : err ? ACCENT : INK, BG, middle_left);
+
+  // Context: the bridge's figures beside the label, a bar filled to the tile's x.
+  const int lw = detailLabel(g, "context", DETAIL_X, DETAIL_CTX_Y, DIM);
+  if (has && d.ctx[0])
+    drawLine(g, V_RM11, d.ctx, DETAIL_X + lw + 8, DETAIL_CTX_Y, DETAIL_W - lw - 8, DIM, BG, middle_left);
+  g->fillRect(DETAIL_X, DETAIL_BAR_Y, DETAIL_W, DETAIL_BAR_H, LINE);
+  const int fill = DETAIL_W * (tile.ctx > 100 ? 100 : tile.ctx) / 100;
+  if (fill > 0) g->fillRect(DETAIL_X, DETAIL_BAR_Y, fill, DETAIL_BAR_H, INK);
+
+  // The last prompt, wrapped to four lines.
+  detailLabel(g, "last prompt", DETAIL_X, DETAIL_PROMPT_LABEL_Y, DIM);
+  g->setFont(&V_RM13.font);
+  const uint8_t nPrompt = wrapText(g, has ? d.prompt : waitCopy, DETAIL_W, DETAIL_PROMPT_LINES, lines);
+  g->setTextDatum(middle_left);
+  g->setTextColor(has ? INK : DIM, BG);
+  for (uint8_t i = 0; i < nPrompt; i++) g->drawString(lines[i], DETAIL_X, DETAIL_PROMPT_Y + i * DETAIL_PROMPT_LINE_H);
+
+  // Model, folder, branch.
+  if (has && d.meta[0]) drawLine(g, V_RM11, d.meta, DETAIL_X, DETAIL_META_Y, DETAIL_W, DIM, BG, middle_left);
+  present(lcd);
+}
+
+// --- the hat picker ------------------------------------------------------------------
+// Opened by a tap on the critter on the detail screen: the 13 shapes, each on a
+// small idle critter in the current colour, `none`, `auto`, and the 8 colours.
+// hat_picker_layout.h owns the geometry, which main.cpp hit-tests with too.
+namespace {
+constexpr int PICK_CELL = 2;      // px per critter cell: the hats reach 50 px across
+constexpr int PICK_CRIT_Y = 21;   // cell 0 this far below the cell's top (hats reach -6.5, the body 7.6)
+constexpr int PICK_MARK = 2;      // the outline of what is chosen
+constexpr int PICK_NAME_X = 104;  // `hat`, beside `< back`
+
+// A 2 px ink outline inside r (what is chosen), else a 1 px line.
+void pickOutline(LovyanGFX *g, const LayoutRect &r, bool chosen) {
+  if (!chosen) {
+    g->drawRect(r.x, r.y, r.w, r.h, LINE);
+    return;
+  }
+  for (int i = 0; i < PICK_MARK; i++) g->drawRect(r.x + i, r.y + i, r.w - 2 * i, r.h - 2 * i, INK);
+}
+}  // namespace
+
+void uiHatPicker(Display &lcd, const AgentTile &tile, int16_t hat, bool autoOn, uint32_t now, bool online,
+                 uint32_t ageMs, const BatteryView &bat, UiLink link) {
+  (void)now;  // the critters stand still (idle pose): nothing here moves
+  g_animating = false;
+  g_link = link;
+  LovyanGFX *g = target(lcd);
+  g->fillScreen(BG);
+  drawTopBar(g, online, ageMs, bat);
+
+  // The back row: `< back` (HAT_PICK_BACK is its touch zone), `hat`, and
+  // whose hat it is, right-aligned.
+  g->setFont(&V_RM13.font);
+  g->setTextDatum(middle_left);
+  g->setTextColor(INK, BG);
+  g->drawString("< back", DETAIL_X, DETAIL_ROW_Y);
+  g->setTextColor(DIM, BG);
+  g->drawString("hat", PICK_NAME_X, DETAIL_ROW_Y);
+  const int nameX = PICK_NAME_X + g->textWidth("hat") + 12;
+  drawLine(g, V_RM11, tile.name, DETAIL_PILL_RIGHT, DETAIL_ROW_Y, DETAIL_PILL_RIGHT - nameX, DIM, BG, middle_right);
+
+  const HatId cur = hatFromCode(hat);
+  const int8_t color = cur.shape >= 0 ? cur.color : 0;
+  for (int i = 0; i < HAT_PICK_CELLS; i++) {
+    const LayoutRect r = hatPickCell(i);
+    g->fillRect(r.x, r.y, r.w, r.h, PANEL);
+    bool chosen;
+    if (i == HAT_PICK_AUTO_CELL) {
+      chosen = autoOn;
+      g->setFont(&V_RM13.font);
+      g->setTextDatum(middle_center);
+      g->setTextColor(chosen ? INK : DIM, PANEL);
+      g->drawString("auto", r.x + r.w / 2, r.y + r.h / 2);
+    } else {
+      const bool none = i == HAT_PICK_NONE_CELL;
+      chosen = !autoOn && (none ? cur.shape < 0 : cur.shape == i);
+      const HatId h = none ? HatId{-1, 0} : HatId{(int8_t)i, color};
+      drawCritter(g, Pose::Idle, h, 0, r.x + r.w / 2 - TILE_CRIT_X * PICK_CELL, r.y + PICK_CRIT_Y, PICK_CELL,
+                  CritterInks{DIM_RGB, PANEL_RGB});
+      if (none) {
+        g->setFont(&V_RM11.font);
+        g->setTextDatum(top_center);
+        g->setTextColor(chosen ? INK : DIM, PANEL);
+        g->drawString("none", r.x + r.w / 2, r.y + 3);
+      }
+    }
+    pickOutline(g, r, chosen);
+  }
+
+  // The colours: inert (dimmed, none chosen) while the folder wears no hat.
+  for (int i = 0; i < HAT_PICK_COLORS; i++) {
+    const LayoutRect r = hatPickSwatch(i);
+    const uint32_t rgb = hatMainRgb((int8_t)i);
+    g->fillRect(r.x, r.y, r.w, r.h, cur.shape >= 0 ? to565(rgb) : blend565(rgb, BG_RGB, 77));
+    if (cur.shape >= 0 && i == cur.color) {
+      for (int k = 0; k < PICK_MARK; k++) g->drawRect(r.x + k, r.y + k, r.w - 2 * k, r.h - 2 * k, INK);
+      g->drawRect(r.x + PICK_MARK, r.y + PICK_MARK, r.w - 2 * PICK_MARK, r.h - 2 * PICK_MARK, BG);
+    }
+  }
+  present(lcd);
 }
 
 // --- navigation ----------------------------------------------------------------

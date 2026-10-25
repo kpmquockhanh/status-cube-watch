@@ -68,6 +68,8 @@ var bridgeUp = false
 var lastFetch: Date?
 var fetching = false
 var answerPolicy = AnswerPolicy()
+/// The agent whose detail screen is open on the cube (Control 0A); cleared when the link leaves ready.
+var detailAgent: String?
 
 /// An accessory app shows no menu bar, but key equivalents still go through the main menu: without an
 /// Edit menu, Cmd-C/V/X/A/Z do nothing in the settings window's text fields.
@@ -120,11 +122,11 @@ func tick(force: Bool) {
     let now = Date()
     if !force {
         if fetching { return }
-        if let last = lastFetch, now.timeIntervalSince(last) < PollPolicy.interval(payload: lastBody) - 0.25 { return }
+        if let last = lastFetch, now.timeIntervalSince(last) < PollPolicy.interval(payload: lastBody, detailOpen: detailAgent != nil) - 0.25 { return }
     }
     lastFetch = now
     fetching = true
-    client.fetch { body, why in
+    client.fetch(detail: detailAgent) { body, why in
         DispatchQueue.main.async {
             fetching = false
             Trace.log("tick", "force \(force), body \(body?.count ?? 0) B, link ready \(link.isReady), link state \(link.state)")
@@ -234,6 +236,20 @@ link.onUnlock = {
         log("unlock request ignored: \(why)")
     }
 }
+link.onDetail = { agent in
+    guard agent != detailAgent else { return }
+    detailAgent = agent
+    Trace.log("detail", "cube shows \(agent ?? "no detail")")
+    tick(force: true)
+}
+link.onHat = { agent, hat in
+    client.setHat(agent: agent, hat: hat) { status, error in
+        DispatchQueue.main.async {
+            log("hat for \(agent): \(hatOutcome(status: status, error: error))")
+            tick(force: true)
+        }
+    }
+}
 link.onAnswer = { agent, prompt, key in
     switch answerPolicy.decide(locked: macLockedNow()) {
     case .ignore(let why):
@@ -257,7 +273,11 @@ statusMenu.onToggleUnlock = {
     _ = link.writeVolume(volumeFrame(systemVolume.current()))
 }
 screenLock.start()
-link.onStateChange = { Trace.log("link", "state -> \($0)"); refreshMenu() }
+link.onStateChange = {
+    Trace.log("link", "state -> \($0)")
+    if !link.isReady { detailAgent = nil }  // a detail screen does not outlive its link
+    refreshMenu()
+}
 statusMenu.onSendNow = { tick(force: true) }
 statusMenu.onRestartBridge = { supervisor.restart() }
 statusMenu.onForgetCube = { link.forgetCube() }

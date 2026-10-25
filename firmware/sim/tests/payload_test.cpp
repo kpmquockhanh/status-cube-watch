@@ -167,9 +167,48 @@ void testHatParsed() {
   CHECK(t[5].hat == 103);
 }
 
+void testDetailParsed() {
+  CHECK(parse(slurp("fixtures/agents-full.json")));
+  const AgentDetail &d = g_p.agents.detail;
+  CHECK(d.present && !strcmp(d.id, "l00002"));
+  CHECK(!strcmp(d.title, "fix login"));
+  CHECK(!strcmp(d.status, "running \u00b7 38m"));
+  CHECK(!strcmp(d.doing, "edit \u00b7 src/auth/session.ts"));
+  CHECK(!strcmp(d.ctx, "41% \u00b7 410k / 1m"));
+  CHECK(!strcmp(d.prompt, "fix the refresh-token race"));
+  CHECK(!strcmp(d.meta, "opus 5.5 \u00b7 ~/dev/checkout-api \u00b7 main"));
+  CHECK(!strcmp(d.err, ""));
+  CHECK(!strcmp(d.subs, "3 subagents"));
+  CHECK(d.hatAuto);
+  // The LAN variant has no `d`.
+  CHECK(parse(slurp("fixtures/agents-lan.json")));
+  CHECK(!g_p.agents.detail.present);
+}
+
+void testDetailRejected() {
+  CHECK(parse(deckWith("\"a\":[],\"d\":\"l00002\"")));  // a string, not an object
+  CHECK(g_p.agents.present && !g_p.agents.detail.present);
+  CHECK(parse(deckWith("\"a\":[],\"d\":{\"t\":\"x\",\"ha\":1}")));  // no id
+  CHECK(!g_p.agents.detail.present);
+  CHECK(parse(deckWith("\"a\":[],\"d\":{\"i\":\"a\",\"ha\":0,\"e\":\"api error\"}")));
+  CHECK(g_p.agents.detail.present && !g_p.agents.detail.hatAuto);
+  CHECK(!strcmp(g_p.agents.detail.err, "api error") && !g_p.agents.detail.prompt[0]);
+}
+
+void testDetailTruncates() {
+  const std::string p(200, 'p');
+  CHECK(parse(deckWith("\"a\":[],\"d\":{\"i\":\"a\",\"p\":\"" + p + "\",\"t\":\"T\"}")));
+  const AgentDetail &d = g_p.agents.detail;
+  CHECK(d.present && strlen(d.prompt) == sizeof(d.prompt) - 1 && sizeof(d.prompt) == 161);
+  CHECK(!strcmp(d.title, "T"));
+}
+
 }  // namespace
 
 int main() {
+  testDetailParsed();
+  testDetailRejected();
+  testDetailTruncates();
   testHatParsed();
   testParsesTilesAndPrompt();
   testLanHasNoPrompt();

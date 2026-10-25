@@ -10,6 +10,7 @@
 #include "ble_frame.h"
 #include "nav_frame.h"
 #include "answer_frame.h"
+#include "detail_frame.h"
 #include "nav_pan.h"
 #include "settings_json.h"
 
@@ -855,15 +856,12 @@ void bleSendUnlock() {
   Serial.println("[ble] unlock requested");
 }
 
-bool bleSendAnswer(const char *agent, const char *prompt, char key) {
-  uint8_t m[BLE_ANSWER_MAX];
-  const size_t len = answerEncode(agent, prompt, key, m, sizeof(m));
-  if (!len) {
-    Serial.println("[ble] answer dropped: bad id or key");
-    return false;
-  }
-  // Only the Mac's link: an iPhone also subscribes to Control, and a Claude
-  // prompt is none of its business.
+namespace {
+
+// Notifies `m` to the Mac's link only: an iPhone also subscribes to Control,
+// and Claude's agents are none of its business. `what` names the message in
+// the `[ble] <what> dropped: <reason>` line.
+bool notifyMac(const uint8_t *m, size_t len, const char *what) {
   uint16_t handle = BLE_HS_CONN_HANDLE_NONE;
   bool subscribed = false;
   portENTER_CRITICAL(&g_mux);
@@ -875,20 +873,62 @@ bool bleSendAnswer(const char *agent, const char *prompt, char key) {
     }
   portEXIT_CRITICAL(&g_mux);
   if (handle == BLE_HS_CONN_HANDLE_NONE || !subscribed || !g_control) {
-    Serial.println("[ble] answer dropped: no Mac subscribed to Control");
+    Serial.printf("[ble] %s dropped: no Mac subscribed to Control\n", what);
     return false;
   }
   NimBLEServer *server = NimBLEDevice::getServer();
   const uint16_t mtu = server ? server->getPeerMTU(handle) : 0;
   if (mtu < 3 || len > (size_t)(mtu - 3)) {
-    Serial.printf("[ble] answer dropped: %u bytes do not fit MTU %u\n", (unsigned)len, (unsigned)mtu);
+    Serial.printf("[ble] %s dropped: %u bytes do not fit MTU %u\n", what, (unsigned)len, (unsigned)mtu);
     return false;
   }
   if (!g_control->notify(m, len, handle)) {
-    Serial.println("[ble] answer dropped: notify failed");
+    Serial.printf("[ble] %s dropped: notify failed\n", what);
     return false;
   }
+  return true;
+}
+
+}  // namespace
+
+bool bleSendAnswer(const char *agent, const char *prompt, char key) {
+  uint8_t m[BLE_ANSWER_MAX];
+  const size_t len = answerEncode(agent, prompt, key, m, sizeof(m));
+  if (!len) {
+    Serial.println("[ble] answer dropped: bad id or key");
+    return false;
+  }
+  if (!notifyMac(m, len, "answer")) return false;
   Serial.printf("[ble] answer %s %s %c\n", agent, prompt, key);
+  return true;
+}
+
+bool bleSendDetail(const char *agent) {
+  uint8_t m[BLE_DETAIL_MAX];
+  const size_t len = detailEncode(agent, m, sizeof(m));
+  if (!len) {
+    Serial.println("[ble] detail dropped: bad id");
+    return false;
+  }
+  if (!notifyMac(m, len, "detail")) return false;
+  Serial.printf("[ble] detail %s\n", len > 2 ? agent : "-");
+  return true;
+}
+
+bool bleSendHat(const char *agent, uint8_t hat) {
+  uint8_t m[BLE_HAT_MAX];
+  const size_t len = hatEncode(agent, hat, m, sizeof(m));
+  if (!len) {
+    Serial.println("[ble] hat dropped: bad id or hat");
+    return false;
+  }
+  if (!notifyMac(m, len, "hat")) return false;
+  if (hat == HAT_NONE)
+    Serial.printf("[ble] hat %s none\n", agent);
+  else if (hat == HAT_AUTO)
+    Serial.printf("[ble] hat %s auto\n", agent);
+  else
+    Serial.printf("[ble] hat %s %u\n", agent, (unsigned)hat);
   return true;
 }
 

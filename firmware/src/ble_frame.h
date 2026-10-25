@@ -9,7 +9,7 @@
 #include <string.h>
 
 constexpr uint8_t BLE_PROTO_VER = 1;
-constexpr uint8_t BLE_FW_REV = 10;  // bumped when behaviour the Mac can see changes
+constexpr uint8_t BLE_FW_REV = 11;  // bumped when behaviour the Mac can see changes
 constexpr size_t BLE_HDR = 4;      // ver, seq, idx, total
 constexpr uint8_t BLE_MAX_CHUNKS = 16;
 constexpr size_t BLE_MAX_PAYLOAD = 2048;
@@ -25,6 +25,8 @@ constexpr uint8_t BLE_CTRL_MEDIA = 0x06;   // cube -> Mac: [0x06, key] press a m
 constexpr uint8_t BLE_CTRL_UNLOCK = 0x07;  // cube -> Mac: [0x07] unlock the Mac's screen (fw_rev 7)
 constexpr uint8_t BLE_CTRL_ANSWER = 0x09;  // cube -> Mac: [0x09, la, agent, lp, prompt, key] answer a Claude prompt (fw_rev 10, answer_frame.h)
 constexpr uint8_t BLE_CTRL_NAV_PAN = 0x08; // cube -> iPhone: [0x08, x lo, x hi, y lo, y hi] the dragged map offset (fw_rev 9)
+constexpr uint8_t BLE_CTRL_DETAIL = 0x0A;  // cube -> Mac: [0x0A, la, agent] the detail screen shows this agent, la 0 = closed (fw_rev 11, detail_frame.h)
+constexpr uint8_t BLE_CTRL_HAT = 0x0B;     // cube -> Mac: [0x0B, la, agent, hat] set the agent's folder hat (fw_rev 11, detail_frame.h)
 
 constexpr char BLE_SERVICE_UUID[] = "6e6d3c10-5d1a-4c1e-9f0b-7c4a2b8e1a01";
 constexpr char BLE_PAYLOAD_UUID[] = "6e6d3c10-5d1a-4c1e-9f0b-7c4a2b8e1a02";

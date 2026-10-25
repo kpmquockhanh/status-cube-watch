@@ -15,6 +15,7 @@ import (
 
 	"claude-status-cube/bridge/internal/agents"
 	"claude-status-cube/bridge/internal/config"
+	"claude-status-cube/bridge/internal/hatstore"
 	"claude-status-cube/bridge/internal/hooksettings"
 	"claude-status-cube/bridge/internal/limits"
 	"claude-status-cube/bridge/internal/mail"
@@ -185,6 +186,7 @@ func main() {
 			Discover: agents.NewDiscovery(projects),
 			Projects: projects,
 		})
+		deps.Hats = hatstore.Open(hatstore.DefaultPath(), func(m string) { errLog.Println(m) })
 	}
 	s := server.New(cfg, deps)
 	if err := s.Run(ctx); err != nil {

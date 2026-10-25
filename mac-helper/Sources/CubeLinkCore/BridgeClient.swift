@@ -17,9 +17,9 @@ public final class BridgeClient {
     }
 
     /// `done(body, nil)` on success, `done(nil, reason)` otherwise. May be called on any queue.
-    public func fetch(_ done: @escaping (Data?, String?) -> Void) {
+    public func fetch(detail: String? = nil, _ done: @escaping (Data?, String?) -> Void) {
         let t0 = Date()
-        session.dataTask(with: base.appendingPathComponent("api/status")) { data, resp, err in
+        session.dataTask(with: BridgeClient.statusURL(port: port, detail: detail)) { data, resp, err in
             Trace.log("http", "GET /api/status -> \((resp as? HTTPURLResponse)?.statusCode ?? -1), \(data?.count ?? 0) B, \(Int(Date().timeIntervalSince(t0) * 1000)) ms, error \(err?.localizedDescription ?? "none")")
             if let err { return done(nil, err.localizedDescription) }
             guard let http = resp as? HTTPURLResponse else { return done(nil, "no HTTP response") }
@@ -28,6 +28,16 @@ public final class BridgeClient {
             if let why = validatePayloadBody(body) { return done(nil, why) }
             done(body, nil)
         }.resume()
+    }
+
+    /// `/api/status`, with `?detail=<id>` (percent-encoded) while a detail screen is open.
+    public static func statusURL(port: Int, detail: String?) -> URL {
+        var c = URLComponents(string: "http://127.0.0.1:\(port)/api/status")!
+        if let detail {
+            let ok = CharacterSet.alphanumerics.union(CharacterSet(charactersIn: "-._~"))
+            c.percentEncodedQuery = "detail=" + (detail.addingPercentEncoding(withAllowedCharacters: ok) ?? "")
+        }
+        return c.url!
     }
 
     /// Whether something answers /health on the port.

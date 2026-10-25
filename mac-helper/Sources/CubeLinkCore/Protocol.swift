@@ -66,6 +66,10 @@ public enum ControlMessage: Equatable {
     /// The user tapped an answer to a Claude prompt (fw_rev 10): the agent id and prompt id from the
     /// payload's `q`, passed through unchanged, and the option key '1'...'9'.
     case answer(agent: String, prompt: String, key: Character)
+    /// Which agent's detail screen is open on the cube (fw_rev 11); nil = closed.
+    case detail(agent: String?)
+    /// The user picked a hat for an agent's folder on the cube (fw_rev 11).
+    case hat(agent: String, hat: HatChoice)
 
     public static func parse(_ d: Data) -> ControlMessage? {
         let b = [UInt8](d)
@@ -85,8 +89,46 @@ public enum ControlMessage: Equatable {
             return .media(k)
         case 0x07: return .unlock
         case 0x09: return parseAnswer(b)
+        case 0x0A: return parseDetail(b)
+        case 0x0B: return parseHat(b)
         default: return nil
         }
+    }
+}
+
+/// A hat picked on the cube: a code 0...103 (shape x 8 + colour), none (0xFE) or auto (0xFF).
+public enum HatChoice: Equatable {
+    case code(Int)
+    case none
+    case auto
+}
+
+private func agentId(_ bytes: ArraySlice<UInt8>) -> String? {
+    guard (1...15).contains(bytes.count), bytes.allSatisfy({ $0 >= 0x20 && $0 <= 0x7E }) else { return nil }
+    return String(decoding: bytes, as: UTF8.self)
+}
+
+/// `0A <la> <agent>`: la 0 closes the detail, else 1...15 printable ASCII bytes; exactly 2 + la bytes.
+private func parseDetail(_ b: [UInt8]) -> ControlMessage? {
+    guard b.count >= 2 else { return nil }
+    let la = Int(b[1])
+    guard b.count == 2 + la else { return nil }
+    if la == 0 { return .detail(agent: nil) }
+    guard let id = agentId(b[2...]) else { return nil }
+    return .detail(agent: id)
+}
+
+/// `0B <la> <agent> <hat>`: exactly 3 + la bytes.
+private func parseHat(_ b: [UInt8]) -> ControlMessage? {
+    guard b.count >= 3 else { return nil }
+    let la = Int(b[1])
+    guard b.count == 3 + la, let id = agentId(b[2..<(2 + la)]) else { return nil }
+    let h = b[2 + la]
+    switch h {
+    case 0...103: return .hat(agent: id, hat: .code(Int(h)))
+    case 0xFE: return .hat(agent: id, hat: .none)
+    case 0xFF: return .hat(agent: id, hat: .auto)
+    default: return nil
     }
 }
 

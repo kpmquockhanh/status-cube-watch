@@ -47,7 +47,8 @@ class IdleSleep {
 
  private:
   // `now` may be a little older than a stamp taken later in the same loop pass
-  // (touch reads millis() itself): that is zero elapsed, not ~49 days.
+  // (closing the display panel reports data() with a fresh millis()): that is
+  // zero elapsed, not ~49 days.
   uint32_t elapsed(uint32_t now) const {
     const int32_t d = (int32_t)(now - last_);
     return d < 0 ? 0 : (uint32_t)d;
