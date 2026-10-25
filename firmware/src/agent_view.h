@@ -33,7 +33,6 @@ class AgentView {
     agent_[sizeof agent_ - 1] = 0;
     screen_ = PromptScreen::None;
     promptId_[0] = 0;
-    clearSent();
     macLocked_ = false;
     lastScreen_ = PromptScreen::None;
     lastOff_ = ButtonsOff::No;
@@ -44,7 +43,6 @@ class AgentView {
     open_ = false;
     screen_ = PromptScreen::None;
     promptId_[0] = 0;
-    clearSent();
     lastScreen_ = PromptScreen::None;
     lastOff_ = ButtonsOff::No;
   }
@@ -54,7 +52,8 @@ class AgentView {
 
   // Every new payload, and whenever the link or lock state changes. Closes the
   // view when the agent's tile is gone or no longer waiting. Returns true when
-  // what shows changed.
+  // the screen, the prompt id shown or the button state changed (main.cpp
+  // redraws on every payload anyway, so text-only changes need no report).
   bool update(const AgentsData &a, bool viaBle, bool macLocked, uint32_t now) {
     if (!open_) return false;
     macLocked_ = macLocked;
@@ -76,8 +75,6 @@ class AgentView {
       bool newId = strcmp(promptId_, a.prompt.id) != 0;
       if (newId || screen_ != PromptScreen::Prompt) {
         shownAt_ = now;  // entering Prompt, or a new prompt: settle again
-        if (sent_) changed = true;
-        clearSent();
       }
       if (newId) changed = true;
       strncpy(promptId_, a.prompt.id, sizeof promptId_ - 1);
@@ -87,9 +84,7 @@ class AgentView {
       notInTmux_ = a.prompt.notInTmux;
     } else {
       if (promptId_[0]) changed = true;
-      if (sent_) changed = true;
       promptId_[0] = 0;
-      clearSent();
     }
     screen_ = s;
 
@@ -108,7 +103,7 @@ class AgentView {
     if (kind_ == PromptKind::Input) return ButtonsOff::Input;
     if (notInTmux_) return ButtonsOff::NotTmux;
     if (macLocked_) return ButtonsOff::Locked;
-    if (sent_) return (uint32_t)(now - sentAt_) < ANSWER_WAIT_MS ? ButtonsOff::Sent : ButtonsOff::NoAnswer;
+    if (answeredShown()) return (uint32_t)(now - sentAt_) < ANSWER_WAIT_MS ? ButtonsOff::Sent : ButtonsOff::NoAnswer;
     if ((uint32_t)(now - shownAt_) < PROMPT_SETTLE_MS) return ButtonsOff::Settling;
     return ButtonsOff::No;
   }
@@ -119,6 +114,7 @@ class AgentView {
     if (screen_ != PromptScreen::Prompt || i >= nOpts_) return false;
     ButtonsOff off = buttonsOff(now);
     if (off != ButtonsOff::No && off != ButtonsOff::NoAnswer) return false;
+    strcpy(sentId_, promptId_);
     sent_ = true;
     sentAt_ = now;
     sentBtn_ = (int8_t)i;
@@ -126,7 +122,7 @@ class AgentView {
     return true;
   }
 
-  int8_t sentButton() const { return sent_ ? sentBtn_ : (int8_t)-1; }
+  int8_t sentButton() const { return answeredShown() ? sentBtn_ : (int8_t)-1; }
 
   // The settle or answer wait ran out (or anything else time-driven changed):
   // redraw.
@@ -139,11 +135,11 @@ class AgentView {
   }
 
  private:
-  void clearSent() {
-    sent_ = false;
-    sentBtn_ = -1;
-    sentAt_ = 0;
-  }
+  // The shown prompt is the one already answered. The memory outlives screen
+  // changes, close() and open(): a WiFi payload in between or BACK and reopen
+  // must not let a second Control 09 out for the same prompt. A tap on another
+  // prompt id replaces it.
+  bool answeredShown() const { return sent_ && promptId_[0] && strcmp(promptId_, sentId_) == 0; }
 
   bool open_ = false;
   char agent_[16] = {0};
@@ -154,6 +150,7 @@ class AgentView {
   bool notInTmux_ = false;
   bool macLocked_ = false;
   uint32_t shownAt_ = 0;
+  char sentId_[16] = {0};
   bool sent_ = false;
   uint32_t sentAt_ = 0;
   int8_t sentBtn_ = -1;

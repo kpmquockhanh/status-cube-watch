@@ -149,7 +149,7 @@ void notTmuxAndLocked() {
   CHECK(v.buttonsOff(5000) == ButtonsOff::NotTmux);  // before Locked
   g.prompt.notInTmux = false;
   CHECK(v.update(g, true, true, 10));  // same prompt id, but the reason changed
-  CHECK(v.buttonsOff(5000) == ButtonsOff::Locked);   // before Settling
+  CHECK(v.buttonsOff(500) == ButtonsOff::Locked);    // still settling: Locked first
   CHECK(!v.tap(0, 5000));
   CHECK(v.update(g, true, false, 6000));
   CHECK(v.buttonsOff(6000) == ButtonsOff::No);
@@ -198,7 +198,7 @@ void tickReportsChanges() {
   CHECK(!v.tick(1100 + ANSWER_WAIT_MS + 1));
 }
 
-void closeForgetsEverything() {
+void closeThenLongWaitIsNoAnswer() {
   base();
   AgentView v;
   openAt(v, 0);
@@ -206,8 +206,55 @@ void closeForgetsEverything() {
   v.close();
   CHECK(!v.isOpen());
   CHECK(v.sentButton() == -1);
-  openAt(v, 5000);  // reopened: fresh settle, no Sent
-  CHECK(v.buttonsOff(5000) == ButtonsOff::Settling);
+  openAt(v, 20000);  // the wait is long over: the answer may be asked again
+  CHECK(v.buttonsOff(20000) == ButtonsOff::NoAnswer);
+  CHECK(v.tap(0, 20000));
+}
+
+void sentSurvivesScreenRoundTrip() {
+  base();
+  AgentView v;
+  openAt(v, 0);
+  CHECK(v.tap(0, 1000));
+  CHECK(v.update(g, false, false, 1100));  // one WiFi payload
+  CHECK(v.screen() == PromptScreen::OverWifi);
+  CHECK(v.update(g, true, false, 1200));   // BLE again, same prompt
+  CHECK(v.screen() == PromptScreen::Prompt);
+  CHECK(v.buttonsOff(2500) == ButtonsOff::Sent);
+  CHECK(!v.tap(0, 2500));
+  CHECK(v.sentButton() == 0);
+}
+
+void sentSurvivesCloseReopen() {
+  base();
+  AgentView v;
+  openAt(v, 0);
+  CHECK(v.tap(1, 1000));
+  v.close();
+  v.open("a1", 1100);
+  v.update(g, true, false, 1100);
+  CHECK(v.buttonsOff(2500) == ButtonsOff::Sent);
+  CHECK(!v.tap(1, 2500));
+}
+
+void newIdAfterSentIsTappable() {
+  base();
+  AgentView v;
+  openAt(v, 0);
+  CHECK(v.tap(0, 1000));
+  std::strcpy(g.prompt.id, "p2");
+  v.update(g, true, false, 2000);
+  CHECK(!v.tap(0, 2999));
+  CHECK(v.tap(0, 3000));
+}
+
+void lockAfterTapShowsLocked() {
+  base();
+  AgentView v;
+  openAt(v, 0);
+  CHECK(v.tap(0, 1000));
+  CHECK(v.update(g, true, true, 1500));
+  CHECK(v.buttonsOff(1500) == ButtonsOff::Locked);
 }
 
 void returnToPromptRestartsSettle() {
@@ -254,7 +301,11 @@ int main() {
   closesWhenTileGone();
   tapOutOfRange();
   tickReportsChanges();
-  closeForgetsEverything();
+  closeThenLongWaitIsNoAnswer();
+  sentSurvivesScreenRoundTrip();
+  sentSurvivesCloseReopen();
+  newIdAfterSentIsTappable();
+  lockAfterTapShowsLocked();
   returnToPromptRestartsSettle();
   wrapSafe();
   return checksDone("agent_view_test");
