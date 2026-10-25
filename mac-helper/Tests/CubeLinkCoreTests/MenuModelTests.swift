@@ -9,11 +9,18 @@ private func payload(_ g1: Int?, _ g2: Int? = 10) -> Data {
     return Data("{\"v\":1,\"cards\":[\(card("Session", g1)),\(card("Week", g2))]}".utf8)
 }
 
+@Test func menuTintSteps() {
+    #expect(MenuModel.tint(percent: 59) == .ink)
+    #expect(MenuModel.tint(percent: 60) == .yellow)
+    #expect(MenuModel.tint(percent: 84) == .yellow)
+    #expect(MenuModel.tint(percent: 85) == .orange)
+}
+
 @Test func barShowsFirstRingPercentWithThresholdTints() {
     #expect(MenuModel.make(payload: payload(42), bridgeUp: true, link: .connected).barTitle == "42%")
-    #expect(MenuModel.make(payload: payload(42), bridgeUp: true, link: .connected).tint == .normal)
-    #expect(MenuModel.make(payload: payload(60), bridgeUp: true, link: .connected).tint == .amber)
-    #expect(MenuModel.make(payload: payload(85), bridgeUp: true, link: .connected).tint == .red)
+    #expect(MenuModel.make(payload: payload(42), bridgeUp: true, link: .connected).tint == .ink)
+    #expect(MenuModel.make(payload: payload(60), bridgeUp: true, link: .connected).tint == .yellow)
+    #expect(MenuModel.make(payload: payload(85), bridgeUp: true, link: .connected).tint == .orange)
 }
 
 @Test func emptyTrackOrNoPayloadShowsDash() {

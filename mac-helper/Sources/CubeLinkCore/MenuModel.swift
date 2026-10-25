@@ -4,7 +4,7 @@ public enum LinkState: Equatable {
     case bluetoothOff, unauthorized, searching, connecting, connected
 }
 
-public enum BarTint: Equatable { case normal, amber, red }
+public enum BarTint: Equatable { case ink, yellow, orange }
 
 public struct CardRow: Equatable {
     public let title: String      // flat one-line form, "5H  14%"
@@ -15,7 +15,7 @@ public struct CardRow: Equatable {
     public let tint: BarTint
 
     public init(title: String, detail: String, label: String? = nil, value: String = "",
-                fraction: Double? = nil, tint: BarTint = .normal) {
+                fraction: Double? = nil, tint: BarTint = .ink) {
         self.title = title
         self.detail = detail
         self.label = label ?? title
@@ -27,8 +27,8 @@ public struct CardRow: Equatable {
 
 /// Everything the menu bar item shows, derived from plain values so it can be tested without AppKit.
 public struct MenuModel: Equatable {
-    public static let amberAt = 60  // same notches as the firmware rings
-    public static let redAt = 85
+    public static let yellowAt = 60  // same notches and tones as the firmware rings: ink, yellow, orange
+    public static let orangeAt = 85
 
     public let barTitle: String
     public let tint: BarTint
@@ -41,9 +41,9 @@ public struct MenuModel: Equatable {
 
     public static func tint(percent: Int) -> BarTint {
         switch percent {
-        case redAt...: return .red
-        case amberAt...: return .amber
-        default: return .normal
+        case orangeAt...: return .orange
+        case yellowAt...: return .yellow
+        default: return .ink
         }
     }
 
@@ -67,7 +67,7 @@ public struct MenuModel: Equatable {
                         let pct = Int(p.filter(\.isNumber))
                         cards.append(CardRow(title: "\(k)  \(p)", detail: r["r"] as? String ?? "", label: k, value: p,
                                              fraction: pct.map { Double(min(max($0, 0), 100)) / 100 },
-                                             tint: pct.map(tint(percent:)) ?? .normal))
+                                             tint: pct.map(tint(percent:)) ?? .ink))
                     }
                     if let m = c["m"] as? String, !m.isEmpty {
                         cards.append(CardRow(title: "Unread mail", detail: m, label: "Unread mail", value: m))
@@ -87,7 +87,7 @@ public struct MenuModel: Equatable {
                 cards.append(CardRow(title: reading.map { "\(title)  \($0)%" } ?? title, detail: detail, label: title,
                                      value: reading.map { "\($0)%" } ?? "",
                                      fraction: reading.map { Double(min($0, 100)) / 100 },
-                                     tint: reading.map(tint(percent:)) ?? .normal))
+                                     tint: reading.map(tint(percent:)) ?? .ink))
             }
         }
         let tint = tint(percent: barPercent ?? 0)

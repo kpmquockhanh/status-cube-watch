@@ -32,11 +32,7 @@ final class StatusMenu: NSObject {
         guard m != applied else { return }  // called every 5 s; rebuild only when something changed
         applied = m
         if let b = item.button {
-            let color: NSColor? = switch m.tint {
-            case .normal: nil
-            case .amber: .systemOrange
-            case .red: .systemRed
-            }
+            let color: NSColor? = m.tint == .ink ? nil : tintColor(m.tint)  // ink: the menu bar's own text colour
             var attrs: [NSAttributedString.Key: Any] = [.font: NSFont.monospacedDigitSystemFont(ofSize: 12, weight: .medium)]
             if let color { attrs[.foregroundColor] = color }
             b.attributedTitle = NSAttributedString(string: " " + m.barTitle, attributes: attrs)

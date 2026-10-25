@@ -52,6 +52,7 @@ The unread-mail badge is configured with `gmail.user` / `gmail.appPassword` in `
 - Tracker state: any hook moves a `starting` agent to `idle`; a hook that sets a status or prompt replaces an on-screen menu prompt (the menu scan then leaves it alone); after a menu, an agent that sends hooks is `idle`, a hookless one `starting`. Prompt ids are `p<start time, base 36>-<n>`, unique across bridge restarts. Every tracker lock is released by `defer` in a small function, so a panic cannot wedge it. A transcript line longer than 16 MiB is skipped.
 - Discovery: `claude agents --json` at most every 10 s, every 60 s once no agent was seen for 10 minutes; a failed login-shell lookup of `claude` is retried every 5 minutes; falling back to the process scan, and recovering, are each logged once.
 - Testing seams: `agents.Runner` (`func(ctx, name, args...) ([]byte, error)`) stands in for every external command (tmux, ps, lsof, the login shell), and `agents.Discoverer` (`Sessions(ctx)`) for finding running sessions; tests must never run real `claude`, `tmux`, `ps` or `lsof`. Hook installation takes a settings path so tests use temp files; never point it at the real `~/.claude/settings.json`.
+- Tiles follow agents-deck's board (`internal/cards/agents.go`, `hats.go`): `HatOf` is its `Auto` hat (FNV-1a 32 of the cleaned folder path, shape `v % 13`, colour `(v >> 8) % 8`) and the tile's `h` is shape x 8 + colour; the status line is its meta line (`edit . 41% ctx`, `allow bash?`, `pick 1 of 3`, `hungry . feed me`, `done . 12m ago`, `starting...`, `exited`, at most `TileLineChars`, dropping the word `ctx` before cutting); an agent that finished a turn and was seen less than `celebrateFor` (6 s) ago has pose `celebrate`. All of it is formatted here: the firmware draws the strings and the hat code as they come.
 - Files adapted from agents-deck start with an `// Adapted from agents-deck ... @ 699bba8, <path>` line; `internal/agents/NOTICE.md` names the repository, commit and files.
 
 ## External reads fail soft
@@ -80,7 +81,7 @@ Each `sources.Event` is `{T, Model, Project, Session, Input, CacheRead, CacheWri
   - Each field is cut to its buffer size in `firmware/src/payload.h`, minus 1 for the NUL (the `Fit` calls in `fitCard`, `cards.go`).
 
   A new string field needs an entry in `fitCard` as well as in `payload.h`.
-- `tone()` sets the 60/85 thresholds. They must match the firmware `NOTCHES`, `preview.html` and the Mac helper's `MenuModel`.
+- `tone()` sets the 60/85 thresholds and the ring colour: `ink` below 60, `amber` at 60-84, `accent` from 85. The thresholds must match the firmware `NOTCHES`, `preview.html` and the Mac helper's `MenuModel.tint`.
 - `windowView` treats a window whose `resets_at` has already passed as lapsed. It drops that window's percentage, drawing an empty track instead of the old full ring, and shows `reset` / `idle`.
 - `until()` (`format.go`) loses precision as the horizon grows ("47m", "4h 05m", "16h", "2d 3h"). All ring cards share one font size, set by the longest `v`, so one long value shrinks every ring.
 - A failed limits read is shortened to one caption word by `shortReason`. The full message goes in `s2`, which the firmware does not draw on a dual card; only the preview shows it.

@@ -8,7 +8,7 @@
 //                                   # payload card (see renderSpecial):
 //                                   # @portal, @ota, @ble-pair, @ble-wait, @waiting, @dev-edit,
 //                                   # @unlock|unlock-wait, @nav-turn|vn|long|longeta|reroute|offroute|arrived|lost|busy, @vol-56|muted|full|zero|fixed|noout|long|none|press|playing|paused,
-//                                   # @agents, @agents-scroll, @prompt, @prompt-settle|sent|noanswer|tmux|locked|input|cut|long|wifi|queued|dropped
+//                                   # @agents, @agents-scroll, @agents-hats, @agents-long, @prompt, @prompt-settle|sent|noanswer|tmux|locked|input|cut|long|wifi|queued|dropped
 //
 // Reads the payload JSON from the file named on the command line, or stdin.
 

@@ -377,7 +377,7 @@ The default is `BUZZER_LEVEL` in `config.h`. SOUND took the place of WiFi refres
 | Gesture | Where | What it does |
 |---|---|---|
 | Swipe left / right | any card | next / previous card |
-| Swipe down | any card but Volume | display panel: BRIGHTNESS, SLEEP, ADVANCE, SOUND |
+| Swipe down | any card but Volume | display panel: brightness, sleep, advance, sound |
 | Vertical drag, tap | Volume | set the level, mute, media keys |
 | Tap | lock prompt | unlock the Mac |
 
@@ -435,11 +435,22 @@ docs/                 BLE protocol, hardware checklists, board reference
 
 #### What the cube shows
 
+The whole cube is drawn in the look of [agents-deck](https://github.com/brushknight/agents-deck): a near-black
+background, warm off-white text, one orange accent, monospace type, square corners and lower-case labels.
+The rings are plain white while there is room, turn yellow from 60 % and orange from 85 %; the Mac's menu
+bar percentage and the browser preview use the same colours. The navigation map keeps its own look.
+
 With agents on, the deck gets an AGENTS card: a grid of up to eight tiles (swipe up and down to scroll
 when there are more than four), one per Claude Code session, each with a little critter for what it is
-doing, its status line and how full its context is. A session that waits for you is orange. Tap it to
-read the question and its answer buttons; BACK or a swipe right returns to the grid. When an agent starts
+doing (wearing a hat that is the same for the same folder), its status line and how full its context is. A session that waits for you is orange, and one that finished a turn you have not looked at gets orange stripes. Tap it to
+read the question and its answer buttons; back or a swipe right returns to the grid. When an agent starts
 waiting, the cube wakes, jumps to the card, opens the question and beeps once (set the level with SOUND).
+
+The critters move while the Agents card (or a question) is on screen: ten frames a second on USB, two on
+battery, and the cube still goes to sleep on schedule. The board cannot tell USB from battery directly, so it
+guesses from the cell voltage (a full cell, or one that is rising, counts as plugged in); a full cell just
+unplugged looks plugged in until it drops a little. The drain on battery with that card showing is still to be
+measured on hardware (`docs/agents-acceptance.md`).
 
 Reading the question and answering it need Bluetooth: over WiFi the cube only learns that an agent
 needs you, because the bridge never sends prompt text over the LAN. A tap on a button goes to the Mac
