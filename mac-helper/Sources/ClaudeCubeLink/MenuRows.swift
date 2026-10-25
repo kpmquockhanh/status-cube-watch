@@ -4,10 +4,11 @@ import CubeLinkCore
 let menuRowWidth: CGFloat = 264
 private let inset: CGFloat = 16
 
-/// The deck palette's RGBs (ink #E8E4DC, yellow #E8B94A, accent #FF4D00), as the cube draws the rings.
+/// Yellow #E8B94A and orange (the accent) #FF4D00 are the deck palette's; ink is the system text colour, which
+/// follows the menu's light or dark appearance (the palette's #E8E4DC would vanish on a light menu).
 func tintColor(_ t: BarTint) -> NSColor {
     switch t {
-    case .ink: NSColor(srgbRed: 0xE8 / 255, green: 0xE4 / 255, blue: 0xDC / 255, alpha: 1)
+    case .ink: .labelColor
     case .yellow: NSColor(srgbRed: 0xE8 / 255, green: 0xB9 / 255, blue: 0x4A / 255, alpha: 1)
     case .orange: NSColor(srgbRed: 0xFF / 255, green: 0x4D / 255, blue: 0x00 / 255, alpha: 1)
     }
