@@ -4,9 +4,11 @@ import Foundation
 /// the helper never re-encodes the payload, so it cannot drift from the contract.
 public final class BridgeClient {
     private let base: URL
-    private let session: URLSession
+    let port: Int
+    let session: URLSession
 
     public init(port: Int) {
+        self.port = port
         base = URL(string: "http://127.0.0.1:\(port)")!
         let cfg = URLSessionConfiguration.ephemeral
         cfg.timeoutIntervalForRequest = 3
