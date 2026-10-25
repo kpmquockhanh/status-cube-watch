@@ -10,5 +10,7 @@
    {"i":"l00005","n":"old-thing","l":"exited","k":"exit","p":"exit","x":0,"h":84}],
   "q":{"i":"l00001","p":"p1abc-1","k":"permission","t":"run this command?",
        "d":"terraform apply -target=module.staging_net","c":"bash . ~/dev/infra-network/terraform",
-       "o":[{"k":"1","l":"yes"},{"k":"2","l":"yes, and don't ask again for terraform apply"},{"k":"3","l":"no"}]}}
+       "o":[{"k":"1","l":"yes"},{"k":"2","l":"yes, and don't ask again for terraform apply"},{"k":"3","l":"no"}]},
+  "d":{"i":"l00002","t":"fix login","s":"running · 38m","w":"edit · src/auth/session.ts","c":"41% · 410k / 1m",
+       "p":"fix the refresh-token race","m":"opus 5.5 · ~/dev/checkout-api · main","n":"3 subagents","ha":1}}
 ]}

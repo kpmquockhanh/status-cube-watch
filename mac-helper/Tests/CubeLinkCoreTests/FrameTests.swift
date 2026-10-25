@@ -97,3 +97,32 @@ func loadFixture() throws -> [FixtureCase] {
     huge += "\"}"
     #expect(validatePayloadBody(Data(huge.utf8)) != nil)                          // over 2 KB
 }
+
+// The Control 0A / 0B lines of the shared fixture, which the firmware's
+// detail_frame_test encodes: `detail <agent|-> <bytes>`, `hat <agent> <n|none|auto> <bytes>`.
+private func controlFixture(_ kind: String) throws -> [[Substring]] {
+    var root = URL(fileURLWithPath: #filePath)
+    for _ in 0..<4 { root.deleteLastPathComponent() }
+    let text = try String(contentsOf: root.appendingPathComponent("firmware/sim/fixtures/ble-frames.txt"), encoding: .utf8)
+    return text.split(separator: "\n").filter { $0.hasPrefix(kind + " ") }.map { $0.split(separator: " ").dropFirst().map { $0 } }
+}
+
+@Test func parsesFixtureDetails() throws {
+    let lines = try controlFixture("detail")
+    #expect(lines.count == 2)
+    for f in lines {
+        let bytes = f.dropFirst(1).map { UInt8($0, radix: 16)! }
+        let agent: String? = f[0] == "-" ? nil : String(f[0])
+        #expect(ControlMessage.parse(Data(bytes)) == .detail(agent: agent))
+    }
+}
+
+@Test func parsesFixtureHats() throws {
+    let lines = try controlFixture("hat")
+    #expect(lines.count == 3)
+    for f in lines {
+        let bytes = f.dropFirst(2).map { UInt8($0, radix: 16)! }
+        let hat: HatChoice = f[1] == "none" ? HatChoice.none : f[1] == "auto" ? .auto : .code(Int(f[1])!)
+        #expect(ControlMessage.parse(Data(bytes)) == .hat(agent: String(f[0]), hat: hat))
+    }
+}

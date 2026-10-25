@@ -548,6 +548,16 @@ bool bleSendAnswer(const char *, const char *, char) {
   return true;
 }
 void bleSendNavPan(int16_t, int16_t) {}
+uint32_t g_details = 0;  // Control 0A sends
+bool bleSendDetail(const char *) {
+  g_details++;
+  return true;
+}
+uint32_t g_hats = 0;  // Control 0B sends
+bool bleSendHat(const char *, uint8_t) {
+  g_hats++;
+  return true;
+}
 
 void bleSendVolume(uint8_t level, bool muted) {
   g_volRequests++;

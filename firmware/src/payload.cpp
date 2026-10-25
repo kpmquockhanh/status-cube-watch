@@ -51,6 +51,23 @@ bool parsePrompt(JsonObjectConst q, AgentPrompt &pr) {
   return true;
 }
 
+// A detail without an id cannot be matched to the screen that asked for it,
+// so it is treated as absent. `out` arrives zeroed.
+void parseDetail(JsonObjectConst d, AgentDetail &out) {
+  strlcpy(out.id, d["i"] | "", sizeof(out.id));
+  if (!out.id[0]) return;
+  out.present = true;
+  strlcpy(out.title, d["t"] | "", sizeof(out.title));
+  strlcpy(out.status, d["s"] | "", sizeof(out.status));
+  strlcpy(out.doing, d["w"] | "", sizeof(out.doing));
+  strlcpy(out.ctx, d["c"] | "", sizeof(out.ctx));
+  strlcpy(out.prompt, d["p"] | "", sizeof(out.prompt));
+  strlcpy(out.meta, d["m"] | "", sizeof(out.meta));
+  strlcpy(out.err, d["e"] | "", sizeof(out.err));
+  strlcpy(out.subs, d["n"] | "", sizeof(out.subs));
+  out.hatAuto = (d["ha"] | 0) != 0;
+}
+
 void parseAgents(JsonObjectConst c, uint8_t cardIndex, AgentsData &a) {
   a.present = true;
   a.card = cardIndex;
@@ -76,6 +93,7 @@ void parseAgents(JsonObjectConst c, uint8_t cardIndex, AgentsData &a) {
   }
   if (c["q"].is<JsonObjectConst>()) a.hasPrompt = parsePrompt(c["q"], a.prompt);
   a.promptDropped = !a.hasPrompt && (c["qc"] | 0) != 0;
+  if (c["d"].is<JsonObjectConst>()) parseDetail(c["d"], a.detail);
 }
 
 }  // namespace

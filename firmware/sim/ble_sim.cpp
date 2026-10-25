@@ -23,6 +23,7 @@
 #include <cstring>
 
 #include "../src/answer_frame.h"
+#include "../src/detail_frame.h"
 #include "../src/ble.h"
 #include "nav_samples.h"
 
@@ -186,6 +187,40 @@ bool bleSendAnswer(const char *agent, const char *prompt, char key) {
     return false;
   }
   Serial.printf("[ble] (sim) answer %s %s %c\n", agent, prompt, key);
+  return true;
+}
+
+bool bleSendDetail(const char *agent) {
+  uint8_t m[BLE_DETAIL_MAX];
+  const size_t len = detailEncode(agent, m, sizeof(m));
+  if (!len) {
+    Serial.println("[ble] detail dropped: bad id");
+    return false;
+  }
+  if (mode() != Mode::Live) {
+    Serial.println("[ble] detail dropped: no Mac subscribed to Control");
+    return false;
+  }
+  Serial.printf("[ble] (sim) detail %s\n", len > 2 ? agent : "-");
+  return true;
+}
+
+bool bleSendHat(const char *agent, uint8_t hat) {
+  uint8_t m[BLE_HAT_MAX];
+  if (!hatEncode(agent, hat, m, sizeof(m))) {
+    Serial.println("[ble] hat dropped: bad id or hat");
+    return false;
+  }
+  if (mode() != Mode::Live) {
+    Serial.println("[ble] hat dropped: no Mac subscribed to Control");
+    return false;
+  }
+  if (hat == HAT_NONE)
+    Serial.printf("[ble] (sim) hat %s none\n", agent);
+  else if (hat == HAT_AUTO)
+    Serial.printf("[ble] (sim) hat %s auto\n", agent);
+  else
+    Serial.printf("[ble] (sim) hat %s %u\n", agent, (unsigned)hat);
   return true;
 }
 
