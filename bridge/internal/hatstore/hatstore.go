@@ -1,5 +1,5 @@
-// Package hatstore keeps the per-folder hat overrides the cube's hat picker
-// sets: a JSON object {"<folder>": code} in the user's config directory.
+// Package hatstore keeps the per-session hat overrides the cube's hat picker
+// sets: a JSON object {"<key>": code} (keys are cards.HatKey: "session:<id>") in the user's config directory.
 package hatstore
 
 import (
@@ -61,22 +61,22 @@ func Open(path string, warn func(string)) *Store {
 	return s
 }
 
-// Get returns the override for folder: code 0..MaxCode, or -1 = no hat;
+// Get returns the override for key: code 0..MaxCode, or -1 = no hat;
 // ok=false = automatic.
-func (s *Store) Get(folder string) (code int, ok bool) {
+func (s *Store) Get(key string) (code int, ok bool) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
-	code, ok = s.m[filepath.Clean(folder)]
+	code, ok = s.m[filepath.Clean(key)]
 	return code, ok
 }
 
-// Set stores code for folder; nil = automatic (the override is removed). The
+// Set stores code for key; nil = automatic (the override is removed). The
 // file is replaced atomically; on a write error the store is unchanged.
-func (s *Store) Set(folder string, code *int) error {
+func (s *Store) Set(k string, code *int) error {
 	if code != nil && (*code < -1 || *code > MaxCode) {
 		return fmt.Errorf("hat %d out of range", *code)
 	}
-	key := filepath.Clean(folder)
+	key := filepath.Clean(k)
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	next := make(map[string]int, len(s.m)+1)

@@ -7,7 +7,7 @@
 //	                    as "no bridge"); a degraded bridge says so in the body.
 //	POST /hook       -> a Claude Code hook event (loopback only, agents on)
 //	POST /api/answer -> answer an agent's prompt (loopback only, agents on)
-//	POST /api/hat -> set an agent folder's hat (loopback only, agents on)
+//	POST /api/hat -> set an agent session's hat (loopback only, agents on)
 //
 // Nothing on the LAN or in a browser may read prompt text or answer a prompt:
 // /api/status serves the full payload (with the prompt) only to a request
@@ -16,7 +16,6 @@ package server
 
 import (
 	"bytes"
-	"cmp"
 	"context"
 	"encoding/json"
 	"errors"
@@ -60,7 +59,7 @@ type Deps struct {
 		Snapshot() []agents.Agent
 		Subscribe() (<-chan struct{}, func())
 	}
-	// Hats stores the per-folder hat overrides; nil when agents are off.
+	// Hats stores the per-session hat overrides; nil when agents are off.
 	Hats interface {
 		Get(folder string) (int, bool)
 		Set(folder string, code *int) error
@@ -490,7 +489,7 @@ func (s *Server) withDetail(full *cards.Payload, id string) *cards.Payload {
 		}
 		auto := true
 		if s.d.Hats != nil {
-			_, overridden := s.d.Hats.Get(cmp.Or(a.Cwd, a.Folder))
+			_, overridden := s.d.Hats.Get(cards.HatKey(a))
 			auto = !overridden
 		}
 		p := cards.WithDetail(*full, a, auto, s.d.Now())
@@ -585,7 +584,7 @@ func (s *Server) answer(w http.ResponseWriter, r *http.Request) {
 	}
 }
 
-// hat sets (or clears) the hat override of the folder an agent works in.
+// hat sets (or clears) the hat override of an agent's session (cards.HatKey).
 // hat: 0..103 = that hat, -1 = no hat, null = automatic.
 func (s *Server) hat(w http.ResponseWriter, r *http.Request) {
 	if !s.cubeClient(r) || s.d.Hats == nil {
@@ -613,18 +612,18 @@ func (s *Server) hat(w http.ResponseWriter, r *http.Request) {
 		sendJSON(w, 400, errorBody{`want {"agent","hat": 0..103 | -1 | null}`})
 		return
 	}
-	folder := ""
+	key := ""
 	for _, a := range s.d.Agents.Snapshot() {
 		if a.ID == b.Agent {
-			folder = cmp.Or(a.Cwd, a.Folder)
+			key = cards.HatKey(a)
 			break
 		}
 	}
-	if folder == "" {
+	if key == "" {
 		sendJSON(w, 404, errorBody{"no such agent"})
 		return
 	}
-	if err := s.d.Hats.Set(folder, code); err != nil {
+	if err := s.d.Hats.Set(key, code); err != nil {
 		s.d.ErrLog.Println("hat failed:", err.Error())
 		sendJSON(w, 500, errorBody{err.Error()})
 		return

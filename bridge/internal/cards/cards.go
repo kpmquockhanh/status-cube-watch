@@ -66,9 +66,9 @@ type Opts struct {
 	Agents           []agents.Agent // the open agents
 	ShowAgents       bool           // add the Agents card (when at least one agent is open)
 	Full             bool           // loopback variant: the Agents card carries the prompt
-	// Hats is the per-folder hat override: code 0..103, -1 = no hat; ok=false
+	// Hats is the per-session hat override (keyed by HatKey): code 0..103, -1 = no hat; ok=false
 	// (or nil) = agents-deck's automatic hat.
-	Hats func(folder string) (code int, ok bool)
+	Hats func(key string) (code int, ok bool)
 }
 
 // Build builds the deck. now carries the local zone: today/month boundaries

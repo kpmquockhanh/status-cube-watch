@@ -3,7 +3,7 @@
 // hat picker. Pure: no Arduino, host-tested in sim/tests/detail_frame_test.cpp.
 //
 //   [0x0A][la][agent id: la bytes]         the detail screen shows this agent; la 0 = closed
-//   [0x0B][la][agent id: la bytes][hat]    set the agent's folder hat
+//   [0x0B][la][agent id: la bytes][hat]    set the agent's hat
 //
 // The agent id is the bridge's (1..15 printable ASCII bytes, as for Control 09).
 // `hat` is shape * 8 + colour (0..103), HAT_NONE or HAT_AUTO.

@@ -569,22 +569,21 @@ func TestCelebratePose(t *testing.T) {
 	}
 }
 
+// A tile's automatic hat comes from its session, not its folder, so it does
+// not change when the session's folder does, and every agent wears one.
 func TestTileHat(t *testing.T) {
 	a := agent("h", "docs-site", agents.Idle, time.Hour)
-	a.Cwd = "/Users/me/code/docs-site"
-	if h := tileOf(a, agentsNow, nil).H; h == nil || *h != 1*8+1 {
-		t.Errorf("hat from cwd = %v, want 9", h)
-	}
-	a.Cwd = ""
-	s, c := HatOf("docs-site")
-	if h := tileOf(a, agentsNow, nil).H; h == nil || *h != s*8+c {
-		t.Errorf("hat from folder = %v", h)
+	a.SessionID = "33333333-cccc-4ccc-8ccc-cccccccccccc"
+	s, c := HatOf(HatKey(a))
+	for _, cwd := range []string{"/Users/me/code/docs-site", ""} {
+		a.Cwd = cwd
+		if h := tileOf(a, agentsNow, nil).H; h == nil || *h != s*8+c {
+			t.Errorf("cwd %q: hat %v, want %d", cwd, h, s*8+c)
+		}
 	}
 	a.Folder = ""
-	tl := tileOf(a, agentsNow, nil)
-	b, _ := json.Marshal(tl)
-	if tl.H != nil || strings.Contains(string(b), `"h":`) {
-		t.Errorf("no folder, hat %v: %s", tl.H, b)
+	if h := tileOf(a, agentsNow, nil).H; h == nil || *h != s*8+c {
+		t.Errorf("no folder: hat %v, want %d", h, s*8+c)
 	}
 }
 

@@ -96,7 +96,7 @@ struct AgentDetail {
   char meta[49];     // model · folder · branch
   char err[61];      // the last error; "" when none
   char subs[17];     // "3 subagents"; "" when none
-  bool hatAuto;      // `ha`: the folder's hat is the automatic one
+  bool hatAuto;      // `ha`: the agent's hat is its automatic one
 };
 
 struct AgentsData {

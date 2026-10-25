@@ -60,7 +60,7 @@ over Bluetooth with the Mac app running, and a few Claude Code sessions (some in
       about 5 s of the link coming back the cube sends `0A` again and the fields fill in.
 - [ ] A tap on the critter opens the hat picker; the tile's current shape and colour (or `auto`) are outlined.
 - [ ] Picking a shape, a colour, `none` and `auto` each changes the critter at once and, within a few seconds,
-      on the grid tile too (and on every other agent in that folder); the bridge's `hats.json` holds the
+      on the grid tile too (and on no other agent, even one in the same folder); the bridge's `hats.json` holds the
       folder's override (removed again by `auto`).
 - [ ] With the Mac app quit, a pick still shows for about 4 s and then the old hat returns; the serial log
       reads `[ble] hat dropped`.

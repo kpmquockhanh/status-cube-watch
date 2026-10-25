@@ -385,7 +385,7 @@ void openDetail(const char *agent, uint32_t now) {
   dirty = true;
 }
 
-// The payload says the open agent's folder wears the automatic hat: only when
+// The payload says the open agent wears its automatic hat: only when
 // its `d` (BLE only) is this agent's; unknown reads as not automatic.
 bool detailHatAuto() {
   const AgentDetail &d = payload.agents.detail;
@@ -395,7 +395,7 @@ bool detailHatAuto() {
 // A tap on the picker: Control 0B to the Mac, and the pick is drawn while it
 // travels (DetailView holds it until the payload shows it or 4 s pass). A
 // shape keeps the current colour, a colour the current shape (nothing while
-// the folder wears no hat). A send that cannot go out is logged by
+// the agent wears no hat). A send that cannot go out is logged by
 // bleSendHat and still shown for its hold.
 void pickHat(HatPick p, uint32_t now) {
   const AgentTile *t = agentsTile(payload.agents, detailView.agent());

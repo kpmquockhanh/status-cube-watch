@@ -189,14 +189,15 @@ func agentsCardOf(list []agents.Agent, full bool, now time.Time, hats func(strin
 
 func tileOf(a agents.Agent, now time.Time, hats func(string) (int, bool)) Tile {
 	t := Tile{I: fitN(a.ID, TileIDChars), N: fitMarked(cmp.Or(a.Title, a.Folder), TileNameChars), X: contextPct(a.Context.Used, a.Context.Window)}
-	if dir := cmp.Or(a.Cwd, a.Folder); dir != "" {
-		// A stored override beats agents-deck's automatic hat; -1 = no hat.
+	{
+		// A hat picked for this session beats its automatic one; -1 = no hat.
+		key := HatKey(a)
 		code, ok := -1, false
 		if hats != nil {
-			code, ok = hats(dir)
+			code, ok = hats(key)
 		}
 		if !ok {
-			shape, color := HatOf(dir)
+			shape, color := HatOf(key)
 			code = shape*hatColors + color
 		}
 		if code >= 0 {

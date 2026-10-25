@@ -1001,7 +1001,7 @@ float editorSlidePos(uint32_t now) {
 // view: backend/internal/web/static/app.css): a two-column grid of square
 // panels that scrolls under the card's caption, one per agent: the Claude
 // chip, a mini critter with the subagent count when subagents work, a pixel
-// critter whose pose follows what it is doing (critter.h) in its folder's hat,
+// critter whose pose follows what it is doing (critter.h) in its own hat,
 // the folder name, the bridge's meta line, and a context gauge round the
 // tile's edge, filled clockwise from the top centre. A waiting tile is solid
 // orange, so it reads across the desk; a hungry one (a finished turn nobody
@@ -1930,7 +1930,7 @@ void uiHatPicker(Display &lcd, const AgentTile &tile, int16_t hat, bool autoOn, 
     pickOutline(g, r, chosen);
   }
 
-  // The colours: inert (dimmed, none chosen) while the folder wears no hat.
+  // The colours: inert (dimmed, none chosen) while the agent wears no hat.
   for (int i = 0; i < HAT_PICK_COLORS; i++) {
     const LayoutRect r = hatPickSwatch(i);
     const uint32_t rgb = hatMainRgb((int8_t)i);

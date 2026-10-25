@@ -12,7 +12,7 @@ import (
 	"claude-status-cube/bridge/internal/hatstore"
 )
 
-func tileHat(t *testing.T, s *Server) *int {
+func tileHat(t *testing.T, s *Server, id string) *int {
 	t.Helper()
 	rec := serve(s, cubeReq("GET", "/api/status", ""))
 	var p cards.Payload
@@ -20,17 +20,24 @@ func tileHat(t *testing.T, s *Server) *int {
 		t.Fatal(err)
 	}
 	for _, c := range p.Cards {
-		if c.T == "AGENTS" && len(c.A) > 0 {
-			return c.A[0].H
+		for _, tl := range c.A {
+			if c.T == "AGENTS" && tl.I == id {
+				return tl.H
+			}
 		}
 	}
-	t.Fatal("no agents card")
+	t.Fatal("no tile " + id)
 	return nil
 }
 
 func TestHatEndpoint(t *testing.T) {
-	ag := newStubAgents(agents.Agent{ID: "a1", Folder: "proj", Cwd: "/x/proj", Status: agents.Idle,
-		StatusSince: fixedNow.Add(-time.Hour)})
+	// Two sessions in one folder: a hat set on one leaves the other alone.
+	a1 := agents.Agent{ID: "a1", SessionID: "11111111-aaaa-4aaa-8aaa-aaaaaaaaaaaa", Folder: "proj", Cwd: "/x/proj",
+		Status: agents.Idle, StatusSince: fixedNow.Add(-time.Hour)}
+	a2 := a1
+	a2.ID, a2.SessionID = "a2", "22222222-bbbb-4bbb-8bbb-bbbbbbbbbbbb"
+	ag := newStubAgents(a1, a2)
+	autoHat := func(a agents.Agent) int { sh, col := cards.HatOf(cards.HatKey(a)); return sh*8 + col }
 	d := Deps{Limits: &stubLimits{l: goodLimits()}, Mail: stubMail{}, Source: &stubSource{},
 		Now: func() time.Time { return fixedNow }, Log: quiet, ErrLog: quiet, Agents: ag,
 		Hats: hatstore.Open(filepath.Join(t.TempDir(), "hats.json"), nil)}
@@ -39,20 +46,22 @@ func TestHatEndpoint(t *testing.T) {
 	if rec := serve(s, cubeReq("POST", "/api/hat", `{"agent":"a1","hat":17}`)); rec.Code != 204 {
 		t.Fatalf("set: %d %s", rec.Code, rec.Body)
 	}
-	if h := tileHat(t, s); h == nil || *h != 17 {
+	if h := tileHat(t, s, "a1"); h == nil || *h != 17 {
 		t.Fatalf("tile hat after set = %v", h)
+	}
+	if h := tileHat(t, s, "a2"); h == nil || *h != autoHat(a2) {
+		t.Fatalf("the other session's hat after set = %v, want its own %d", h, autoHat(a2))
 	}
 	if rec := serve(s, cubeReq("POST", "/api/hat", `{"agent":"a1","hat":-1}`)); rec.Code != 204 {
 		t.Fatalf("none: %d", rec.Code)
 	}
-	if h := tileHat(t, s); h != nil {
+	if h := tileHat(t, s, "a1"); h != nil {
 		t.Fatalf("tile hat after none = %d", *h)
 	}
 	if rec := serve(s, cubeReq("POST", "/api/hat", `{"agent":"a1","hat":null}`)); rec.Code != 204 {
 		t.Fatalf("auto: %d", rec.Code)
 	}
-	sh, col := cards.HatOf("/x/proj")
-	if h := tileHat(t, s); h == nil || *h != sh*8+col {
+	if h := tileHat(t, s, "a1"); h == nil || *h != autoHat(a1) {
 		t.Fatalf("tile hat after auto = %v", h)
 	}
 
