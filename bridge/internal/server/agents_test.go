@@ -413,7 +413,7 @@ func TestAgentsOffUnchanged(t *testing.T) {
 	s := newAgentsTest(nil, nil)
 	// Plan 1's output for these stubs, captured before the agents work.
 	const starting = `{"v":1,"ts":1792843200,"src":"stub","cards":[{"t":"CLAUDE","v":"--","s1":"starting","s2":"starting up","c":"ink","g":-1,"c2":"ink","g2":-1,"rows":[{"k":"5H","p":"--","r":""},{"k":"7D","p":"--","r":""}]}]}`
-	const after = `{"v":1,"ts":1792843200,"src":"stub","cards":[{"t":"CLAUDE","v":"2h 00m","s1":"to reset","s2":"","c":"green","g":42,"c2":"green","g2":10,"rows":[{"k":"5H","p":"42%","r":"2h 00m"},{"k":"7D","p":"10%","r":"3d 12h"}]}]}`
+	const after = `{"v":1,"ts":1792843200,"src":"stub","cards":[{"t":"CLAUDE","v":"2h 00m","s1":"to reset","s2":"","c":"ink","g":42,"c2":"ink","g2":10,"rows":[{"k":"5H","p":"42%","r":"2h 00m"},{"k":"7D","p":"10%","r":"3d 12h"}]}]}`
 	check := func(want string) {
 		t.Helper()
 		for _, r := range []*http.Request{

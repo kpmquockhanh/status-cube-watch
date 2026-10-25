@@ -2,6 +2,7 @@ package cards
 
 import (
 	"bytes"
+	"cmp"
 	"encoding/json"
 	"math"
 	"sort"
@@ -60,9 +61,10 @@ type Tile struct {
 	N string `json:"n"`           // folder name
 	L string `json:"l"`           // status line: "needs you", "Edit +3", "thinking", "idle 12m", ...
 	K string `json:"k"`           // run|wait|idle|err|exit|start
-	P string `json:"p"`           // pose: idle|start|run|think|read|write|bash|web|plan|delegate|compact|wait|err|exit|hungry
+	P string `json:"p"`           // pose: idle|start|run|think|read|write|bash|web|plan|delegate|compact|wait|err|exit|hungry|celebrate
 	X int    `json:"x"`           // context used, 0..100
 	U int    `json:"u,omitempty"` // 1 = finished a turn nobody looked at
+	H *int   `json:"h,omitempty"` // hat: shape*8 + colour (0..103); absent = no hat
 }
 
 // AgentPrompt is the longest-waiting agent's question; only in the loopback
@@ -170,34 +172,112 @@ func agentsCardOf(list []agents.Agent, full bool, now time.Time) *Card {
 
 func tileOf(a agents.Agent, now time.Time) Tile {
 	t := Tile{I: fitN(a.ID, TileIDChars), N: fitN(a.Folder, TileNameChars), X: contextPct(a.Context.Used, a.Context.Window)}
+	if dir := cmp.Or(a.Cwd, a.Folder); dir != "" {
+		shape, color := HatOf(dir)
+		h := shape*hatColors + color
+		t.H = &h
+	}
 	if a.Unseen {
 		t.U = 1
 	}
 	switch a.Status {
 	case agents.Waiting:
-		t.K, t.P, t.L = "wait", "wait", "needs you"
+		t.K, t.P, t.L = "wait", "wait", waitLine(a.Waiting)
 	case agents.Running:
 		t.K, t.P, t.L = "run", "think", "thinking"
 		if a.Activity != nil && a.Activity.Tool != "" {
-			t.P, t.L = toolPose(a.Activity.Tool), a.Activity.Tool
+			t.P = toolPose(a.Activity.Tool)
+			t.L = toolVerb(a.Activity.Tool)
 		}
-		if n := len(a.Subagents); n > 0 {
-			t.L += " +" + strconv.Itoa(n)
+		if a.Context.Window > 0 {
+			// The full "<verb> . N% ctx" when it fits, else drop the word "ctx".
+			if full := t.L + " . " + strconv.Itoa(t.X) + "% ctx"; len(full) <= TileLineChars {
+				t.L = full
+			} else {
+				t.L += " . " + strconv.Itoa(t.X) + "%"
+			}
 		}
 	case agents.Starting:
-		t.K, t.P, t.L = "start", "start", "starting"
+		t.K, t.P, t.L = "start", "start", "starting..."
 	case agents.Error:
-		t.K, t.P, t.L = "err", "err", "error"
+		t.K, t.P, t.L = "err", "err", cmp.Or(a.ErrorText, "error")
 	case agents.Exited:
 		t.K, t.P, t.L = "exit", "exit", "exited"
 	default: // idle
-		t.K, t.P, t.L = "idle", "idle", idleLine(a.StatusSince, now)
-		if a.Unseen {
-			t.P = "hungry"
+		t.K, t.P = "idle", "idle"
+		switch {
+		case a.Unseen:
+			t.P, t.L = "hungry", "hungry . feed me"
+		case !a.StatusSince.IsZero() && now.Sub(a.StatusSince) < celebrateFor:
+			t.P, t.L = "celebrate", "done . "+agoOf(a.StatusSince, now)+" ago"
+		default:
+			t.L = "done . " + agoOf(a.StatusSince, now) + " ago"
 		}
 	}
-	t.L = fitN(t.L, TileLineChars)
+	t.L = fitMarked(t.L, TileLineChars)
 	return t
+}
+
+// celebrateFor is how long an agent that just finished (and was seen) cheers.
+const celebrateFor = 6 * time.Second
+
+// toolVerb is agents-deck's verb(): the lower-cased tool name, a few renamed.
+func toolVerb(tool string) string {
+	l := strings.ToLower(tool)
+	switch l {
+	case "compact":
+		return "compacting"
+	case "todowrite":
+		return "plan"
+	case "webfetch":
+		return "web"
+	case "websearch":
+		return "search"
+	case "multiedit", "notebookedit":
+		return "edit"
+	case "task":
+		return "agent"
+	}
+	return l
+}
+
+// waitLine words a waiting tile. The tool name comes from the permission
+// prompt's context ("bash \u00b7 ~/code/x"): only a bare lower-case word before
+// the separator is used, never a path or free text, so the LAN variant
+// cannot leak prompt content.
+func waitLine(w *agents.Prompt) string {
+	if w == nil {
+		return "needs input"
+	}
+	switch w.Kind {
+	case "question":
+		return "pick 1 of " + strconv.Itoa(len(w.Options))
+	case "permission":
+		head, _, _ := strings.Cut(w.Context, " \u00b7 ")
+		head = strings.TrimSpace(head)
+		if head != "" && strings.Trim(head, "abcdefghijklmnopqrstuvwxyz0123456789_-") == "" {
+			return "allow " + head + "?"
+		}
+		return "allow?"
+	}
+	return "needs input"
+}
+
+// agoOf is agents-deck's ago(): "12s", "4m", "3h", "2d".
+func agoOf(since, now time.Time) string {
+	s := int64(0)
+	if !since.IsZero() {
+		s = max(0, int64(now.Sub(since)/time.Second))
+	}
+	switch {
+	case s < 60:
+		return itoa(s) + "s"
+	case s < 3600:
+		return itoa(s/60) + "m"
+	case s < 86400:
+		return itoa(s/3600) + "h"
+	}
+	return itoa(s/86400) + "d"
 }
 
 // toolPose is the pose of a running agent using tool.
@@ -219,24 +299,6 @@ func toolPose(tool string) string {
 		return "compact"
 	}
 	return "run"
-}
-
-// idleLine: "idle" under a minute, else one floored unit: "idle 12m",
-// "idle 3h", "idle 2d".
-func idleLine(since, now time.Time) string {
-	if since.IsZero() {
-		return "idle"
-	}
-	d := now.Sub(since)
-	switch {
-	case d < time.Minute:
-		return "idle"
-	case d < time.Hour:
-		return "idle " + itoa(int64(d/time.Minute)) + "m"
-	case d < 24*time.Hour:
-		return "idle " + itoa(int64(d/time.Hour)) + "h"
-	}
-	return "idle " + itoa(int64(d/(24*time.Hour))) + "d"
 }
 
 // contextPct is round(100*used/window), clamped to 0..100; 0 without a window.

@@ -69,7 +69,7 @@ func TestAgentsCardOrderAndSummary(t *testing.T) {
 		}
 	}
 	want("ids", ids, []string{"a2", "a1", "a3", "a4"})
-	want("lines", lines, []string{"needs you", "needs you", "Edit +3", "idle 12m"})
+	want("lines", lines, []string{"allow?", "allow?", "edit . 25% ctx", "hungry . feed me"})
 	want("poses", poses, []string{"wait", "wait", "write", "hungry"})
 	want("kinds", kinds, []string{"wait", "wait", "run", "idle"})
 	if c.A[2].X != 25 || c.A[3].U != 1 || c.A[2].U != 0 || c.A[0].N != "long-wait" {
@@ -135,8 +135,8 @@ func TestAgentsTileOrderAndPoses(t *testing.T) {
 	for _, tl := range c.A {
 		got = append(got, tl.I+":"+tl.K+":"+tl.P+":"+tl.L)
 	}
-	want := []string{"w1:wait:wait:needs you", "r1:run:think:thinking", "r2:run:bash:Bash",
-		"s1:start:start:starting", "x1:err:err:error", "i1:idle:idle:idle", "e1:exit:exit:exited"}
+	want := []string{"w1:wait:wait:allow?", "r1:run:think:thinking", "r2:run:bash:bash",
+		"s1:start:start:starting...", "x1:err:err:error", "i1:idle:idle:done . 30s ago", "e1:exit:exit:exited"}
 	if !reflect.DeepEqual(got, want) {
 		t.Errorf("tiles = %q\nwant  %q", got, want)
 	}
@@ -154,8 +154,8 @@ func TestAgentsTileOrderAndPoses(t *testing.T) {
 
 func TestAgentsIdleAgeAndContext(t *testing.T) {
 	for since, want := range map[time.Duration]string{
-		59 * time.Second: "idle", 12*time.Minute + 59*time.Second: "idle 12m",
-		3*time.Hour + 59*time.Minute: "idle 3h", 50 * time.Hour: "idle 2d",
+		59 * time.Second: "done . 59s ago", 12*time.Minute + 59*time.Second: "done . 12m ago",
+		3*time.Hour + 59*time.Minute: "done . 3h ago", 50 * time.Hour: "done . 2d ago",
 	} {
 		if got := tileOf(agent("i", "f", agents.Idle, since), agentsNow).L; got != want {
 			t.Errorf("idle %v = %q, want %q", since, got, want)
@@ -473,5 +473,147 @@ func TestMarshalNoHTMLEscapes(t *testing.T) {
 	}
 	if string(b) != `{"v":1,"ts":0,"src":"<a&b>","cards":[]}` {
 		t.Errorf("Marshal = %s", b)
+	}
+}
+
+func TestTileMetaWording(t *testing.T) {
+	line := func(a agents.Agent) string { return tileOf(a, agentsNow).L }
+	run := agent("r", "f", agents.Running, time.Minute)
+	if got := line(run); got != "thinking" {
+		t.Errorf("running, no tool = %q", got)
+	}
+	run.Activity = &agents.Activity{Tool: "Bash"}
+	if got := line(run); got != "bash" {
+		t.Errorf("running no context = %q", got)
+	}
+	run.Context.Used, run.Context.Window = 41, 100
+	if got := line(run); got != "bash . 41% ctx" {
+		t.Errorf("running = %q", got)
+	}
+	for tool, verb := range map[string]string{"Task": "agent", "TodoWrite": "plan", "WebSearch": "search",
+		"WebFetch": "web", "MultiEdit": "edit", "Read": "read"} {
+		run.Activity.Tool = tool
+		if got := line(run); got != verb+" . 41% ctx" {
+			t.Errorf("verb(%s) = %q", tool, got)
+		}
+	}
+	run.Activity.Tool = "Compact"
+	if got := line(run); got != "compacting . 41%" {
+		t.Errorf("compact = %q", got)
+	}
+	run.Activity.Tool = "mcp__server__averylongtoolname"
+	if got := line(run); len(got) > TileLineChars || !strings.HasSuffix(got, "...") {
+		t.Errorf("long verb = %q", got)
+	}
+
+	w := agent("w", "f", agents.Waiting, time.Minute)
+	w.Waiting.Context = "bash \u00b7 ~/code/x"
+	if got := line(w); got != "allow bash?" {
+		t.Errorf("permission = %q", got)
+	}
+	w.Waiting.Context = "~/code/secret-project"
+	if got := line(w); got != "allow?" {
+		t.Errorf("permission, path context = %q", got)
+	}
+	w.Waiting.Kind = "question"
+	w.Waiting.Options = make([]agents.Option, 3)
+	if got := line(w); got != "pick 1 of 3" {
+		t.Errorf("question = %q", got)
+	}
+	w.Waiting.Kind = "input"
+	if got := line(w); got != "needs input" {
+		t.Errorf("input = %q", got)
+	}
+	un := agent("u", "f", agents.Idle, time.Minute)
+	un.Unseen = true
+	if got := line(un); got != "hungry . feed me" {
+		t.Errorf("unseen = %q", got)
+	}
+	if got := line(agent("i", "f", agents.Idle, 5*time.Minute)); got != "done . 5m ago" {
+		t.Errorf("idle = %q", got)
+	}
+	e := agent("e", "f", agents.Error, time.Minute)
+	if got := line(e); got != "error" {
+		t.Errorf("error = %q", got)
+	}
+	e.ErrorText = "api 529 overloaded and then some"
+	if got := line(e); got != "api 529 overl..." {
+		t.Errorf("error text = %q", got)
+	}
+	if got := line(agent("s", "f", agents.Starting, 0)); got != "starting..." {
+		t.Errorf("starting = %q", got)
+	}
+	if got := line(agent("x", "f", agents.Exited, 0)); got != "exited" {
+		t.Errorf("exited = %q", got)
+	}
+}
+
+func TestCelebratePose(t *testing.T) {
+	pose := func(since time.Duration, unseen bool) string {
+		a := agent("c", "f", agents.Idle, since)
+		a.Unseen = unseen
+		return tileOf(a, agentsNow).P
+	}
+	if got := pose(3*time.Second, false); got != "celebrate" {
+		t.Errorf("3 s = %q", got)
+	}
+	if got := pose(7*time.Second, false); got != "idle" {
+		t.Errorf("7 s = %q", got)
+	}
+	if got := pose(3*time.Second, true); got != "hungry" {
+		t.Errorf("unseen = %q", got)
+	}
+	if got := pose(5*time.Minute, true); got != "hungry" {
+		t.Errorf("unseen old = %q", got)
+	}
+}
+
+func TestTileHat(t *testing.T) {
+	a := agent("h", "docs-site", agents.Idle, time.Hour)
+	a.Cwd = "/Users/me/code/docs-site"
+	if h := tileOf(a, agentsNow).H; h == nil || *h != 1*8+1 {
+		t.Errorf("hat from cwd = %v, want 9", h)
+	}
+	a.Cwd = ""
+	s, c := HatOf("docs-site")
+	if h := tileOf(a, agentsNow).H; h == nil || *h != s*8+c {
+		t.Errorf("hat from folder = %v", h)
+	}
+	a.Folder = ""
+	tl := tileOf(a, agentsNow)
+	b, _ := json.Marshal(tl)
+	if tl.H != nil || strings.Contains(string(b), `"h":`) {
+		t.Errorf("no folder, hat %v: %s", tl.H, b)
+	}
+}
+
+func TestToneSteps(t *testing.T) {
+	for pct, want := range map[int]string{0: "ink", 59: "ink", 60: "amber", 84: "amber", 85: "accent", 100: "accent"} {
+		if got := tone(pct); got != want {
+			t.Errorf("tone(%d) = %q, want %q", pct, got, want)
+		}
+	}
+}
+
+func TestHatsWithinBudget(t *testing.T) {
+	for _, full := range []bool{true, false} {
+		o := budgetOpts(true)
+		o.Full = full
+		for i := range o.Agents {
+			o.Agents[i].Cwd = fmt.Sprintf("/Users/someone/code/project-%d", i)
+		}
+		p := Build(budgetEvents(), o, agentsNow)
+		if n := size(t, p); n > MaxPayloadBytes {
+			t.Errorf("full %v: %d bytes", full, n)
+		}
+		c := agentsCard(t, p)
+		if c == nil || len(c.A) < 4 || (full && c.Q == nil) {
+			t.Fatalf("full %v: card %+v", full, c)
+		}
+		for _, tl := range c.A {
+			if tl.H == nil {
+				t.Errorf("tile %s has no hat", tl.I)
+			}
+		}
 	}
 }

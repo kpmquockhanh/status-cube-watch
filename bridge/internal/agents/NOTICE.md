@@ -11,6 +11,8 @@ Source files used by this plan:
 - `backend/internal/daemon/daemon.go` (`Hook`, `Answer`, `subagents`, `scanMenu`, `LookPathLogin`, `shellJoin`)
 - `backend/internal/daemon/accounts.go` (`activeSessions`, single account)
 - `backend/internal/tmux/tmux.go` (`run`, `SendKeys`, `Capture`, `PaneTTYs`; default server instead of `-L agentsterm`)
+- `backend/internal/hats/hats.go` (`Auto`, `Clean`, the shape and colour order; ported as `cards.HatOf`)
+- `firmware/devices/ws169-panel/src/ui.c` (`meta`, `verb`, `ago`, `pose_of`: tile status lines and the celebrate window; reworded in `cards/agents.go`)
 - `backend/internal/claude/live.go` (`ActiveSessions`, `ttysOf`, `LiveSessions`, `isInteractiveClaude`, `sessionArg`, `newestTranscript`, `processCwds`, `findTranscript`, `projectName`)
 - `backend/internal/claude/transcript.go`
 - `backend/internal/claude/sessions.go` (`Subagents`, `TranscriptTurn`, `subagentTail`, `IsSessionID`)

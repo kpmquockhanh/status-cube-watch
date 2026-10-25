@@ -110,11 +110,11 @@ func build(events []sources.Event, o Opts, now time.Time, budget int) Payload {
 func tone(pct int) string {
 	switch {
 	case pct >= 85:
-		return "red"
+		return "accent"
 	case pct >= 60:
 		return "amber"
 	}
-	return "green"
+	return "ink"
 }
 
 type windowState struct {
