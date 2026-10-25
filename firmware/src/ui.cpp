@@ -995,25 +995,31 @@ float editorSlidePos(uint32_t now) {
 }
 
 // --- the Agents card -----------------------------------------------------------
-// agents-deck's board (docs/images/panel-board-v2.png): a two-column grid of
-// square panels that scrolls under the card's caption, one per agent: the
-// Claude chip, a pixel critter whose pose follows what it is doing (critter.h)
-// in its folder's hat, the folder name, the bridge's meta line and a context
-// bar. A waiting tile is solid orange, so it reads across the desk; a hungry
-// one (a finished turn nobody looked at) slides orange stripes. agents_layout.h
-// owns the geometry, which main.cpp hit-tests with too.
+// agents-deck's board (docs/images/panel-board-v2.png, the web app's panel
+// view: backend/internal/web/static/app.css): a two-column grid of square
+// panels that scrolls under the card's caption, one per agent: the Claude
+// chip, a mini critter with the subagent count when subagents work, a pixel
+// critter whose pose follows what it is doing (critter.h) in its folder's hat,
+// the folder name, the bridge's meta line, and a context gauge round the
+// tile's edge, filled clockwise from the top centre. A waiting tile is solid
+// orange, so it reads across the desk; a hungry one (a finished turn nobody
+// looked at) slides orange stripes. agents_layout.h owns the geometry, which
+// main.cpp hit-tests with too.
 constexpr uint32_t ACCENT_RGB = 0xFF4D00;
 constexpr uint32_t INK_RGB = 0xE8E4DC;
 constexpr uint32_t CHIP_RGB = 0xC98B6B;     // the Claude chip (agents-deck's chip_color)
-constexpr uint32_t WAIT_TRACK = 0xB23600;   // the context bar's track on orange
-constexpr int TILE_CELL = 4;                // px per critter cell on a tile: 18 x 13 cells = 72 x 52
+constexpr uint32_t RING_TRACK_RGB = 0x2A2925;  // the gauge's track (app.css --ring-track)
+constexpr uint8_t WAIT_TRACK_ALPHA = 64;    // on orange: black at 25%
+constexpr int RING_W = 2;                   // the gauge's stroke
+constexpr int TILE_CELL = 3;                // px per critter cell on a tile: the body is 42 px, ~40% of the tile
 constexpr int TILE_CRIT_X = 7;              // the body (cells 0..14) is centred: cell 0 at mid - 7 cells
-constexpr int TILE_CRIT_Y = 28;             // cell 0 this far below the tile's top (hats reach -6.5)
-constexpr int TILE_NAME_Y = 60;             // tops of the name, the meta line
-constexpr int TILE_META_Y = 77;
-constexpr int TILE_TEXT_PAD = 5;
-constexpr int TILE_BAR_INSET = 7, TILE_BAR_H = 3, TILE_BAR_BOTTOM = 4;
-constexpr int CHIP = 6, CHIP_INSET = 5;
+constexpr int TILE_CRIT_Y = 24;             // cell 0 this far below the tile's top (hats reach -6.5)
+constexpr int TILE_NAME_Y = 68;             // centres of the name, the meta line
+constexpr int TILE_META_Y = 84;
+constexpr int TILE_TEXT_PAD = 4;           // 100 px: the bridge's 16-character line at 6 px a letter
+constexpr int CHIP = 6, CHIP_INSET = 6;
+constexpr int SUBS_X = 6, SUBS_Y = 7;       // the mini critter's cell (0, 0), 1 px a cell
+constexpr int SUBS_W = 14, SUBS_TOP = -1, SUBS_BOTTOM = 9;  // its body only: cells 0..14, rows -1..9
 constexpr int STRIPE_PITCH = 16, STRIPE_W = 7;  // 5 px across the diagonal, as agents-deck draws them
 constexpr int SCROLL_BAR_W = 3;
 
@@ -1058,11 +1064,16 @@ void drawCritter(LovyanGFX *g, Pose pose, HatId hat, uint32_t ms, float ox, floa
 // --- wrapping ------------------------------------------------------------------
 constexpr size_t LINE_CAP = 64;  // more than any line 200 px can hold
 
+// True where byte `i` of `s` continues a UTF-8 character, so a cut there would
+// split it (the tile line's separator and the subagent sign are two bytes).
+bool midChar(const char *s, size_t i) { return ((uint8_t)s[i] & 0xC0) == 0x80; }
+
 // `text` cut until it and a trailing "..." fit `maxW` in the font already set.
 void ellipsize(LovyanGFX *g, const char *text, int maxW, char *out) {
   size_t k = strlen(text);
   if (k > LINE_CAP - 4) k = LINE_CAP - 4;
   for (;; k--) {
+    if (k > 0 && midChar(text, k)) continue;
     size_t e = k;
     while (e > 0 && text[e - 1] == ' ') e--;
     memcpy(out, text, e);
@@ -1087,6 +1098,7 @@ uint8_t wrapText(LovyanGFX *g, const char *text, int maxW, uint8_t maxLines, cha
     const size_t len = strlen(p);
     size_t fit = 0;
     for (size_t k = 1; k <= len && k < LINE_CAP; k++) {
+      if (k < len && midChar(p, k)) continue;
       memcpy(buf, p, k);
       buf[k] = '\0';
       if (g->textWidth(buf) > maxW) break;
@@ -1100,7 +1112,10 @@ uint8_t wrapText(LovyanGFX *g, const char *text, int maxW, uint8_t maxLines, cha
       ellipsize(g, p, maxW, out[n++]);
       break;
     }
-    if (fit == 0) fit = 1;  // not even one letter fits: never stall
+    if (fit == 0) {  // not even one letter fits: never stall
+      fit = 1;
+      while (fit < len && midChar(p, fit)) fit++;
+    }
     // End the line at the last space that fits, else cut the word.
     size_t cut = fit;
     if (p[fit] != ' ') {
@@ -1164,13 +1179,61 @@ bool tileHungry(const AgentTile &t) {
   return t.kind == AgentKind::Idle && (t.unseen || poseFromName(t.pose) == Pose::Hungry);
 }
 
+// The context gauge (app.js makeRing): a RING_W band round the tile's edge,
+// the track all the way round and `pct` of it filled clockwise from the top
+// centre: the top's right half, the right side, the bottom, the left side, the
+// top's left half.
+void drawRing(LovyanGFX *g, const LayoutRect &r, uint8_t pct, uint16_t track, uint16_t fill) {
+  const int x2 = r.x + r.w, y2 = r.y + r.h, half = r.w / 2;
+  g->fillRect(r.x, r.y, r.w, RING_W, track);
+  g->fillRect(r.x, y2 - RING_W, r.w, RING_W, track);
+  g->fillRect(r.x, r.y, RING_W, r.h, track);
+  g->fillRect(x2 - RING_W, r.y, RING_W, r.h, track);
+  int left = 2 * (r.w + r.h) * (pct > 100 ? 100 : pct) / 100;
+  int n = left < r.w - half ? left : r.w - half;  // top, centre to right
+  if (n > 0) g->fillRect(r.x + half, r.y, n, RING_W, fill);
+  left -= n;
+  n = left < r.h ? left : r.h;  // right, down
+  if (n > 0) g->fillRect(x2 - RING_W, r.y, RING_W, n, fill);
+  left -= n;
+  n = left < r.w ? left : r.w;  // bottom, right to left
+  if (n > 0) g->fillRect(x2 - n, y2 - RING_W, n, RING_W, fill);
+  left -= n;
+  n = left < r.h ? left : r.h;  // left, up
+  if (n > 0) g->fillRect(r.x, y2 - n, RING_W, n, fill);
+  left -= n;
+  n = left < half ? left : half;  // top, left to centre
+  if (n > 0) g->fillRect(r.x, r.y, n, RING_W, fill);
+}
+
+// Subagents at work (app.js updateTile): a 1 px-a-cell critter in the top-left
+// corner, its body only, and the bridge's "×N" beside it for more than one.
+void drawSubs(LovyanGFX *g, const AgentTile &t, const LayoutRect &r, uint32_t now, uint32_t body,
+              uint32_t bgRgb, uint16_t metaColor) {
+  const int ox = r.x + SUBS_X, oy = r.y + SUBS_Y;
+  int32_t cx, cy, cw, ch;  // within the grid's own clip
+  g->getClipRect(&cx, &cy, &cw, &ch);
+  const int x0 = ox > cx ? ox : (int)cx, x1 = ox + SUBS_W < cx + cw ? ox + SUBS_W : (int)(cx + cw);
+  const int y0 = oy + SUBS_TOP > cy ? oy + SUBS_TOP : (int)cy;
+  const int y1 = oy + SUBS_BOTTOM < cy + ch ? oy + SUBS_BOTTOM : (int)(cy + ch);
+  if (x1 > x0 && y1 > y0) {
+    g->setClipRect(x0, y0, x1 - x0, y1 - y0);
+    drawCritter(g, Pose::Run, hatFromCode(-1), now, ox, oy, 1, CritterInks{body, bgRgb});
+    g->setClipRect(cx, cy, cw, ch);
+  }
+  if (!t.subs[0]) return;
+  g->setFont(&V_RM11.font);
+  g->setTextDatum(bottom_left);
+  g->setTextColor(metaColor, to565(bgRgb));
+  g->drawString(t.subs, ox + SUBS_W + 2, oy + SUBS_BOTTOM + 1);
+}
+
 void drawTile(LovyanGFX *g, const AgentTile &t, const LayoutRect &r, uint32_t now) {
   const bool wait = t.kind == AgentKind::Wait, hungry = tileHungry(t);
   const bool quiet = (t.kind == AgentKind::Idle && !hungry) || t.kind == AgentKind::Exit || t.kind == AgentKind::Start;
-  const uint32_t bgRgb = wait ? ACCENT_RGB : PANEL_RGB;
+  const uint32_t bgRgb = wait ? ACCENT_RGB : t.kind == AgentKind::Exit ? EMPTY_RGB : PANEL_RGB;
   const uint16_t bg = to565(bgRgb);
   g->fillRect(r.x, r.y, r.w, r.h, bg);
-  g->drawRect(r.x, r.y, r.w, r.h, wait || hungry ? ACCENT : LINE);
   if (hungry) drawStripes(g, r, now);
 
   g->fillRect(r.x + r.w - CHIP_INSET - CHIP, r.y + CHIP_INSET, CHIP, CHIP, wait ? BG : to565(CHIP_RGB));
@@ -1184,29 +1247,17 @@ void drawTile(LovyanGFX *g, const AgentTile &t, const LayoutRect &r, uint32_t no
   drawCritter(g, poseFromName(t.pose), hatFromCode(t.hat), now, r.x + r.w / 2 - TILE_CRIT_X * TILE_CELL,
               r.y + TILE_CRIT_Y, TILE_CELL, CritterInks{body, bgRgb});
 
-  // The name in bold (12 letters fit); a longer one steps down to the label
-  // faces, whose 11 px holds the bridge's 16, as the name is what tells
-  // tiles apart. Its line is centred on the bold one's.
+  // The name and the meta line in Share Tech Mono, as the web board sets
+  // them, each cut with "..." to the tile.
   const uint16_t ink = wait ? BG : quiet ? DIM : INK;
-  const int textW = r.w - 2 * TILE_TEXT_PAD, cx = r.x + r.w / 2;
-  Vlw *nameFont = &V_RM11;
-  for (Vlw *f : {&V_RB14, &V_RM13}) {
-    g->setFont(&f->font);
-    if (g->textWidth(t.name) <= textW) {
-      nameFont = f;
-      break;
-    }
-  }
-  drawLine(g, *nameFont, t.name, cx, r.y + TILE_NAME_Y + 8, textW, ink, bg, middle_center);
   const uint16_t meta = wait ? BG : hungry || t.kind == AgentKind::Err ? ACCENT : DIM;
-  drawLine(g, V_RM11, t.line, cx, r.y + TILE_META_Y, textW, meta, bg, top_center);
+  const int textW = r.w - 2 * TILE_TEXT_PAD, cx = r.x + r.w / 2;
+  drawLine(g, V_RM13, t.name, cx, r.y + TILE_NAME_Y, textW, ink, bg, middle_center);
+  drawLine(g, V_RM11, t.line, cx, r.y + TILE_META_Y, textW, meta, bg, middle_center);
+  if (t.hasSubs) drawSubs(g, t, r, now, body, bgRgb, meta);
 
-  // Context used, along the bottom.
-  const int bx = r.x + TILE_BAR_INSET, bw = r.w - 2 * TILE_BAR_INSET;
-  const int by = r.y + r.h - TILE_BAR_BOTTOM - TILE_BAR_H;
-  g->fillRect(bx, by, bw, TILE_BAR_H, wait ? to565(WAIT_TRACK) : LINE);
-  const int fill = bw * (t.ctx > 100 ? 100 : t.ctx) / 100;
-  if (fill > 0) g->fillRect(bx, by, fill, TILE_BAR_H, ink);
+  drawRing(g, r, t.ctx, wait ? blend565(BG_RGB, ACCENT_RGB, WAIT_TRACK_ALPHA) : to565(RING_TRACK_RGB),
+           wait ? BG : ACCENT);
 }
 
 // A slot with no agent, so the grid always shows whole rows and a screenful.

@@ -230,7 +230,7 @@ bool hatsShot(Display &lcd) {
       const int shape = first + i;
       snprintf(t.id, sizeof(t.id), "h%02d", shape);
       snprintf(t.name, sizeof(t.name), "%s", NAMES[shape]);
-      snprintf(t.line, sizeof(t.line), "hat %d . colour %d", shape, shape % 8);
+      snprintf(t.line, sizeof(t.line), "hat %d \xC2\xB7 colour %d", shape, shape % 8);
       snprintf(t.pose, sizeof(t.pose), "%s", POSES[i % 4]);
       t.kind = KINDS[i % 4];
       t.ctx = (uint8_t)(10 + shape * 7);

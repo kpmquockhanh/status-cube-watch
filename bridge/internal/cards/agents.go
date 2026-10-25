@@ -28,7 +28,9 @@ const MaxTiles = 8
 const (
 	TileIDChars       = 15  // Tile.I, AgentPrompt.I
 	TileNameChars     = 16  // Tile.N
-	TileLineChars     = 16  // Tile.L
+	TileLineChars     = 16  // Tile.L, in characters: it may hold the two-byte "\u00b7"
+	TileLineBytes     = 23  // Tile.L, in bytes (payload.h: line[24])
+	TileSubsBytes     = 7   // Tile.S: "\u00d7" and the count
 	TileKindChars     = 5   // Tile.K: run|wait|idle|err|exit|start
 	TilePoseChars     = 9   // Tile.P: the longest is "celebrate"
 	PromptIDChars     = 15  // AgentPrompt.P
@@ -54,17 +56,32 @@ func fitMarked(s string, n int) string {
 	return strings.TrimRight(all[:n-3], " ") + "..."
 }
 
+// sep joins a tile's status-line parts, as agents-deck does. It is the one
+// non-ASCII character a tile line carries; the firmware's rm11 has the glyph.
+const sep = " \u00b7 "
+
+// fitLine cuts a status line to TileLineChars characters (it may hold sep),
+// ending a cut one in "...".
+func fitLine(s string) string {
+	r := []rune(s)
+	if len(r) <= TileLineChars {
+		return s
+	}
+	return strings.TrimRight(string(r[:TileLineChars-3]), " ") + "..."
+}
+
 // Tile is one agent on the Agents card. It never carries a tool's detail
 // (paths, commands, URLs) or a prompt's text.
 type Tile struct {
-	I string `json:"i"`           // agent id
-	N string `json:"n"`           // folder name
-	L string `json:"l"`           // status line: "allow bash?", "edit . 41% ctx", "hungry . feed me", "done . 12m ago", ...
-	K string `json:"k"`           // run|wait|idle|err|exit|start
-	P string `json:"p"`           // pose: idle|start|run|think|read|write|bash|web|plan|delegate|compact|wait|err|exit|hungry|celebrate
-	X int    `json:"x"`           // context used, 0..100
-	U int    `json:"u,omitempty"` // 1 = finished a turn nobody looked at
-	H *int   `json:"h,omitempty"` // hat: shape*8 + colour (0..103); absent = no hat
+	I string  `json:"i"`           // agent id
+	N string  `json:"n"`           // folder name
+	L string  `json:"l"`           // status line: "allow bash?", "edit · 41% ctx", "hungry · feed me", "done · 12m ago", ...
+	K string  `json:"k"`           // run|wait|idle|err|exit|start
+	P string  `json:"p"`           // pose: idle|start|run|think|read|write|bash|web|plan|delegate|compact|wait|err|exit|hungry|celebrate
+	X int     `json:"x"`           // context used, 0..100
+	U int     `json:"u,omitempty"` // 1 = finished a turn nobody looked at
+	H *int    `json:"h,omitempty"` // hat: shape*8 + colour (0..103); absent = no hat
+	S *string `json:"s,omitempty"` // subagents at work: "" for one, "×N" for more; absent = none
 }
 
 // AgentPrompt is the longest-waiting agent's question; only in the loopback
@@ -171,7 +188,7 @@ func agentsCardOf(list []agents.Agent, full bool, now time.Time) *Card {
 }
 
 func tileOf(a agents.Agent, now time.Time) Tile {
-	t := Tile{I: fitN(a.ID, TileIDChars), N: fitN(a.Folder, TileNameChars), X: contextPct(a.Context.Used, a.Context.Window)}
+	t := Tile{I: fitN(a.ID, TileIDChars), N: fitMarked(cmp.Or(a.Title, a.Folder), TileNameChars), X: contextPct(a.Context.Used, a.Context.Window)}
 	if dir := cmp.Or(a.Cwd, a.Folder); dir != "" {
 		shape, color := HatOf(dir)
 		h := shape*hatColors + color
@@ -180,6 +197,13 @@ func tileOf(a agents.Agent, now time.Time) Tile {
 	if a.Unseen {
 		t.U = 1
 	}
+	if n := len(a.Subagents); n > 0 {
+		s := ""
+		if n > 1 {
+			s = "\u00d7" + strconv.Itoa(n)
+		}
+		t.S = &s
+	}
 	switch a.Status {
 	case agents.Waiting:
 		t.K, t.P, t.L = "wait", "wait", waitLine(a.Waiting)
@@ -187,34 +211,34 @@ func tileOf(a agents.Agent, now time.Time) Tile {
 		t.K, t.P, t.L = "run", "think", "thinking"
 		if a.Activity != nil && a.Activity.Tool != "" {
 			t.P = toolPose(a.Activity.Tool)
-			t.L = toolVerb(a.Activity.Tool)
+			t.L = Fit(toolVerb(a.Activity.Tool), math.MaxInt)
 		}
 		if a.Context.Window > 0 {
-			// The full "<verb> . N% ctx" when it fits, else drop the word "ctx".
-			if full := t.L + " . " + strconv.Itoa(t.X) + "% ctx"; len(full) <= TileLineChars {
+			// The full "<verb> · N% ctx" when it fits, else drop the word "ctx".
+			if full := t.L + sep + strconv.Itoa(t.X) + "% ctx"; len([]rune(full)) <= TileLineChars {
 				t.L = full
 			} else {
-				t.L += " . " + strconv.Itoa(t.X) + "%"
+				t.L += sep + strconv.Itoa(t.X) + "%"
 			}
 		}
 	case agents.Starting:
 		t.K, t.P, t.L = "start", "start", "starting..."
 	case agents.Error:
-		t.K, t.P, t.L = "err", "err", cmp.Or(a.ErrorText, "error")
+		t.K, t.P, t.L = "err", "err", cmp.Or(Fit(a.ErrorText, math.MaxInt), "error")
 	case agents.Exited:
 		t.K, t.P, t.L = "exit", "exit", "exited"
 	default: // idle
 		t.K, t.P = "idle", "idle"
 		switch {
 		case a.Unseen:
-			t.P, t.L = "hungry", "hungry . feed me"
+			t.P, t.L = "hungry", "hungry"+sep+"feed me"
 		case !a.StatusSince.IsZero() && now.Sub(a.StatusSince) < celebrateFor:
-			t.P, t.L = "celebrate", "done . "+agoOf(a.StatusSince, now)+" ago"
+			t.P, t.L = "celebrate", "done"+sep+agoOf(a.StatusSince, now)+" ago"
 		default:
-			t.L = "done . " + agoOf(a.StatusSince, now) + " ago"
+			t.L = "done" + sep + agoOf(a.StatusSince, now) + " ago"
 		}
 	}
-	t.L = fitMarked(t.L, TileLineChars)
+	t.L = fitLine(t.L)
 	return t
 }
 

@@ -53,6 +53,10 @@ void testParsesTilesAndPrompt() {
   CHECK(!a.prompt.notInTmux && !a.prompt.cut);
   const AgentTile *t = agentsTile(a, "l00003");
   CHECK(t && !strcmp(t->name, "claude-status..."));
+  CHECK(t && !t->hasSubs);
+  t = agentsTile(a, "l00002");
+  CHECK(t && t->hasSubs && !strcmp(t->subs, "×3"));
+  CHECK(t && !strcmp(t->line, "edit · 41% ctx"));
   CHECK(agentsTile(a, "nope") == nullptr);
 }
 
@@ -66,7 +70,7 @@ void testLongestPose() {
   CHECK(parse(slurp("fixtures/agents-many.json")));
   const AgentTile *t = agentsTile(g_p.agents, "l00007");
   CHECK(t && !strcmp(t->pose, "celebrate"));
-  CHECK(t && !strcmp(t->line, "done . 4s ago"));
+  CHECK(t && !strcmp(t->line, "done · 4s ago"));
 }
 
 void testFlags() {

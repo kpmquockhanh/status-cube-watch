@@ -42,7 +42,8 @@ ASCII = [chr(c) for c in range(0x20, 0x7F)]
 # Street names on the navigation screen: Vietnamese letters plus the middle dot.
 VIET = (list("ÀÁÂÃÈÉÊÌÍÒÓÔÕÙÚÝàáâãèéêìíòóôõùúýĂăĐđĨĩŨũƠơƯư\u00b7")
         + [chr(c) for c in range(0x1EA0, 0x1EFA)])
-CHARSETS = {"b18v": ASCII + sorted(set(VIET)), "s12v": ASCII + sorted(set(VIET))}
+# The tile meta line's separator and the subagent count's sign (bridge agents.go).
+CHARSETS = {"b18v": ASCII + sorted(set(VIET)), "s12v": ASCII + sorted(set(VIET)), "rm11": ASCII + ["\u00b7", "\u00d7"]}
 
 
 def build(weight, size, chars, ttf):

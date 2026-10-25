@@ -11,7 +11,7 @@
     --bg: #0a0a0a; --panel: #141412; --ink: #e8e4dc; --dim: #7a776f; --faint: #262622;
     --accent: #ff4d00; --blue: #6f8fd8; --green: #6dbe6a;
     --amber: #e8b94a; --violet: #a68bd8; --red: #ff4d00;
-    --chip: #c98b6b; --track-wait: #b23600;
+    --chip: #c98b6b; --empty: #0b0b0b;
     --mono: "Roboto Mono", "Share Tech Mono", ui-monospace, Menlo, monospace;
     --ease-out: cubic-bezier(0.23, 1, 0.32, 1);
   }
@@ -138,34 +138,41 @@
   .ag-view { position: absolute; top: 54px; left: 0; width: 240px; height: 200px; overflow-y: auto; scrollbar-width: none; }
   .ag-view::-webkit-scrollbar { display: none; }
   .ag-grid { position: relative; }
-  /* Tiles are 108 x 96 (TILE_W/TILE_H in agents_layout.h), square, with a 1 px
-     line; the critter is a plain block and its hat a band in the hat's colour
-     (`h` & 7, HAT_COLORS below). */
-  .tile { position: absolute; width: 108px; height: 96px; box-sizing: border-box; background: var(--panel); border: 1px solid var(--faint); overflow: hidden; text-align: center; }
-  .tile.wait { background: var(--accent); border-color: var(--accent); color: var(--bg); cursor: pointer; }
-  .tile.hungry { border-color: var(--accent); background: repeating-linear-gradient(135deg, var(--panel) 0 6px, #3a1a0a 6px 8px); }
-  .tile .chip { position: absolute; top: 5px; right: 5px; width: 8px; height: 8px; background: var(--chip); }
+  /* Tiles are 108 x 96 (TILE_W/TILE_H in agents_layout.h), square, with the
+     context gauge round the edge (drawRing in ui.cpp, agents-deck's makeRing):
+     a 2 px track, `x` % of it filled clockwise from the top centre. The
+     critter is a plain block and its hat a band in the hat's colour (`h` & 7,
+     HAT_COLORS below); `s` puts a mini critter and its text top left. */
+  .tile { position: absolute; width: 108px; height: 96px; box-sizing: border-box; background: var(--panel); overflow: hidden; text-align: center; }
+  .tile.wait { background: var(--accent); color: var(--bg); cursor: pointer; }
+  .tile.exit { background: var(--empty); }
+  .tile.hungry { background: repeating-linear-gradient(135deg, var(--panel) 0 6px, #3a1a0a 6px 8px); }
+  .tile .gauge { position: absolute; inset: 0; width: 108px; height: 96px; }
+  .tile .gauge path { fill: none; stroke-width: 2; stroke-linejoin: miter; }
+  .tile .gauge .rt { stroke: #2a2925; }
+  .tile .gauge .rf { stroke: var(--accent); }
+  .tile.wait .gauge .rt { stroke: rgba(10, 10, 10, 0.25); }
+  .tile.wait .gauge .rf { stroke: var(--bg); }
+  .tile .chip { position: absolute; top: 6px; right: 6px; width: 6px; height: 6px; background: var(--chip); }
   .tile.wait .chip { background: var(--bg); }
-  .tile .n { position: absolute; left: 5px; right: 5px; top: 60px; font-size: 12px; font-weight: 700; line-height: 16px; white-space: nowrap; overflow: hidden; }
-  .tile .l { position: absolute; left: 5px; right: 5px; top: 77px; font-size: 11px; line-height: 13px; color: var(--dim); white-space: nowrap; overflow: hidden; }
+  .tile .subs { position: absolute; left: 6px; top: 6px; display: flex; align-items: flex-end; gap: 2px; font-size: 11px; line-height: 10px; color: var(--dim); }
+  .tile .subs i { width: 14px; height: 7px; background: var(--dim); }
+  .tile .n, .tile .l { position: absolute; left: 4px; right: 4px; font-family: "Share Tech Mono", ui-monospace, Menlo, monospace; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+  .tile .n { top: 60px; font-size: 13px; line-height: 16px; }
+  .tile .l { top: 77px; font-size: 11px; line-height: 14px; color: var(--dim); }
   .tile.idle .n, .tile.exit .n, .tile.start .n { color: var(--dim); }
   .tile.hungry .n { color: var(--ink); }
-  .tile.hungry .l, .tile.err .l { color: var(--accent); }
-  .tile.wait .l { color: var(--bg); }
-  .tile .meter { position: absolute; left: 7px; right: 7px; bottom: 4px; height: 3px; background: var(--faint); }
-  .tile .meter i { display: block; height: 100%; background: var(--ink); }
-  .tile.idle .meter i, .tile.exit .meter i, .tile.start .meter i { background: var(--dim); }
-  .tile.wait .meter { background: var(--track-wait); }
-  .tile.wait .meter i { background: var(--bg); }
-  .crit { position: absolute; left: 24px; top: 30px; width: 56px; height: 20px; background: var(--dim); }
-  .crit::before, .crit::after { content: ""; position: absolute; top: 5px; width: 4px; height: 8px; background: var(--panel); }
-  .crit::before { left: 16px; }
-  .crit::after { right: 16px; }
-  .tile.run .crit, .tile.hungry .crit { background: var(--accent); }
-  .tile.err .crit { background: var(--ink); }
-  .tile.wait .crit { background: var(--bg); }
+  .tile.hungry .l, .tile.err .l, .tile.hungry .subs, .tile.err .subs { color: var(--accent); }
+  .tile.wait .l, .tile.wait .subs { color: var(--bg); }
+  .crit { position: absolute; left: 33px; top: 27px; width: 42px; height: 18px; background: var(--dim); }
+  .crit::before, .crit::after { content: ""; position: absolute; top: 4px; width: 3px; height: 6px; background: var(--panel); }
+  .crit::before { left: 12px; }
+  .crit::after { right: 12px; }
+  .tile.run .crit, .tile.hungry .crit, .tile.run .subs i, .tile.hungry .subs i { background: var(--accent); }
+  .tile.err .crit, .tile.err .subs i { background: var(--ink); }
+  .tile.wait .crit, .tile.wait .subs i { background: var(--bg); }
   .tile.wait .crit::before, .tile.wait .crit::after { background: var(--accent); }
-  .crit .hat { position: absolute; left: 12px; top: -8px; width: 32px; height: 8px; }
+  .crit .hat { position: absolute; left: 9px; top: -6px; width: 24px; height: 6px; }
   /* The prompt screen is the cube's: all accent, black text, a black detail box,
      the first button solid black with accent text, the others a 2 px black
      outline, and a button that is off (the browser never answers, so all of
@@ -248,6 +255,7 @@ const cards = () => (data.cards.length ? data.cards : [WAITING]);
 // keeps drawing whatever the bridge sent.
 const esc = (x) => String(x ?? '').replace(/[&<>"]/g, (ch) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' }[ch]));
 let promptAgent = null; // the tile whose prompt screen is open
+const RING_D = 'M54 1H107V95H1V1Z'; // the gauge's path: from the top centre, clockwise
 
 function paintAgents(card, color) {
   const tiles = card.a.filter((t) => t && typeof t === 'object');
@@ -262,8 +270,10 @@ function paintAgents(card, color) {
     const hat = Number.isInteger(t.h) && t.h >= 0 && t.h < 104
       ? `<span class="hat" style="background:${HAT_COLORS[t.h % 8]}"></span>` : '';
     return `<div class="tile ${k}${hungry ? ' hungry' : ''}" data-id="${esc(t.i)}" style="left:${i & 1 ? 123 : 9}px;top:${Math.floor(i / 2) * 102}px">` +
-      `<span class="chip"></span><div class="n">${esc(t.n)}</div><div class="crit">${hat}</div>` +
-      `<div class="l">${esc(t.l)}</div><div class="meter"><i style="width:${x}%"></i></div></div>`;
+      `<span class="chip"></span>${typeof t.s === 'string' ? `<span class="subs"><i></i>${esc(t.s)}</span>` : ''}` +
+      `<div class="n">${esc(t.n)}</div><div class="crit">${hat}</div><div class="l">${esc(t.l)}</div>` +
+      `<svg class="gauge" viewBox="0 0 108 96"><path class="rt" d="${RING_D}"/>` +
+      `<path class="rf" d="${RING_D}" pathLength="100" stroke-dasharray="${x} 100"/></svg></div>`;
   }).join('');
   const open = promptAgent && tiles.find((t) => String(t.i) === promptAgent && t.k === 'wait');
   if (promptAgent && !open) promptAgent = null; // gone or no longer waiting: close, as AgentView does

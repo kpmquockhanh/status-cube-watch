@@ -53,12 +53,14 @@ enum class PromptKind : uint8_t { Permission, Question, Input };       // unknow
 struct AgentTile {
   char id[16];
   char name[17];
-  char line[17];
+  char line[24];  // UTF-8: its separator, U+00B7, takes two bytes (agents.go TileLineBytes)
   char pose[10];  // the longest is "celebrate"
   AgentKind kind;
   uint8_t ctx;   // context used, 0-100
   bool unseen;   // finished a turn nobody looked at
   int16_t hat;   // shape * 8 + colour, 0-103; -1 = no hat
+  bool hasSubs;  // subagents at work: a mini critter in the corner
+  char subs[8];  // beside it: "" for one, "×N" (U+00D7) for more (agents.go TileSubsBytes)
 };
 
 struct PromptOpt {

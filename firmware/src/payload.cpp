@@ -65,6 +65,8 @@ void parseAgents(JsonObjectConst c, uint8_t cardIndex, AgentsData &a) {
     const int x = t["x"] | 0;
     tile.ctx = x < 0 ? 0 : (x > 100 ? 100 : (uint8_t)x);
     tile.unseen = (t["u"] | 0) != 0;
+    tile.hasSubs = t["s"].is<const char *>();
+    strlcpy(tile.subs, t["s"] | "", sizeof(tile.subs));
     // Only an integer 0..103 counts; anything else (absent, string, float, out of range) is no hat.
     tile.hat = -1;
     if (t["h"].is<int>()) {

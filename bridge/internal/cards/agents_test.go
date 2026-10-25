@@ -7,6 +7,7 @@ import (
 	"strings"
 	"testing"
 	"time"
+	"unicode/utf8"
 
 	"claude-status-cube/bridge/internal/agents"
 	"claude-status-cube/bridge/internal/limits"
@@ -69,7 +70,7 @@ func TestAgentsCardOrderAndSummary(t *testing.T) {
 		}
 	}
 	want("ids", ids, []string{"a2", "a1", "a3", "a4"})
-	want("lines", lines, []string{"allow?", "allow?", "edit . 25% ctx", "hungry . feed me"})
+	want("lines", lines, []string{"allow?", "allow?", "edit · 25% ctx", "hungry · feed me"})
 	want("poses", poses, []string{"wait", "wait", "write", "hungry"})
 	want("kinds", kinds, []string{"wait", "wait", "run", "idle"})
 	if c.A[2].X != 25 || c.A[3].U != 1 || c.A[2].U != 0 || c.A[0].N != "long-wait" {
@@ -136,7 +137,7 @@ func TestAgentsTileOrderAndPoses(t *testing.T) {
 		got = append(got, tl.I+":"+tl.K+":"+tl.P+":"+tl.L)
 	}
 	want := []string{"w1:wait:wait:allow?", "r1:run:think:thinking", "r2:run:bash:bash",
-		"s1:start:start:starting...", "x1:err:err:error", "i1:idle:idle:done . 30s ago", "e1:exit:exit:exited"}
+		"s1:start:start:starting...", "x1:err:err:error", "i1:idle:idle:done · 30s ago", "e1:exit:exit:exited"}
 	if !reflect.DeepEqual(got, want) {
 		t.Errorf("tiles = %q\nwant  %q", got, want)
 	}
@@ -154,8 +155,8 @@ func TestAgentsTileOrderAndPoses(t *testing.T) {
 
 func TestAgentsIdleAgeAndContext(t *testing.T) {
 	for since, want := range map[time.Duration]string{
-		59 * time.Second: "done . 59s ago", 12*time.Minute + 59*time.Second: "done . 12m ago",
-		3*time.Hour + 59*time.Minute: "done . 3h ago", 50 * time.Hour: "done . 2d ago",
+		59 * time.Second: "done · 59s ago", 12*time.Minute + 59*time.Second: "done · 12m ago",
+		3*time.Hour + 59*time.Minute: "done · 3h ago", 50 * time.Hour: "done · 2d ago",
 	} {
 		if got := tileOf(agent("i", "f", agents.Idle, since), agentsNow).L; got != want {
 			t.Errorf("idle %v = %q, want %q", since, got, want)
@@ -324,7 +325,7 @@ func TestAgentsPayloadBudget(t *testing.T) {
 	if len(c.A) != MaxTiles || c.Q == nil {
 		t.Fatalf("without extra cards: %d tiles, q %+v", len(c.A), c.Q)
 	}
-	if c.A[0].N != "du-an-dep-du-an-" || c.Q.T == "" || c.Q.D == "" || len(c.Q.O) != 6 {
+	if c.A[0].N != "du-an-dep-du-..." || c.Q.T == "" || c.Q.D == "" || len(c.Q.O) != 6 {
 		t.Errorf("tile %+v q %+v", c.A[0], c.Q)
 	}
 	// With the extra cards on, they go before any prompt data.
@@ -487,22 +488,22 @@ func TestTileMetaWording(t *testing.T) {
 		t.Errorf("running no context = %q", got)
 	}
 	run.Context.Used, run.Context.Window = 41, 100
-	if got := line(run); got != "bash . 41% ctx" {
+	if got := line(run); got != "bash · 41% ctx" {
 		t.Errorf("running = %q", got)
 	}
 	for tool, verb := range map[string]string{"Task": "agent", "TodoWrite": "plan", "WebSearch": "search",
 		"WebFetch": "web", "MultiEdit": "edit", "Read": "read"} {
 		run.Activity.Tool = tool
-		if got := line(run); got != verb+" . 41% ctx" {
+		if got := line(run); got != verb+" · 41% ctx" {
 			t.Errorf("verb(%s) = %q", tool, got)
 		}
 	}
 	run.Activity.Tool = "Compact"
-	if got := line(run); got != "compacting . 41%" {
+	if got := line(run); got != "compacting · 41%" {
 		t.Errorf("compact = %q", got)
 	}
 	run.Activity.Tool = "mcp__server__averylongtoolname"
-	if got := line(run); len(got) > TileLineChars || !strings.HasSuffix(got, "...") {
+	if got := line(run); utf8.RuneCountInString(got) > TileLineChars || len(got) > TileLineBytes || !strings.HasSuffix(got, "...") {
 		t.Errorf("long verb = %q", got)
 	}
 
@@ -526,10 +527,10 @@ func TestTileMetaWording(t *testing.T) {
 	}
 	un := agent("u", "f", agents.Idle, time.Minute)
 	un.Unseen = true
-	if got := line(un); got != "hungry . feed me" {
+	if got := line(un); got != "hungry · feed me" {
 		t.Errorf("unseen = %q", got)
 	}
-	if got := line(agent("i", "f", agents.Idle, 5*time.Minute)); got != "done . 5m ago" {
+	if got := line(agent("i", "f", agents.Idle, 5*time.Minute)); got != "done · 5m ago" {
 		t.Errorf("idle = %q", got)
 	}
 	e := agent("e", "f", agents.Error, time.Minute)
@@ -615,5 +616,57 @@ func TestHatsWithinBudget(t *testing.T) {
 				t.Errorf("tile %s has no hat", tl.I)
 			}
 		}
+	}
+}
+
+// A tile's subagent badge is agents-deck's: a mini critter, plus "×N" for
+// more than one.
+func TestTileSubagentBadge(t *testing.T) {
+	a := agent("r", "f", agents.Running, time.Minute)
+	if s := tileOf(a, agentsNow).S; s != nil {
+		t.Errorf("no subagents = %q, want absent", *s)
+	}
+	a.Subagents = make([]agents.Subagent, 1)
+	if s := tileOf(a, agentsNow).S; s == nil || *s != "" {
+		t.Errorf("one subagent = %v, want \"\"", s)
+	}
+	a.Subagents = make([]agents.Subagent, 3)
+	if s := tileOf(a, agentsNow).S; s == nil || *s != "×3" {
+		t.Errorf("three subagents = %v, want ×3", s)
+	}
+	b, _ := json.Marshal(tileOf(agent("r", "f", agents.Running, time.Minute), agentsNow))
+	if strings.Contains(string(b), `"s"`) {
+		t.Errorf("no subagents marshals %s", b)
+	}
+}
+
+// Only the separator is non-ASCII: tool names and error text are folded.
+func TestTileLineFoldsToASCII(t *testing.T) {
+	e := agent("e", "f", agents.Error, time.Minute)
+	e.ErrorText = "café “x”"
+	if got := tileOf(e, agentsNow).L; got != `cafe "x"` {
+		t.Errorf("error = %q", got)
+	}
+	r := agent("r", "f", agents.Running, time.Minute)
+	r.Activity = &agents.Activity{Tool: "Édit☃"}
+	if got := tileOf(r, agentsNow).L; got != "edit" {
+		t.Errorf("verb = %q", got)
+	}
+}
+
+// A tile is named by its session's title, as agents-deck's board is, so two
+// agents in one folder read apart; with no title it falls back to the folder.
+func TestTileNameIsTheTitle(t *testing.T) {
+	a := agent("r", "claude-status-cube", agents.Running, time.Minute)
+	if got := tileOf(a, agentsNow).N; got != "claude-status..." {
+		t.Errorf("no title = %q", got)
+	}
+	a.Title = "Agents deck tiles"
+	if got := tileOf(a, agentsNow).N; got != "Agents deck t..." {
+		t.Errorf("long title = %q", got)
+	}
+	a.Title = "fix login"
+	if got := tileOf(a, agentsNow).N; got != "fix login" {
+		t.Errorf("title = %q", got)
 	}
 }

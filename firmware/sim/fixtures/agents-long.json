@@ -4,7 +4,7 @@
  {"t":"AGENTS","v":"4","s1":"1 NEEDS YOU","s2":"","c":"accent",
   "a":[
    {"i":"l00011","n":"payments-gateway","l":"allow webfetch?","k":"wait","p":"wait","x":55,"h":34},
-   {"i":"l00012","n":"kubernetes-nodes","l":"compacting . 97%","k":"run","p":"compact","x":97,"h":36},
-   {"i":"l00013","n":"release-pipel...","l":"hungry . feed me","k":"idle","p":"hungry","x":100,"u":1,"h":75},
+   {"i":"l00012","n":"kubernetes-nodes","l":"compacting · 97%","k":"run","p":"compact","x":97,"h":36},
+   {"i":"l00013","n":"release-pipel...","l":"hungry · feed me","k":"idle","p":"hungry","x":100,"u":1,"h":75},
    {"i":"l00014","n":"auth-service-api","l":"api 529 overl...","k":"err","p":"err","x":64,"h":91}]}
 ]}
