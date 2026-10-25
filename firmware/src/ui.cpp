@@ -860,7 +860,7 @@ void drawSwitch(LovyanGFX *g, int x, int cy, bool on, uint16_t accent) {
 }
 
 // "15 min" as a bold number and a small unit on one baseline; a value with no
-// space ("63%", "OFF") is all bold.
+// space ("63%", "off") is all bold.
 void drawSheetValue(LovyanGFX *g, const char *value, int x, int baseline, uint16_t color) {
   char num[16];
   size_t n = 0;
@@ -913,9 +913,9 @@ void drawSheetBar(LovyanGFX *g, uint16_t accent, int yOff) {
   g->setFont(&V_RB18.font);
   g->setTextDatum(middle_center);
   g->setTextColor(INK, LINE);
-  g->drawString("RESET", reset.x + reset.w / 2, reset.y + reset.h / 2 + yOff);
+  g->drawString("reset", reset.x + reset.w / 2, reset.y + reset.h / 2 + yOff);
   g->setTextColor(BG, accent);
-  g->drawString("DONE", done.x + done.w / 2, done.y + done.h / 2 + yOff);
+  g->drawString("done", done.x + done.w / 2, done.y + done.h / 2 + yOff);
 }
 
 // The sheet body, `yOff` px from its resting place so it can slide (negative:
@@ -952,6 +952,7 @@ void drawDevicePanel(LovyanGFX *g, const DeviceSettings &s, int yOff) {
   for (int r = 0; r < DEV_EDIT_ROWS; r++) {
     char buf[12];
     devEditorValue(r, s, buf, sizeof(buf));
+    lowerCopy(buf, buf, sizeof(buf));  // "OFF", "MED": lower-case like every label
     DeviceSettings dec = s, inc = s;
     devEditorApply(dec, EditHit{EditAction::Dec, (uint8_t)r}, s, s);
     devEditorApply(inc, EditHit{EditAction::Inc, (uint8_t)r}, s, s);
@@ -1634,7 +1635,7 @@ void uiUnlock(Display &lcd, bool waiting) {
   g->setFont(&V_RB24.font);
   g->setTextColor(INK, BG);
   g->drawString(waiting ? "unlocking" : "tap to unlock", CX, 186);
-  drawLabel(g, waiting ? "Check your Mac" : "Your Mac is locked", CX, 214, DIM, middle_center);
+  drawLabel(g, waiting ? "check your mac" : "your mac is locked", CX, 214, DIM, middle_center);
 
   drawLabel(g, "swipe for the cards", CX, 256, MUTED, middle_center);
   present(lcd);
