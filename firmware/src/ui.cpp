@@ -37,13 +37,14 @@ constexpr uint32_t RGB888[7] = {
 
 constexpr uint32_t BG_RGB = 0x000000;
 constexpr uint32_t PANEL_RGB = 0x141412;  // a lifted surface: the display panel
+constexpr uint32_t TILE_RGB = 0x0F0F0D;   // a critter's ground: Agents tiles, hat picker cells (darker than PANEL)
 constexpr uint32_t DIM_RGB = 0x7A776F;    // secondary text
 constexpr uint32_t LINE_RGB = 0x262622;   // hairlines, tracks, idle buttons
 constexpr uint32_t MUTED_RGB = 0x4A4842;  // a disabled glyph on LINE
 constexpr uint32_t EMPTY_RGB = 0x0B0B0B;  // an empty slot
 
 uint16_t g_palette[7];
-uint16_t BG, PANEL, INK, DIM, LINE, ACCENT, EMPTY;
+uint16_t BG, PANEL, TILE, INK, DIM, LINE, ACCENT, EMPTY;
 // MUTED a disabled glyph; ACC_DEV the panel's accent.
 uint16_t MUTED, ACC_DEV;
 
@@ -1163,7 +1164,7 @@ void drawScrollBar(LovyanGFX *g, int x, int viewY, int viewH, int contentH, int 
 // lines at 20% from bottom-left to top-right every 16 px, moving one pixel
 // every 60 ms. Drawn as runs along each row, inside the tile's outline.
 void drawStripes(LovyanGFX *g, const LayoutRect &r, uint32_t now) {
-  const uint16_t c = blend565(ACCENT_RGB, PANEL_RGB, 51);
+  const uint16_t c = blend565(ACCENT_RGB, TILE_RGB, 51);
   const int shift = (int)((now / 60) % STRIPE_PITCH);
   const int y2 = r.y + r.h - 1;
   for (int y = r.y + 1; y < y2; y++) {
@@ -1236,7 +1237,7 @@ void drawSubs(LovyanGFX *g, const AgentTile &t, const LayoutRect &r, uint32_t no
 void drawTile(LovyanGFX *g, const AgentTile &t, const LayoutRect &r, uint32_t now) {
   const bool wait = t.kind == AgentKind::Wait, hungry = tileHungry(t);
   const bool quiet = (t.kind == AgentKind::Idle && !hungry) || t.kind == AgentKind::Exit || t.kind == AgentKind::Start;
-  const uint32_t bgRgb = wait ? ACCENT_RGB : t.kind == AgentKind::Exit ? EMPTY_RGB : PANEL_RGB;
+  const uint32_t bgRgb = wait ? ACCENT_RGB : t.kind == AgentKind::Exit ? EMPTY_RGB : TILE_RGB;
   const uint16_t bg = to565(bgRgb);
   g->fillRect(r.x, r.y, r.w, r.h, bg);
   if (hungry) drawStripes(g, r, now);
@@ -1470,6 +1471,7 @@ void uiBegin(Display &) {
   for (int i = 0; i < 7; i++) g_palette[i] = to565(RGB888[i]);
   BG = to565(BG_RGB);
   PANEL = to565(PANEL_RGB);
+  TILE = to565(TILE_RGB);
   INK = g_palette[ACC_INK];
   DIM = to565(DIM_RGB);
   LINE = to565(LINE_RGB);
@@ -1906,24 +1908,24 @@ void uiHatPicker(Display &lcd, const AgentTile &tile, int16_t hat, bool autoOn, 
   const int8_t color = cur.shape >= 0 ? cur.color : 0;
   for (int i = 0; i < HAT_PICK_CELLS; i++) {
     const LayoutRect r = hatPickCell(i);
-    g->fillRect(r.x, r.y, r.w, r.h, PANEL);
+    g->fillRect(r.x, r.y, r.w, r.h, TILE);
     bool chosen;
     if (i == HAT_PICK_AUTO_CELL) {
       chosen = autoOn;
       g->setFont(&V_RM13.font);
       g->setTextDatum(middle_center);
-      g->setTextColor(chosen ? INK : DIM, PANEL);
+      g->setTextColor(chosen ? INK : DIM, TILE);
       g->drawString("auto", r.x + r.w / 2, r.y + r.h / 2);
     } else {
       const bool none = i == HAT_PICK_NONE_CELL;
       chosen = !autoOn && (none ? cur.shape < 0 : cur.shape == i);
       const HatId h = none ? HatId{-1, 0} : HatId{(int8_t)i, color};
       drawCritter(g, Pose::Idle, h, 0, r.x + r.w / 2 - TILE_CRIT_X * PICK_CELL, r.y + PICK_CRIT_Y, PICK_CELL,
-                  CritterInks{DIM_RGB, PANEL_RGB});
+                  CritterInks{DIM_RGB, TILE_RGB});
       if (none) {
         g->setFont(&V_RM11.font);
         g->setTextDatum(top_center);
-        g->setTextColor(chosen ? INK : DIM, PANEL);
+        g->setTextColor(chosen ? INK : DIM, TILE);
         g->drawString("none", r.x + r.w / 2, r.y + 3);
       }
     }

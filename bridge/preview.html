@@ -8,7 +8,7 @@
   :root {
     /* agents-deck's palette, the same tokens as the top of firmware/src/ui.cpp.
        Its one alarm colour is the accent, so red is the accent too. */
-    --bg: #000000; --panel: #141412; --ink: #e8e4dc; --dim: #7a776f; --faint: #262622;
+    --bg: #000000; --panel: #141412; --tile: #0f0f0d; --ink: #e8e4dc; --dim: #7a776f; --faint: #262622;
     --accent: #ff4d00; --blue: #6f8fd8; --green: #6dbe6a;
     --amber: #e8b94a; --violet: #a68bd8; --red: #ff4d00;
     --chip: #c98b6b; --empty: #0b0b0b;
@@ -143,10 +143,10 @@
      a 2 px track, `x` % of it filled clockwise from the top centre. The
      critter is a plain block and its hat a band in the hat's colour (`h` & 7,
      HAT_COLORS below); `s` puts a mini critter and its text top left. */
-  .tile { position: absolute; width: 108px; height: 96px; box-sizing: border-box; background: var(--panel); overflow: hidden; text-align: center; }
+  .tile { position: absolute; width: 108px; height: 96px; box-sizing: border-box; background: var(--tile); overflow: hidden; text-align: center; }
   .tile.wait { background: var(--accent); color: var(--bg); cursor: pointer; }
   .tile.exit { background: var(--empty); }
-  .tile.hungry { background: repeating-linear-gradient(135deg, var(--panel) 0 6px, #3a1a0a 6px 8px); }
+  .tile.hungry { background: repeating-linear-gradient(135deg, var(--tile) 0 6px, #3a1a0a 6px 8px); }
   .tile .gauge { position: absolute; inset: 0; width: 108px; height: 96px; }
   .tile .gauge path { fill: none; stroke-width: 2; stroke-linejoin: miter; }
   .tile .gauge .rt { stroke: #2a2925; }
@@ -165,7 +165,7 @@
   .tile.hungry .l, .tile.err .l, .tile.hungry .subs, .tile.err .subs { color: var(--accent); }
   .tile.wait .l, .tile.wait .subs { color: var(--bg); }
   .crit { position: absolute; left: 33px; top: 27px; width: 42px; height: 18px; background: var(--dim); }
-  .crit::before, .crit::after { content: ""; position: absolute; top: 4px; width: 3px; height: 6px; background: var(--panel); }
+  .crit::before, .crit::after { content: ""; position: absolute; top: 4px; width: 3px; height: 6px; background: var(--tile); }
   .crit::before { left: 12px; }
   .crit::after { right: 12px; }
   .tile.run .crit, .tile.hungry .crit, .tile.run .subs i, .tile.hungry .subs i { background: var(--accent); }
