@@ -93,6 +93,43 @@ void settleBlocksEarlyTap() {
   CHECK(v.sentButton() == 0);
 }
 
+// The prompt was covered (unlock prompt, a ride, the passkey) and is drawn
+// again: its buttons settle again before a tap counts.
+void resettleRestartsSettle() {
+  base();
+  AgentView v;
+  openAt(v, 0);
+  CHECK(v.buttonsOff(5000) == ButtonsOff::No);
+  CHECK(v.tick(4999));  // settled: the frame shows live buttons
+  v.resettle(5000);
+  CHECK(v.buttonsOff(5000) == ButtonsOff::Settling);
+  CHECK(v.tick(5000));
+  CHECK(!v.tap(0, 5000 + PROMPT_SETTLE_MS - 1));
+  CHECK(v.tap(0, 5000 + PROMPT_SETTLE_MS));
+  // It does not forget the answer: resettling an answered prompt keeps Sent.
+  v.resettle(6500);
+  CHECK(v.buttonsOff(6500) == ButtonsOff::Sent);
+  CHECK(!v.tap(1, 6500 + PROMPT_SETTLE_MS));
+}
+
+// The Mac unlocks: the buttons that were off come on only after a settle.
+void unlockRestartsSettle() {
+  base();
+  AgentView v;
+  openAt(v, 0, true, true);
+  CHECK(v.buttonsOff(5000) == ButtonsOff::Locked);
+  v.update(g, true, false, 5000);
+  CHECK(v.buttonsOff(5000) == ButtonsOff::Settling);
+  CHECK(!v.tap(0, 5000 + PROMPT_SETTLE_MS - 1));
+  CHECK(v.tap(0, 5000 + PROMPT_SETTLE_MS));
+  // Staying unlocked does not restart it.
+  base();
+  AgentView w;
+  openAt(w, 0, true, false);
+  w.update(g, true, false, 5000);
+  CHECK(w.buttonsOff(5000) == ButtonsOff::No);
+}
+
 void newIdResettles() {
   base();
   AgentView v;
@@ -167,8 +204,10 @@ void notTmuxAndLocked() {
   CHECK(v.buttonsOff(500) == ButtonsOff::Locked);    // still settling: Locked first
   CHECK(!v.tap(0, 5000));
   CHECK(v.update(g, true, false, 6000));
-  CHECK(v.buttonsOff(6000) == ButtonsOff::No);
-  CHECK(v.tap(0, 6000));
+  CHECK(v.buttonsOff(6000) == ButtonsOff::Settling);  // unlocked: settle first
+  CHECK(!v.tap(0, 6000));
+  CHECK(v.buttonsOff(6000 + PROMPT_SETTLE_MS) == ButtonsOff::No);
+  CHECK(v.tap(0, 6000 + PROMPT_SETTLE_MS));
 }
 
 void closesWhenAnswered() {
@@ -307,6 +346,8 @@ int main() {
   otherWaitingTileIsQueued();
   droppedAndNoText();
   settleBlocksEarlyTap();
+  resettleRestartsSettle();
+  unlockRestartsSettle();
   newIdResettles();
   oneTapOneSend();
   noAnswerAllowsRetry();

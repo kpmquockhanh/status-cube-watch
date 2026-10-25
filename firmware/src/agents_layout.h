@@ -88,6 +88,9 @@ struct ScrollY {
 // name, y 44).
 constexpr int16_t PROMPT_VIEW_Y = 58;
 constexpr int16_t PROMPT_VIEW_H = 202;
+// The column across: the text and every button (answers and BACK) span it.
+constexpr int16_t PROMPT_COL_X = 20;
+constexpr int16_t PROMPT_COL_W = 200;
 constexpr int16_t PROMPT_BTN_H = 34;
 constexpr int16_t PROMPT_BTN_GAP = 6;
 constexpr int16_t PROMPT_BLOCK_GAP = 8;
@@ -130,8 +133,9 @@ struct PromptLayout {
   int16_t reasonY() const { return _reason; }
   int16_t backY() const { return _back; }
 
-  // The button under screen height `y`: its index, PROMPT_HIT_BACK, or -1.
-  int buttonAt(int16_t y, int16_t scroll) const {
+  // The button under screen point (x, y): its index, PROMPT_HIT_BACK, or -1.
+  int buttonAt(int16_t x, int16_t y, int16_t scroll) const {
+    if (x < PROMPT_COL_X || x >= PROMPT_COL_X + PROMPT_COL_W) return -1;
     if (y < PROMPT_VIEW_Y || y >= PROMPT_VIEW_Y + PROMPT_VIEW_H) return -1;
     const int c = y - PROMPT_VIEW_Y + scroll;  // content y
     for (uint8_t i = 0; i < _n; i++) {

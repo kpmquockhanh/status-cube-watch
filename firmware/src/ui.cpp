@@ -1141,7 +1141,7 @@ void drawAgentsCard(LovyanGFX *g, const Card &card, const AgentsData &a, int16_t
 }
 
 // --- the prompt screen -------------------------------------------------------------
-constexpr int PROMPT_X = 20, PROMPT_W = LCD_WIDTH - 2 * PROMPT_X;
+constexpr int PROMPT_X = PROMPT_COL_X, PROMPT_W = PROMPT_COL_W;  // agents_layout.h: hit-tested there too
 constexpr int PROMPT_HEADER_Y = 44;
 constexpr int DETAIL_PAD_X = 8;
 constexpr int BTN_R = 12, KEY_R = 9;

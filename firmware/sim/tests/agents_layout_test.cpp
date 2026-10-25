@@ -77,15 +77,21 @@ int main() {
   CHECK(p.backY() == 256);
   CHECK(p.contentH() == 290);
   const int16_t top = PROMPT_VIEW_Y;
-  CHECK(p.buttonAt(top + 134 + 10, 0) == 0);
-  CHECK(p.buttonAt(top + 174 + 10, 0) == 1);
-  CHECK(p.buttonAt(top + 134 + 36, 0) == -1);  // in the gap
-  CHECK(p.buttonAt(top + 256 + 10, 0) == -1);       // BACK is below the view until scrolled
-  CHECK(p.buttonAt(top + 256 + 10 - 90, 90) == PROMPT_HIT_BACK);
-  CHECK(p.buttonAt(top + 10, 0) == -1);
-  CHECK(p.buttonAt(top + 174 + 10 - 40, 40) == 1);  // scrolled 40
-  CHECK(p.buttonAt(top - 5, 0) == -1);              // above the view
-  CHECK(p.buttonAt(PROMPT_VIEW_Y + PROMPT_VIEW_H + 5, 100) == -1);
+  CHECK(p.buttonAt(120, top + 134 + 10, 0) == 0);
+  CHECK(p.buttonAt(120, top + 174 + 10, 0) == 1);
+  CHECK(p.buttonAt(120, top + 134 + 36, 0) == -1);  // in the gap
+  CHECK(p.buttonAt(120, top + 256 + 10, 0) == -1);       // BACK is below the view until scrolled
+  CHECK(p.buttonAt(120, top + 256 + 10 - 90, 90) == PROMPT_HIT_BACK);
+  CHECK(p.buttonAt(120, top + 10, 0) == -1);
+  CHECK(p.buttonAt(120, top + 174 + 10 - 40, 40) == 1);  // scrolled 40
+  CHECK(p.buttonAt(120, top - 5, 0) == -1);              // above the view
+  CHECK(p.buttonAt(120, PROMPT_VIEW_Y + PROMPT_VIEW_H + 5, 100) == -1);
+  // Across: only between the buttons' left and right edges (they span the column).
+  CHECK(p.buttonAt(PROMPT_COL_X, top + 134 + 10, 0) == 0);
+  CHECK(p.buttonAt(PROMPT_COL_X + PROMPT_COL_W - 1, top + 134 + 10, 0) == 0);
+  CHECK(p.buttonAt(PROMPT_COL_X - 1, top + 134 + 10, 0) == -1);
+  CHECK(p.buttonAt(PROMPT_COL_X + PROMPT_COL_W, top + 134 + 10, 0) == -1);
+  CHECK(p.buttonAt(5, top + 256 + 10 - 90, 90) == -1);  // beside BACK
 
   // Optional blocks.
   PromptMetrics m2{1, 0, false, true};
@@ -96,8 +102,8 @@ int main() {
   CHECK(p.buttonY(1) == 94);
   CHECK(p.backY() == 136);
   CHECK(p.contentH() == 170);
-  CHECK(p.buttonAt(PROMPT_VIEW_Y + 30, 0) == -1);  // the reason line is not a button
-  CHECK(p.buttonAt(PROMPT_VIEW_Y + 60, 0) == 0);
+  CHECK(p.buttonAt(120, PROMPT_VIEW_Y + 30, 0) == -1);  // the reason line is not a button
+  CHECK(p.buttonAt(120, PROMPT_VIEW_Y + 60, 0) == 0);
 
   // The reason line pushes the buttons down by its height and one gap.
   PromptMetrics m3{2, 3, true, false};
@@ -112,7 +118,7 @@ int main() {
   CHECK(p.backY() == backNo + 26);
   p.build(m2, 0);  // no options (an input prompt): title, reason, BACK
   CHECK(p.backY() == 20 + 8 + 18 + 8);
-  CHECK(p.buttonAt(PROMPT_VIEW_Y + 1000, 0) == -1);
+  CHECK(p.buttonAt(120, PROMPT_VIEW_Y + 1000, 0) == -1);
 
   return checksDone("agents_layout");
 }

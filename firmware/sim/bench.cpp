@@ -145,6 +145,9 @@ struct Scenario {
   // BLE payloads start this long into the run (0 = at once); until then WiFi
   // delivers, and for `handover` its fetches answer with the LAN variant.
   uint32_t bleFromMs;
+  // A Mac pairs during [pairFromMs, pairToMs): the passkey screen covers
+  // everything (0, 0 = never).
+  uint32_t pairFromMs, pairToMs;
   std::vector<Stroke> strokes;
 };
 
@@ -218,10 +221,12 @@ Scenario makeScenario(const std::string &name) {
     s.agents = Scenario::AGENTS_RUNNING;
     s.strokes.push_back(swipe(6000, 190, 150, 50, 150));  // swipe left: usage -> Agents, once a payload is in
   } else if (name == "alert") {
-    s.what = "asleep on the usage card; at 300 s an agent waits on a prompt: wake, jump to it, one beep, a tap answers";
+    s.what = "asleep on the usage card; at 300 s an agent waits on a prompt: wake, jump to it, one beep; covered by a passkey, a tap right after it is refused, a later one answers";
     s.seconds = 330;
     s.sleepMin = 2;
     s.agents = Scenario::AGENTS_ALERT;
+    s.pairFromMs = 305000;  // the passkey covers the prompt for 10 s
+    s.pairToMs = 315000;
   } else if (name == "handover") {
     s.what = "an agent waits; WiFi (LAN variant, no prompt) until BLE starts at 40 s; BLE wins while live, one beep";
     s.seconds = 120;
@@ -409,7 +414,13 @@ bool Touch::read(int16_t &x, int16_t &y) {
 
 // --- stand-ins: BLE -------------------------------------------------------------
 void bleBegin() { publishSettings(); }
-BleState bleState() { return S.bleLive ? BleState::Connected : BleState::Advertising; }
+BleState bleState() {
+  if (g_running && S.pairToMs) {
+    const uint32_t t = millis() - g_start;
+    if (t >= S.pairFromMs && t < S.pairToMs) return BleState::Pairing;
+  }
+  return S.bleLive ? BleState::Connected : BleState::Advertising;
+}
 uint32_t blePasskey() { return 0; }
 bool bleMacBonded() { return S.bonded; }
 bool blePhoneBonded() { return S.nav != nullptr; }
@@ -492,8 +503,10 @@ bool bleTakeVolume(MacVolume &out) {
 void bleSendMedia(MediaKey) {}
 void bleSendUnlock() {}
 uint32_t g_answers = 0;  // Control 09 sends
+uint32_t g_answerAt = 0;  // ms into the run of the last one
 bool bleSendAnswer(const char *, const char *, char) {
   g_answers++;
+  g_answerAt = millis() - g_start;
   return true;
 }
 void bleSendNavPan(int16_t, int16_t) {}
@@ -614,7 +627,11 @@ void runScenario() {
     parsePayload(payloadJson(millis()), p);
     g_running = false;
     const PromptLayout L = uiPromptLayout(p.agents.prompt, ButtonsOff::No);
-    S.strokes.push_back(tapAt(ALERT_AT_MS + 15000, 120, PROMPT_VIEW_Y + L.buttonY(0) + PROMPT_BTN_H / 2));
+    const int16_t y = PROMPT_VIEW_Y + L.buttonY(0) + PROMPT_BTN_H / 2;
+    // Just after the passkey screen goes, the prompt is settling again: no answer.
+    S.strokes.push_back(tapAt(S.pairToMs + 300, 120, y));
+    // Once it has been readable for PROMPT_SETTLE_MS: one answer.
+    S.strokes.push_back(tapAt(S.pairToMs + 2000, 120, y));
   }
   resetCounters();
   g_start = millis();
@@ -783,12 +800,16 @@ int main(int argc, char **argv) {
     return 1;
   }
   // The alert: the screen woke for the prompt, it beeped once (the Mac resends
-  // the same prompt every 5 s), the prompt is what is drawn, and the one tap on
-  // its first button sent one answer.
+  // the same prompt every 5 s), the prompt is what is drawn, and of the two taps
+  // on its first button only the one made after it settled again (once the
+  // passkey screen stopped covering it) sent an answer.
   if (S.agents == Scenario::AGENTS_ALERT &&
-      (g_backlight == 0 || g_attention != 1 || !benchPromptOpen() || g_answers != 1)) {
+      (g_backlight == 0 || g_attention != 1 || !benchPromptOpen() || g_answers != 1 ||
+       g_answerAt < S.pairToMs + PROMPT_SETTLE_MS)) {
     fprintf(stderr, "%s: at the end the screen was %s, %u attention beeps (expected 1), prompt drawn=%d, %u answers (expected 1)\n",
             S.name, g_backlight ? "on" : "off", (unsigned)g_attention, (int)benchPromptOpen(), (unsigned)g_answers);
+    fprintf(stderr, "%s: the answer went out %u ms into the run; the passkey screen left at %u ms\n", S.name,
+            (unsigned)g_answerAt, (unsigned)S.pairToMs);
     return 1;
   }
   // The handover: once BLE is live its payload stays (WiFi results are drained),

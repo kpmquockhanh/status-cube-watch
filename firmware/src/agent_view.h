@@ -56,6 +56,9 @@ class AgentView {
   // redraws on every payload anyway, so text-only changes need no report).
   bool update(const AgentsData &a, bool viaBle, bool macLocked, uint32_t now) {
     if (!open_) return false;
+    // The Mac unlocked: buttons that were off come on only after a settle,
+    // like a prompt that just appeared.
+    if (macLocked_ && !macLocked) shownAt_ = now;
     macLocked_ = macLocked;
     const AgentTile *t = agentsTile(a, agent_);
     if (!t || t->kind != AgentKind::Wait) {
@@ -124,6 +127,11 @@ class AgentView {
     lastOff_ = ButtonsOff::Sent;  // the caller redraws after a tap itself
     return true;
   }
+
+  // The prompt is on screen again after something covered it (the unlock
+  // prompt, a ride, the passkey): settle again, so a tap counts only once it
+  // has been readable for PROMPT_SETTLE_MS. An answer already sent stays sent.
+  void resettle(uint32_t now) { shownAt_ = now; }
 
   // The tap's Control 09 could not go out (no Mac on the link): no answer is
   // coming, so the buttons show NoAnswer now instead of after ANSWER_WAIT_MS.

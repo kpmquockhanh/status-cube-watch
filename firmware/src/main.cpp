@@ -97,11 +97,13 @@ AgentAlert agentAlert;
 bool payloadViaBle = false;  // the payload came over BLE: only such a prompt is shown or answered
 bool macLockedNow = false;   // the Mac's screen is locked (Volume bits 5/6): the buttons are off
 bool lastBleLive = false;    // the transport the view last saw, to update it when the link changes
+bool lastPairing = false;    // the passkey screen was up at the last pass
 bool touchOnGrid = false;    // the finger now down landed in a grid that scrolls (latched at landing)
 // A tap on the prompt screen waits for this pass's payload and Volume intake,
 // so it is checked against the prompt the view knows about now, not the one a
 // moment ago (a new prompt id restarts the settle time first). -1 = none.
-int16_t promptTapY = -1;
+int16_t promptTapX = 0, promptTapY = -1;
+char promptScrollId[16] = "";  // the prompt the column's scroll belongs to
 // The prompt screen as the last frame drew it. A queued tap is hit-tested
 // against this, and only while the view still matches it: a tap aimed at what
 // was on the glass never lands on a button that moved (the reason line came
@@ -313,7 +315,16 @@ void updateAgentView(uint32_t now) {
     promptLayoutStale = true;
     dirty = true;
   }
-  if (!agentView.isOpen()) backToGrid(now);
+  if (!agentView.isOpen()) {
+    backToGrid(now);
+    return;
+  }
+  // A new prompt for the open agent starts at its top.
+  if (agentView.screen() == PromptScreen::Prompt && strcmp(promptScrollId, payload.agents.prompt.id) != 0) {
+    promptScroll.reset();
+    strncpy(promptScrollId, payload.agents.prompt.id, sizeof(promptScrollId) - 1);
+    promptScrollId[sizeof(promptScrollId) - 1] = 0;
+  }
 }
 
 const PromptLayout &currentPromptLayout(uint32_t now) {
@@ -361,6 +372,7 @@ void promptGesture(Gesture g, uint32_t now) {
       promptScroll.release();
       break;
     case Gesture::Tap:
+      promptTapX = gestures.startX();
       promptTapY = gestures.startY();
       break;
     case Gesture::SwipePrev:
@@ -376,7 +388,7 @@ void promptGesture(Gesture g, uint32_t now) {
 // dropped, never sent, unless the view is still what the last frame drew.
 void routePromptTap(uint32_t now) {
   if (promptTapY < 0) return;
-  const int16_t y = promptTapY;
+  const int16_t x = promptTapX, y = promptTapY;
   promptTapY = -1;
   if (!agentView.isOpen() || agentView.screen() != PromptScreen::Prompt || !payload.agents.hasPrompt) return;
   const DrawnPrompt &d = drawnPrompt;
@@ -384,7 +396,7 @@ void routePromptTap(uint32_t now) {
     Serial.println("[agents] tap dropped: the prompt changed under it");
     return;
   }
-  const int hit = d.layout.buttonAt(y, d.scroll);
+  const int hit = d.layout.buttonAt(x, y, d.scroll);
   if (hit == PROMPT_HIT_BACK) {
     closeAgentView(now);
     return;
@@ -404,7 +416,10 @@ void pollTouch() {
   touchDown = down;
   if (down) touchToScreen(appliedRot, x, y);
   // Latched before the touch dismisses the waiting screen, so that touch does not also act.
-  if (landing) touchCovered = bleState() == BleState::Pairing || (!pairWaitDismissed && waitingToPair());
+  // The waiting screen is not drawn while "PAIRING OPEN" is (which a tap dismisses below).
+  if (landing) {
+    touchCovered = bleState() == BleState::Pairing || (!pairWaitDismissed && waitingToPair() && !pairingMsgUp());
+  }
   if (down && !pairWaitDismissed && waitingToPair()) {
     pairWaitDismissed = true;
     dirty = true;
@@ -731,7 +746,8 @@ void loop() {
     dirty = true;
   }
   const DeckSpot was = deckSpot();
-  if (bleTake(payload)) {
+  const bool bleGot = bleTake(payload);
+  if (bleGot) {
     gotData = true;
     payloadViaBle = true;
   }
@@ -803,9 +819,12 @@ void loop() {
   // While BLE is live a WiFi result is drained but not applied: BLE's is the
   // full payload, and the LAN one would take the prompt text off the screen
   // (and flip the view to "open on Bluetooth") until the next BLE push.
+  // `td` was decided before this pass's bleTake(), so a BLE payload that just
+  // arrived (the first after a gap) counts as live too.
   static Payload wifiDrain;  // too big for a stack
-  const NetFetch fetched = netTake(td.bleLive ? wifiDrain : payload);
-  if (fetched == NetFetch::Ok && !td.bleLive) {
+  const bool bleWins = td.bleLive || bleGot;
+  const NetFetch fetched = netTake(bleWins ? wifiDrain : payload);
+  if (fetched == NetFetch::Ok && !bleWins) {
     gotData = true;
     payloadViaBle = false;  // the LAN variant: never prompt text
   }
@@ -830,6 +849,13 @@ void loop() {
   if (td.bleLive != lastBleLive) {
     lastBleLive = td.bleLive;
     updateAgentView(now);
+  }
+  // The passkey screen comes and goes with the BLE state: show or remove it now,
+  // not at the next once-a-second redraw (a prompt under it settles from then).
+  const bool pairingNow = bleState() == BleState::Pairing;
+  if (pairingNow != lastPairing) {
+    lastPairing = pairingNow;
+    dirty = true;
   }
   if (agentView.tick(now)) {  // the settle or the answer wait ran out
     promptLayoutStale = true;
@@ -882,6 +908,7 @@ void loop() {
     } else {
       lcd.setBrightness(0);
       lcd.sleep();
+      drawnPrompt.shown = false;  // nothing is on the glass now
       setCpu(CPU_MHZ_SLOW);
     }
   }
@@ -905,6 +932,7 @@ void loop() {
     const UiLink link = td.bleLive ? UiLink::Ble : (wifiUp && netOnline() ? UiLink::Wifi : UiLink::None);
     // The open prompt's agent (update() closed the view if its tile went).
     const AgentTile *promptTile = agentView.isOpen() ? agentsTile(payload.agents, agentView.agent()) : nullptr;
+    const bool promptWasShown = drawnPrompt.shown;
     drawnPrompt.shown = false;
     if (pairing) uiBlePair(lcd, blePasskey());  // the code must be seen
     else if (navOn) {
@@ -919,6 +947,9 @@ void loop() {
     else if (promptTile) {
       const AgentsData &a = payload.agents;
       const AgentTile *first = a.hasPrompt ? agentsTile(a, a.prompt.agent) : nullptr;
+      // The prompt comes back from under another screen (unlock, a ride, the
+      // passkey, a sleeping panel): its buttons settle again before a tap counts.
+      if (!promptWasShown && agentView.screen() == PromptScreen::Prompt && a.hasPrompt) agentView.resettle(now);
       const PromptLayout &layout = currentPromptLayout(now);  // also keeps the scroll range current
       const PromptUi pv{agentView.screen(), agentView.buttonsOff(now), agentView.sentButton(), promptScroll.offset(),
                         first ? first->name : ""};
