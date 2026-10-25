@@ -150,7 +150,7 @@ func sortAgents(list []agents.Agent) []agents.Agent {
 }
 
 // agentsCardOf builds the Agents card; nil when no agent is open.
-func agentsCardOf(list []agents.Agent, full bool, now time.Time) *Card {
+func agentsCardOf(list []agents.Agent, full bool, now time.Time, hats func(string) (int, bool)) *Card {
 	if len(list) == 0 {
 		return nil
 	}
@@ -174,7 +174,7 @@ func agentsCardOf(list []agents.Agent, full bool, now time.Time) *Card {
 		c.S1, c.C = strconv.Itoa(running)+" RUNNING", "blue"
 	}
 	for _, a := range sorted[:min(len(sorted), MaxTiles)] {
-		c.A = append(c.A, tileOf(a, now))
+		c.A = append(c.A, tileOf(a, now, hats))
 	}
 	if full {
 		for _, a := range sorted {
@@ -187,12 +187,21 @@ func agentsCardOf(list []agents.Agent, full bool, now time.Time) *Card {
 	return c
 }
 
-func tileOf(a agents.Agent, now time.Time) Tile {
+func tileOf(a agents.Agent, now time.Time, hats func(string) (int, bool)) Tile {
 	t := Tile{I: fitN(a.ID, TileIDChars), N: fitMarked(cmp.Or(a.Title, a.Folder), TileNameChars), X: contextPct(a.Context.Used, a.Context.Window)}
 	if dir := cmp.Or(a.Cwd, a.Folder); dir != "" {
-		shape, color := HatOf(dir)
-		h := shape*hatColors + color
-		t.H = &h
+		// A stored override beats agents-deck's automatic hat; -1 = no hat.
+		code, ok := -1, false
+		if hats != nil {
+			code, ok = hats(dir)
+		}
+		if !ok {
+			shape, color := HatOf(dir)
+			code = shape*hatColors + color
+		}
+		if code >= 0 {
+			t.H = &code
+		}
 	}
 	if a.Unseen {
 		t.U = 1

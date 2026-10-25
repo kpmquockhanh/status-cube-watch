@@ -147,7 +147,7 @@ func TestAgentsTileOrderAndPoses(t *testing.T) {
 		"WebFetch": "web", "WebSearch": "web", "TodoWrite": "plan", "ExitPlanMode": "plan",
 		"Task": "delegate", "Agent": "delegate", "Compact": "compact", "mcp__x__y": "run"}
 	for tool, pose := range poses {
-		if got := tileOf(mk("r", "f", agents.Running, tool), agentsNow).P; got != pose {
+		if got := tileOf(mk("r", "f", agents.Running, tool), agentsNow, nil).P; got != pose {
 			t.Errorf("pose(%s) = %q, want %q", tool, got, pose)
 		}
 	}
@@ -158,7 +158,7 @@ func TestAgentsIdleAgeAndContext(t *testing.T) {
 		59 * time.Second: "done · 59s ago", 12*time.Minute + 59*time.Second: "done · 12m ago",
 		3*time.Hour + 59*time.Minute: "done · 3h ago", 50 * time.Hour: "done · 2d ago",
 	} {
-		if got := tileOf(agent("i", "f", agents.Idle, since), agentsNow).L; got != want {
+		if got := tileOf(agent("i", "f", agents.Idle, since), agentsNow, nil).L; got != want {
 			t.Errorf("idle %v = %q, want %q", since, got, want)
 		}
 	}
@@ -168,7 +168,7 @@ func TestAgentsIdleAgeAndContext(t *testing.T) {
 	}{{1, 200, 1}, {3, 1000, 0}, {5, 1000, 1}, {300, 200, 100}, {-5, 100, 0}, {10, 0, 0}} {
 		a := agent("c", "f", agents.Idle, 0)
 		a.Context.Used, a.Context.Window = tc.used, tc.window
-		if got := tileOf(a, agentsNow).X; got != tc.want {
+		if got := tileOf(a, agentsNow, nil).X; got != tc.want {
 			t.Errorf("context %d/%d = %d, want %d", tc.used, tc.window, got, tc.want)
 		}
 	}
@@ -478,7 +478,7 @@ func TestMarshalNoHTMLEscapes(t *testing.T) {
 }
 
 func TestTileMetaWording(t *testing.T) {
-	line := func(a agents.Agent) string { return tileOf(a, agentsNow).L }
+	line := func(a agents.Agent) string { return tileOf(a, agentsNow, nil).L }
 	run := agent("r", "f", agents.Running, time.Minute)
 	if got := line(run); got != "thinking" {
 		t.Errorf("running, no tool = %q", got)
@@ -553,7 +553,7 @@ func TestCelebratePose(t *testing.T) {
 	pose := func(since time.Duration, unseen bool) string {
 		a := agent("c", "f", agents.Idle, since)
 		a.Unseen = unseen
-		return tileOf(a, agentsNow).P
+		return tileOf(a, agentsNow, nil).P
 	}
 	if got := pose(3*time.Second, false); got != "celebrate" {
 		t.Errorf("3 s = %q", got)
@@ -572,16 +572,16 @@ func TestCelebratePose(t *testing.T) {
 func TestTileHat(t *testing.T) {
 	a := agent("h", "docs-site", agents.Idle, time.Hour)
 	a.Cwd = "/Users/me/code/docs-site"
-	if h := tileOf(a, agentsNow).H; h == nil || *h != 1*8+1 {
+	if h := tileOf(a, agentsNow, nil).H; h == nil || *h != 1*8+1 {
 		t.Errorf("hat from cwd = %v, want 9", h)
 	}
 	a.Cwd = ""
 	s, c := HatOf("docs-site")
-	if h := tileOf(a, agentsNow).H; h == nil || *h != s*8+c {
+	if h := tileOf(a, agentsNow, nil).H; h == nil || *h != s*8+c {
 		t.Errorf("hat from folder = %v", h)
 	}
 	a.Folder = ""
-	tl := tileOf(a, agentsNow)
+	tl := tileOf(a, agentsNow, nil)
 	b, _ := json.Marshal(tl)
 	if tl.H != nil || strings.Contains(string(b), `"h":`) {
 		t.Errorf("no folder, hat %v: %s", tl.H, b)
@@ -623,18 +623,18 @@ func TestHatsWithinBudget(t *testing.T) {
 // more than one.
 func TestTileSubagentBadge(t *testing.T) {
 	a := agent("r", "f", agents.Running, time.Minute)
-	if s := tileOf(a, agentsNow).S; s != nil {
+	if s := tileOf(a, agentsNow, nil).S; s != nil {
 		t.Errorf("no subagents = %q, want absent", *s)
 	}
 	a.Subagents = make([]agents.Subagent, 1)
-	if s := tileOf(a, agentsNow).S; s == nil || *s != "" {
+	if s := tileOf(a, agentsNow, nil).S; s == nil || *s != "" {
 		t.Errorf("one subagent = %v, want \"\"", s)
 	}
 	a.Subagents = make([]agents.Subagent, 3)
-	if s := tileOf(a, agentsNow).S; s == nil || *s != "×3" {
+	if s := tileOf(a, agentsNow, nil).S; s == nil || *s != "×3" {
 		t.Errorf("three subagents = %v, want ×3", s)
 	}
-	b, _ := json.Marshal(tileOf(agent("r", "f", agents.Running, time.Minute), agentsNow))
+	b, _ := json.Marshal(tileOf(agent("r", "f", agents.Running, time.Minute), agentsNow, nil))
 	if strings.Contains(string(b), `"s"`) {
 		t.Errorf("no subagents marshals %s", b)
 	}
@@ -644,12 +644,12 @@ func TestTileSubagentBadge(t *testing.T) {
 func TestTileLineFoldsToASCII(t *testing.T) {
 	e := agent("e", "f", agents.Error, time.Minute)
 	e.ErrorText = "café “x”"
-	if got := tileOf(e, agentsNow).L; got != `cafe "x"` {
+	if got := tileOf(e, agentsNow, nil).L; got != `cafe "x"` {
 		t.Errorf("error = %q", got)
 	}
 	r := agent("r", "f", agents.Running, time.Minute)
 	r.Activity = &agents.Activity{Tool: "Édit☃"}
-	if got := tileOf(r, agentsNow).L; got != "edit" {
+	if got := tileOf(r, agentsNow, nil).L; got != "edit" {
 		t.Errorf("verb = %q", got)
 	}
 }
@@ -658,15 +658,15 @@ func TestTileLineFoldsToASCII(t *testing.T) {
 // agents in one folder read apart; with no title it falls back to the folder.
 func TestTileNameIsTheTitle(t *testing.T) {
 	a := agent("r", "claude-status-cube", agents.Running, time.Minute)
-	if got := tileOf(a, agentsNow).N; got != "claude-status..." {
+	if got := tileOf(a, agentsNow, nil).N; got != "claude-status..." {
 		t.Errorf("no title = %q", got)
 	}
 	a.Title = "Agents deck tiles"
-	if got := tileOf(a, agentsNow).N; got != "Agents deck t..." {
+	if got := tileOf(a, agentsNow, nil).N; got != "Agents deck t..." {
 		t.Errorf("long title = %q", got)
 	}
 	a.Title = "fix login"
-	if got := tileOf(a, agentsNow).N; got != "fix login" {
+	if got := tileOf(a, agentsNow, nil).N; got != "fix login" {
 		t.Errorf("title = %q", got)
 	}
 }

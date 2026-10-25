@@ -7,6 +7,7 @@
 //	                    as "no bridge"); a degraded bridge says so in the body.
 //	POST /hook       -> a Claude Code hook event (loopback only, agents on)
 //	POST /api/answer -> answer an agent's prompt (loopback only, agents on)
+//	POST /api/hat -> set an agent folder's hat (loopback only, agents on)
 //
 // Nothing on the LAN or in a browser may read prompt text or answer a prompt:
 // /api/status serves the full payload (with the prompt) only to a request
@@ -15,6 +16,7 @@ package server
 
 import (
 	"bytes"
+	"cmp"
 	"context"
 	"encoding/json"
 	"errors"
@@ -57,6 +59,11 @@ type Deps struct {
 		Answer(ctx context.Context, agentID, promptID, key string) error
 		Snapshot() []agents.Agent
 		Subscribe() (<-chan struct{}, func())
+	}
+	// Hats stores the per-folder hat overrides; nil when agents are off.
+	Hats interface {
+		Get(folder string) (int, bool)
+		Set(folder string, code *int) error
 	}
 	Now     func() time.Time // nil = time.Now
 	Preview func() []byte    // nil = preview.html from the working directory when present, else bridge.PreviewHTML
@@ -145,6 +152,9 @@ func (s *Server) publishLocked() {
 		ExtraCards:       s.in.extra,
 		Limits:           &lim,
 		Mail:             s.in.mail,
+	}
+	if s.d.Hats != nil {
+		o.Hats = s.d.Hats.Get
 	}
 	now := s.d.Now()
 	if s.d.Agents == nil {
@@ -450,6 +460,8 @@ func (s *Server) route(w http.ResponseWriter, r *http.Request) {
 		s.hook(w, r)
 	case "/api/answer":
 		s.answer(w, r)
+	case "/api/hat":
+		s.hat(w, r)
 	default:
 		notFound(w)
 	}
@@ -539,6 +551,54 @@ func (s *Server) answer(w http.ResponseWriter, r *http.Request) {
 		s.d.ErrLog.Println("answer failed:", err.Error())
 		sendJSON(w, 500, errorBody{err.Error()})
 	}
+}
+
+// hat sets (or clears) the hat override of the folder an agent works in.
+// hat: 0..103 = that hat, -1 = no hat, null = automatic.
+func (s *Server) hat(w http.ResponseWriter, r *http.Request) {
+	if !s.cubeClient(r) || s.d.Hats == nil {
+		notFound(w)
+		return
+	}
+	if !postOnly(w, r) {
+		return
+	}
+	var b struct {
+		Agent string          `json:"agent"`
+		Hat   json.RawMessage `json:"hat"` // empty = key missing
+	}
+	dec := json.NewDecoder(http.MaxBytesReader(w, r.Body, maxAnswerBody))
+	bad := dec.Decode(&b) != nil || dec.Decode(&struct{}{}) != io.EOF || b.Agent == "" || len(b.Hat) == 0
+	var code *int
+	if !bad && string(b.Hat) != "null" {
+		var n int
+		if err := json.Unmarshal(b.Hat, &n); err != nil || n < -1 || n > 103 {
+			bad = true
+		}
+		code = &n
+	}
+	if bad {
+		sendJSON(w, 400, errorBody{`want {"agent","hat": 0..103 | -1 | null}`})
+		return
+	}
+	folder := ""
+	for _, a := range s.d.Agents.Snapshot() {
+		if a.ID == b.Agent {
+			folder = cmp.Or(a.Cwd, a.Folder)
+			break
+		}
+	}
+	if folder == "" {
+		sendJSON(w, 404, errorBody{"no such agent"})
+		return
+	}
+	if err := s.d.Hats.Set(folder, code); err != nil {
+		s.d.ErrLog.Println("hat failed:", err.Error())
+		sendJSON(w, 500, errorBody{err.Error()})
+		return
+	}
+	s.republish()
+	send(w, 204, nil, jsonType)
 }
 
 type trackingWriter struct {

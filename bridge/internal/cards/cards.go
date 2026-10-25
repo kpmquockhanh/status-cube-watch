@@ -65,6 +65,9 @@ type Opts struct {
 	Agents           []agents.Agent // the open agents
 	ShowAgents       bool           // add the Agents card (when at least one agent is open)
 	Full             bool           // loopback variant: the Agents card carries the prompt
+	// Hats is the per-folder hat override: code 0..103, -1 = no hat; ok=false
+	// (or nil) = agents-deck's automatic hat.
+	Hats func(folder string) (code int, ok bool)
 }
 
 // Build builds the deck. now carries the local zone: today/month boundaries
@@ -80,7 +83,7 @@ func build(events []sources.Event, o Opts, now time.Time, budget int) Payload {
 	cards := []Card{usageCard(o.Limits, o.Mail, now.UnixMilli())}
 	agentsAt := -1
 	if o.ShowAgents {
-		if c := agentsCardOf(o.Agents, o.Full, now); c != nil {
+		if c := agentsCardOf(o.Agents, o.Full, now, o.Hats); c != nil {
 			agentsAt = len(cards)
 			cards = append(cards, *c)
 		}
