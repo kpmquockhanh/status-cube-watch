@@ -258,7 +258,7 @@ after `./install.sh install` again.
 the usage source (local logs or Admin API, with its key or OAuth token), the spend/token cards,
 the refresh interval, Gmail (address + app password) and whether the bridge serves the LAN (WiFi
 cubes need it; off = `127.0.0.1` only). Apply saves and restarts the bridge, which gets them as the
-bridge's environment variables (`CUBE_SOURCE`, `CUBE_EXTRA_CARDS`, `CUBE_REFRESH_MS`,
+bridge's environment variables (`CUBE_SOURCE`, `CUBE_EXTRA_CARDS`, `CUBE_AGENTS`, `CUBE_REFRESH_MS`,
 `CUBE_HOST`, `ANTHROPIC_ADMIN_*`, `CUBE_GMAIL_*`), which win over any `config.json`. The secrets are one Keychain item ("Claude Cube Link
 bridge settings"); the rest is in the app's defaults (`bridgeSettings`). On its first launch after
 `./install.sh install` the app imports `bridge/config.json` once, if it has no settings of its own

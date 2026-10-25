@@ -183,6 +183,13 @@ let systemVolume = SystemVolume()
 let nowPlaying = NowPlaying(log: log)
 let screenLock = ScreenLock()
 let unlocker = Unlocker(log: log)
+/// Locked as of now. The `ScreenLock` flag alone is not enough: it changes only when the
+/// `com.apple.screenIsLocked` notification is handled on main, so a tap handled just before that is
+/// still "unlocked", and with fast user switching (session off the console) it may never be set.
+/// An answer types into a session, so ask the session itself at the moment it matters.
+func macLockedNow() -> Bool {
+    screenLock.isLocked || sessionLocked(CGSessionCopyCurrentDictionary() as? [String: Any])
+}
 var unlockPolicy = UnlockPolicy()
 /// The Volume frame: the output's state, whether anything is playing, and whether the cube should
 /// offer to unlock the Mac.
@@ -190,7 +197,7 @@ func volumeFrame(_ v: MacVolume) -> Data {
     var v = v
     v.playing = nowPlaying.playing
     v.locked = UnlockPolicy.offer(enabled: unlocker.isEnabled, locked: screenLock.isLocked)
-    v.screenLocked = screenLock.isLocked
+    v.screenLocked = macLockedNow()
     return encodeVolume(v)
 }
 systemVolume.onChange = { v in
@@ -228,7 +235,7 @@ link.onUnlock = {
     }
 }
 link.onAnswer = { agent, prompt, key in
-    switch answerPolicy.decide(locked: screenLock.isLocked) {
+    switch answerPolicy.decide(locked: macLockedNow()) {
     case .ignore(let why):
         log("answer for \(agent) ignored: \(why)")
     case .post:
@@ -236,7 +243,9 @@ link.onAnswer = { agent, prompt, key in
             DispatchQueue.main.async {
                 answerPolicy.finished()
                 log("answer \(key) for \(agent)/\(prompt): \(describe(answerOutcome(status: status, error: error)))")
-                tick(force: true)  // the cube learns from the next payload
+                // The cube learns from the next payload; the bridge rebuilds it ~150 ms after the
+                // keys land, so fetch a little later or this would still show the old prompt.
+                DispatchQueue.main.asyncAfter(deadline: .now() + 0.3) { tick(force: true) }
             }
         }
     }

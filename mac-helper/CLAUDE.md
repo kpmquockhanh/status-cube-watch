@@ -36,7 +36,7 @@ Everything runs on the main queue. `CBCentralManager` is created with `queue: .m
 
 ## Runtime flow
 
-- **Tick.** A 1 s `Timer` runs in `.common` run-loop mode, which keeps it firing while the status menu is open. If it stopped, the cube would call the link stale after 15 s and fall back to WiFi. A tick fetches only when `PollPolicy` says it is due: every 1 s while the last payload has an Agents tile with `k` `wait`, else every 5 s, and never while a non-forced fetch is still running. Each fetch:
+- **Tick.** A 1 s `Timer` runs in `.common` run-loop mode, which keeps it firing while the status menu is open. If it stopped, the cube would call the link stale after 15 s and fall back to WiFi. A tick fetches only when `PollPolicy` says it is due: every 1 s while the last payload has an Agents tile with `k` `wait`, else every 5 s, and a timer tick is skipped while any fetch is still out (a forced tick always fetches). Each fetch:
   1. `BridgeClient.fetch` reads `127.0.0.1:<port>/api/status`.
   2. The menu is updated with `MenuModel.make`.
   3. If the link is ready, `PushPolicy` decides whether to send (on change, every 5 s, or when forced), and `CubeLink.send` sends.

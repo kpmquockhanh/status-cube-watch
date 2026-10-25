@@ -36,7 +36,7 @@ swift test                                          # frame encoding, push polic
 ./install.sh install|status|logs|restart|uninstall  # LaunchAgent; install needs a terminal (Bluetooth-permission prompt)
 ```
 `install.sh` builds `cube-bridge` into the app and removes the `bridgeDir` and `nodePath` older installs recorded from the `com.claude-cube.link` defaults, and names `bridge/config.json` in `importConfig`, which the app imports once into its own bridge settings if it has none. Bridge lookup: `CUBE_BRIDGE_DIR`, a leftover `bridgeDir`, the bundled copy, a `bridge/` near the cwd (`swift run`). Edits to `bridge/` reach the installed app only after `./install.sh install`.
-App env: `CUBE_PORT`, `CUBE_BRIDGE_DIR` (the directory holding `cube-bridge`); flag `--port`. The bridge-config env vars (`CUBE_SOURCE`, `CUBE_EXTRA_CARDS`, `CUBE_REFRESH_MS`, `CUBE_HOST`, the admin and Gmail ones) are not passed through to the child: the app's Bridge settings decide them.
+App env: `CUBE_PORT`, `CUBE_BRIDGE_DIR` (the directory holding `cube-bridge`); flag `--port`. The bridge-config env vars (`CUBE_SOURCE`, `CUBE_EXTRA_CARDS`, `CUBE_AGENTS`, `CUBE_REFRESH_MS`, `CUBE_HOST`, the admin and Gmail ones) are not passed through to the child: the app's Bridge settings decide them.
 
 Desktop simulator (from `firmware/sim/`, needs `brew install sdl2` and one prior `pio run`):
 ```sh

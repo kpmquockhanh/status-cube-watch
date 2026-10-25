@@ -25,6 +25,20 @@ public struct AnswerPolicy {
     public mutating func finished() { inFlight = false }
 }
 
+/// Whether the login session is locked or not on the console, read from `CGSessionCopyCurrentDictionary()`.
+/// True when there is no dictionary, when `CGSSessionScreenIsLocked` is set, or when
+/// `kCGSSessionOnConsoleKey` is false or missing (fast user switching: another user has the screen).
+/// Values may come as Bool or NSNumber.
+public func sessionLocked(_ session: [String: Any]?) -> Bool {
+    guard let session else { return true }
+    func flag(_ key: String) -> Bool? {
+        if let b = session[key] as? Bool { return b }
+        return (session[key] as? NSNumber)?.boolValue
+    }
+    if flag("CGSSessionScreenIsLocked") == true { return true }
+    return flag("kCGSSessionOnConsoleKey") != true
+}
+
 public enum AnswerOutcome: Equatable {
     case answered
     case notNow
@@ -49,9 +63,9 @@ public func describe(_ o: AnswerOutcome) -> String {
     switch o {
     case .answered: return "answered"
     case .notNow: return "not answerable now (409)"
-    case .trackingOff: return "agent tracking is off (404)"
+    case .trackingOff: return "agent tracking is off or the agent is gone (404)"
     case .rejected(let code): return "refused by the bridge (HTTP \(code))"
-    case .failed(let reason): return "not sent: \(reason)"
+    case .failed(let reason): return "no reply from the bridge: \(reason)"
     }
 }
 

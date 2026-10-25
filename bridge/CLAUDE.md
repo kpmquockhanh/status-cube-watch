@@ -15,7 +15,7 @@ curl -s localhost:8787/api/status        # the payload the cube gets
 curl -s localhost:8787/health            # always 200 while serving; {ok, error, source, lastError, limitsError, lastOk}
 ./cube-bridge hooks install|uninstall [--port N] [--settings PATH]   # add/remove the bridge's own Claude Code hooks (default ~/.claude/settings.json; use --settings with a temp file when trying it)
 echo '{"hook_event_name":"Stop","session_id":"x"}' | ./cube-bridge hook --port 8787   # what a hook runs: POST stdin to /hook, print nothing, exit 0
-CUBE_AGENTS=1 ./cube-bridge             # track Claude Code agents (on by default; `CUBE_AGENTS=0` or config key `agents: false` turns it off)
+CUBE_AGENTS=0 ./cube-bridge   # agent tracking is on by default; this turns it off
 ./agent.sh restart                       # reload the LaunchAgent copy (label com.claude-status-cube.bridge, logs in ~/Library/Logs/claude-status-cube/)
 ```
 

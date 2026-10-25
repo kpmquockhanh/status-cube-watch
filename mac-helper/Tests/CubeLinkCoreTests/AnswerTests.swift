@@ -78,7 +78,17 @@ private func answerFixture(_ kind: String) throws -> [Substring] {
     #expect(answerOutcome(status: nil, error: "offline") == .failed("offline"))
     #expect(describe(.answered) == "answered")
     #expect(describe(.notNow) == "not answerable now (409)")
-    #expect(describe(.trackingOff).contains("agent tracking is off"))
+    #expect(describe(.trackingOff) == "agent tracking is off or the agent is gone (404)")
     #expect(describe(.rejected(500)) == "refused by the bridge (HTTP 500)")
-    #expect(describe(.failed("offline")) == "not sent: offline")
+    #expect(describe(.failed("offline")) == "no reply from the bridge: offline")
+}
+
+@Test func sessionLockedReadsTheLiveSession() {
+    #expect(sessionLocked(nil))
+    #expect(!sessionLocked(["kCGSSessionOnConsoleKey": true]))
+    #expect(!sessionLocked(["kCGSSessionOnConsoleKey": NSNumber(value: 1), "CGSSessionScreenIsLocked": false]))
+    #expect(sessionLocked(["kCGSSessionOnConsoleKey": true, "CGSSessionScreenIsLocked": true]))
+    #expect(sessionLocked(["kCGSSessionOnConsoleKey": true, "CGSSessionScreenIsLocked": NSNumber(value: 1)]))
+    #expect(sessionLocked(["kCGSSessionOnConsoleKey": false]))
+    #expect(sessionLocked([:]))
 }
