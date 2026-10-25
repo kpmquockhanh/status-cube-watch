@@ -13,8 +13,10 @@ struct LayoutRect {
   int16_t x, y, w, h;
 };
 
-// The grid sits under the card's caption (y 44): two columns of tiles in a
-// view that scrolls.
+// The grid sits under the card's caption (y 44) in a view that scrolls. The
+// tiles fill it by count: one agent takes the whole view, two share it side by
+// side at full height, more go in rows of two, TILE_H tall, and an odd last
+// one spans both columns. No empty slots.
 constexpr int16_t AGENTS_VIEW_Y = 54;
 constexpr int16_t AGENTS_VIEW_H = 200;  // holds two rows of tiles (2 x 96 + 6)
 constexpr int16_t TILE_W = 108;
@@ -22,21 +24,27 @@ constexpr int16_t TILE_H = 96;  // the 72 x 52 critter (4 px a cell), its hat, n
 constexpr int16_t TILE_GAP = 6;
 constexpr int16_t TILE_COL0_X = 9;
 constexpr int16_t TILE_COL1_X = 123;
+constexpr int16_t TILE_SPAN_W = TILE_COL1_X + TILE_W - TILE_COL0_X;  // both columns and the gap
 
-// Tile `i` (row-major, two per row) on screen at this scroll.
-inline LayoutRect agentsTileRect(uint8_t i, int16_t scroll) {
+// Height of each row for `nTiles` tiles: one row fills the view.
+inline int16_t agentsRowH(uint8_t nTiles) { return nTiles <= 2 ? AGENTS_VIEW_H : TILE_H; }
+
+// Tile `i` of `nTiles` (row-major, two per row) on screen at this scroll.
+inline LayoutRect agentsTileRect(uint8_t i, uint8_t nTiles, int16_t scroll) {
+  const int16_t rowH = agentsRowH(nTiles);
+  const bool spans = (nTiles & 1) && i + 1 == nTiles;  // alone on its row
   LayoutRect r;
-  r.x = (i & 1) ? TILE_COL1_X : TILE_COL0_X;
-  r.y = (int16_t)(AGENTS_VIEW_Y + (i / 2) * (TILE_H + TILE_GAP) - scroll);
-  r.w = TILE_W;
-  r.h = TILE_H;
+  r.x = spans || !(i & 1) ? TILE_COL0_X : TILE_COL1_X;
+  r.y = (int16_t)(AGENTS_VIEW_Y + (i / 2) * (rowH + TILE_GAP) - scroll);
+  r.w = spans ? TILE_SPAN_W : TILE_W;
+  r.h = rowH;
   return r;
 }
 
 // Height of all rows together, 0 for no tiles.
 inline int16_t agentsContentH(uint8_t nTiles) {
   const int rows = (nTiles + 1) / 2;
-  return (int16_t)(rows == 0 ? 0 : rows * TILE_H + (rows - 1) * TILE_GAP);
+  return (int16_t)(rows == 0 ? 0 : rows * agentsRowH(nTiles) + (rows - 1) * TILE_GAP);
 }
 
 // The tile under a touch, or -1 for none (a gap, past the last tile, or
@@ -44,7 +52,7 @@ inline int16_t agentsContentH(uint8_t nTiles) {
 inline int agentsTileAt(int16_t x, int16_t y, uint8_t nTiles, int16_t scroll) {
   if (y < AGENTS_VIEW_Y || y >= AGENTS_VIEW_Y + AGENTS_VIEW_H) return -1;
   for (uint8_t i = 0; i < nTiles; i++) {
-    const LayoutRect r = agentsTileRect(i, scroll);
+    const LayoutRect r = agentsTileRect(i, nTiles, scroll);
     if (x >= r.x && x < r.x + r.w && y >= r.y && y < r.y + r.h) return i;
   }
   return -1;
