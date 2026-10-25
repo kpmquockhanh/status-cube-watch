@@ -12,7 +12,7 @@ Run these from `firmware/`. `src/config.h` must exist (copy `src/config.h.exampl
 pio run                                  # board build; also fetches LovyanGFX / ArduinoJson / NimBLE into .pio/libdeps, which sim/ compiles against
 pio run -t upload && pio device monitor  # USB flash + serial (115200, exception decoder)
 pip install -r tools/requirements.txt    # in a venv: pillow==11.3.0, pinned because glyph boxes move between releases
-python3 tools/gen_fonts.py               # regenerate src/fonts_gen.h from tools/Inter.ttf (run it from that venv)
+python3 tools/gen_fonts.py               # regenerate src/fonts_gen.h from tools/*.ttf: Inter, Roboto Mono, Share Tech Mono (run it from that venv)
 ```
 
 Run these from `sim/`:
