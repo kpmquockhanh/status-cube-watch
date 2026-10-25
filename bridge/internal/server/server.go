@@ -8,6 +8,8 @@
 //	POST /hook       -> a Claude Code hook event (loopback only, agents on)
 //	POST /api/answer -> answer an agent's prompt (loopback only, agents on)
 //	POST /api/hat -> set an agent session's hat (loopback only, agents on)
+//	GET /api/changes -> wait for the agents to change: 204 as soon as they
+//	                    do, 304 after changesWait (loopback only, agents on)
 //
 // Nothing on the LAN or in a browser may read prompt text or answer a prompt:
 // /api/status serves the full payload (with the prompt) only to a request
@@ -71,6 +73,9 @@ type Deps struct {
 }
 
 const (
+	// changesWait is how long GET /api/changes waits before answering 304,
+	// inside the server's 10 s WriteTimeout.
+	changesWait     = 8 * time.Second
 	agentsDebounce  = 150 * time.Millisecond // tracker changes are gathered this long before a rebuild
 	agentsSyncEvery = 3 * time.Second        // Tracker.Sync interval
 	maxHookBody     = 8 << 20                // same cap as the hook command's stdin
@@ -106,6 +111,13 @@ type Server struct {
 
 	debounce, syncEvery time.Duration
 
+	// changed is closed (and replaced) on every agents rebuild and hat set:
+	// a GET /api/changes waiting on it answers at once, so the Mac app pushes
+	// a new status within a moment instead of at its next poll.
+	changeMu    sync.Mutex
+	changed     chan struct{}
+	changesWait time.Duration
+
 	mu          sync.Mutex // guards the fields below; held while a payload is built and stored
 	in          inputs
 	refreshed   bool
@@ -133,7 +145,8 @@ func New(cfg config.Config, d Deps) *Server {
 		d.ErrLog = log.New(os.Stderr, "", 0)
 	}
 	s := &Server{cfg: cfg, d: d, label: d.Source.Label(), hasRequestCounts: d.Source.HasRequestCounts(),
-		debounce: agentsDebounce, syncEvery: agentsSyncEvery, hookErrs: map[string]bool{}}
+		debounce: agentsDebounce, syncEvery: agentsSyncEvery, hookErrs: map[string]bool{},
+		changed: make(chan struct{}), changesWait: changesWait}
 	// Served until the first refresh lands: the usage card with empty rings and
 	// "starting" for a caption, so the cube has something valid to draw.
 	s.in = inputs{lim: limits.Limits{Error: "starting up"}}
@@ -277,6 +290,42 @@ func (s *Server) watchAgents(ctx context.Context) {
 		case <-t.C:
 		}
 		s.guard("agents rebuild failed:", s.republish)
+		s.notifyChanged()
+	}
+}
+
+// notifyChanged wakes every waiting GET /api/changes.
+func (s *Server) notifyChanged() {
+	s.changeMu.Lock()
+	defer s.changeMu.Unlock()
+	close(s.changed)
+	s.changed = make(chan struct{})
+}
+
+// changes answers 204 as soon as the agents change (notifyChanged), 304 when
+// changesWait passes first, and nothing when the client hangs up. Same guard
+// as /api/answer; the Mac app calls it in a loop and fetches /api/status on 204.
+func (s *Server) changes(w http.ResponseWriter, r *http.Request) {
+	if !s.cubeClient(r) {
+		notFound(w)
+		return
+	}
+	if r.Method != http.MethodGet {
+		w.Header().Set("Allow", http.MethodGet)
+		sendJSON(w, 405, errorBody{"method not allowed"})
+		return
+	}
+	s.changeMu.Lock()
+	ch := s.changed
+	s.changeMu.Unlock()
+	t := time.NewTimer(s.changesWait)
+	defer t.Stop()
+	select {
+	case <-ch:
+		send(w, 204, nil, jsonType)
+	case <-t.C:
+		w.WriteHeader(304)
+	case <-r.Context().Done():
 	}
 }
 
@@ -471,6 +520,8 @@ func (s *Server) route(w http.ResponseWriter, r *http.Request) {
 		s.answer(w, r)
 	case "/api/hat":
 		s.hat(w, r)
+	case "/api/changes":
+		s.changes(w, r)
 	default:
 		notFound(w)
 	}
@@ -629,6 +680,7 @@ func (s *Server) hat(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	s.republish()
+	s.notifyChanged()
 	send(w, 204, nil, jsonType)
 }
 

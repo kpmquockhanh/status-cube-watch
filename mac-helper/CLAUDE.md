@@ -36,6 +36,7 @@ Everything runs on the main queue. `CBCentralManager` is created with `queue: .m
 
 ## Runtime flow
 
+- **Changes.** `watchChanges` (`main.swift`) waits on the bridge's `GET /api/changes` in a loop on its own session (12 s timeout; the fetch session's 3 s would cut the wait short): 204 forces a tick at once, 304 asks again, anything else (an older bridge's 404, no bridge) waits `ChangesWatch.backoff` (10 s) first. The tick below keeps running as the fallback.
 - **Tick.** A 1 s `Timer` runs in `.common` run-loop mode, which keeps it firing while the status menu is open. If it stopped, the cube would call the link stale after 15 s and fall back to WiFi. A tick fetches only when `PollPolicy` says it is due: every 1 s while the last payload has an Agents tile with `k` `wait` or the cube has a detail screen open (`detailAgent`, set by Control `0A`, cleared when the link leaves ready; the fetch is then `/api/status?detail=<id>`), else every 5 s, and a timer tick is skipped while any fetch is still out (a forced tick always fetches). Each fetch:
   1. `BridgeClient.fetch` reads `127.0.0.1:<port>/api/status`.
   2. The menu is updated with `MenuModel.make`.

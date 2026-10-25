@@ -288,6 +288,20 @@ supervisor.start()
 // decides whether this one fetches (1 s while an agent waits, else 5 s).
 let tickTimer = Timer(timeInterval: 1, repeats: true) { _ in tick(force: false) }
 RunLoop.main.add(tickTimer, forMode: .common)
+
+/// Waits on the bridge's `GET /api/changes` in a loop and fetches as soon as the agents change, so a
+/// new status reaches the cube within a moment rather than at the next 5 s poll (`ChangesWatch`).
+func watchChanges() {
+    client.waitForChange { status in
+        DispatchQueue.main.async {
+            let next = ChangesWatch.after(status: status)
+            Trace.log("changes", "status \(status ?? -1), fetch \(next.fetch)")
+            if next.fetch { tick(force: true) }
+            DispatchQueue.main.asyncAfter(deadline: .now() + next.delay) { watchChanges() }
+        }
+    }
+}
+watchChanges()
 log("Claude Cube Link started (bridge :\(port), dir \(bridgeDir.path))")
 Trace.log("main", "tracing on; bridge binary \(binaryFound ? binaryPath : "not found")")
 
