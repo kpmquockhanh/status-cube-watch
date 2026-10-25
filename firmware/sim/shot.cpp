@@ -9,7 +9,7 @@
 //                                   # @portal, @ota, @ble-pair, @ble-wait, @waiting, @dev-edit,
 //                                   # @unlock|unlock-wait, @nav-turn|vn|long|longeta|reroute|offroute|arrived|lost|busy, @vol-56|muted|full|zero|fixed|noout|long|none|press|playing|paused,
 //                                   # @agents, @agents-scroll, @agents-hats, @agents-long, @prompt, @prompt-settle|sent|noanswer|tmux|locked|input|cut|long|wifi|queued|dropped
-//                                   # @detail, @detail-loading|wifi|err|long
+//                                   # @detail, @detail-loading|wifi|err|long, @hat-pick, @hat-pick-set|none
 //
 // Reads the payload JSON from the file named on the command line, or stdin.
 
@@ -350,6 +350,29 @@ bool detailShot(Display &lcd, const char *state) {
   return true;
 }
 
+// The hat picker of fixtures/agents-full.json's l00002: wearing its automatic
+// hat with `auto` chosen (""), or a picked wizard in yellow ("set": shape 4,
+// colour 2), or no hat ("none").
+bool hatPickShot(Display &lcd, const char *state) {
+  static Payload p;
+  if (!loadPayload("fixtures/agents-full.json", p)) return false;
+  const AgentTile *tile = agentsTile(p.agents, "l00002");
+  if (!tile) return false;
+  int16_t hat = tile->hat;
+  bool autoOn = true;
+  if (!strcmp(state, "set")) {
+    hat = 4 * 8 + 2;
+    autoOn = false;
+  } else if (!strcmp(state, "none")) {
+    hat = -1;
+    autoOn = false;
+  } else if (strcmp(state, "")) {
+    return false;
+  }
+  uiHatPicker(lcd, *tile, hat, autoOn, 4000, true, 4000, batteryViewFromEnv(), linkFromEnv());
+  return true;
+}
+
 // Screens that are not payload cards. Selected with `@name` on the command
 // line; the grab goes to <prefix>-<name>.png. Returns false for an unknown name.
 bool renderSpecial(Display &lcd, const char *name) {
@@ -385,6 +408,8 @@ bool renderSpecial(Display &lcd, const char *name) {
     if (!promptShot(lcd, name[6] ? name + 7 : "")) return false;
   } else if (!strcmp(name, "detail") || !strncmp(name, "detail-", 7)) {
     if (!detailShot(lcd, name[6] ? name + 7 : "")) return false;
+  } else if (!strcmp(name, "hat-pick") || !strncmp(name, "hat-pick-", 9)) {
+    if (!hatPickShot(lcd, name[8] ? name + 9 : "")) return false;
   } else {
     return false;
   }

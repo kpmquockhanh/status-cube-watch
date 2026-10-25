@@ -47,6 +47,25 @@ over Bluetooth with the Mac app running, and a few Claude Code sessions (some in
 - [ ] A second tap on the same prompt never sends a second answer.
 - [ ] A tap just as a newer prompt replaces the first never answers the newer one.
 
+## Detail and hats
+
+- [ ] A tap on a working, idle or hungry tile opens its detail screen; within a couple of seconds over BLE its
+      fields fill in from `d` (title, doing now, context, last prompt, meta); over WiFi it reads
+      "details need Bluetooth".
+- [ ] `< back` and a swipe right close it; the Mac's log shows the `0A 00` and the next payload carries no `d`.
+- [ ] The tile starting to wait closes the detail (and the prompt alert opens as usual); the agent ending
+      closes it too.
+- [ ] Screen sleep closes the detail and its hat picker; after waking, the deck shows the grid.
+- [ ] Reconnect: with the detail open, turn the Mac's Bluetooth off and on (or restart the Mac app); within
+      about 5 s of the link coming back the cube sends `0A` again and the fields fill in.
+- [ ] A tap on the critter opens the hat picker; the tile's current shape and colour (or `auto`) are outlined.
+- [ ] Picking a shape, a colour, `none` and `auto` each changes the critter at once and, within a few seconds,
+      on the grid tile too (and on every other agent in that folder); the bridge's `hats.json` holds the
+      folder's override (removed again by `auto`).
+- [ ] With the Mac app quit, a pick still shows for about 4 s and then the old hat returns; the serial log
+      reads `[ble] hat dropped`.
+- [ ] `< back` and a swipe right in the picker return to the detail screen, not the grid.
+
 ## Alert
 
 - [ ] A new prompt beeps once at each SOUND level (LOW, MED, HIGH), and not at off.

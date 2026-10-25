@@ -7,6 +7,7 @@
 #include "config.h"
 #include "critter.h"
 #include "detail_layout.h"
+#include "hat_picker_layout.h"
 #include "fonts_gen.h"
 #include "dev_editor.h"
 #include "editor_layout.h"
@@ -1814,7 +1815,7 @@ void uiAgentDetail(Display &lcd, const AgentsData &a, const AgentTile &tile, int
                                                                       : DIM_RGB;
   const LayoutRect &cr = DETAIL_CRITTER;
   drawCritter(g, poseFromName(tile.pose), hatFromCode(hat), now, cr.x + cr.w / 2 - TILE_CRIT_X * DETAIL_CELL,
-              cr.y + 25, DETAIL_CELL, CritterInks{body, BG_RGB});
+              cr.y + 23, DETAIL_CELL, CritterInks{body, BG_RGB});
 
   // The title (rb18, two lines) and the subagents under it.
   char lines[DETAIL_PROMPT_LINES][LINE_CAP];
@@ -1851,6 +1852,87 @@ void uiAgentDetail(Display &lcd, const AgentsData &a, const AgentTile &tile, int
 
   // Model, folder, branch.
   if (has && d.meta[0]) drawLine(g, V_RM11, d.meta, DETAIL_X, DETAIL_META_Y, DETAIL_W, DIM, BG, middle_left);
+  present(lcd);
+}
+
+// --- the hat picker ------------------------------------------------------------------
+// Opened by a tap on the critter on the detail screen: the 13 shapes, each on a
+// small idle critter in the current colour, `none`, `auto`, and the 8 colours.
+// hat_picker_layout.h owns the geometry, which main.cpp hit-tests with too.
+namespace {
+constexpr int PICK_CELL = 2;      // px per critter cell: the hats reach 50 px across
+constexpr int PICK_CRIT_Y = 21;   // cell 0 this far below the cell's top (hats reach -6.5, the body 7.6)
+constexpr int PICK_MARK = 2;      // the outline of what is chosen
+constexpr int PICK_NAME_X = 104;  // `hat`, beside `< back`
+
+// A 2 px ink outline inside r (what is chosen), else a 1 px line.
+void pickOutline(LovyanGFX *g, const LayoutRect &r, bool chosen) {
+  if (!chosen) {
+    g->drawRect(r.x, r.y, r.w, r.h, LINE);
+    return;
+  }
+  for (int i = 0; i < PICK_MARK; i++) g->drawRect(r.x + i, r.y + i, r.w - 2 * i, r.h - 2 * i, INK);
+}
+}  // namespace
+
+void uiHatPicker(Display &lcd, const AgentTile &tile, int16_t hat, bool autoOn, uint32_t now, bool online,
+                 uint32_t ageMs, const BatteryView &bat, UiLink link) {
+  (void)now;  // the critters stand still (idle pose): nothing here moves
+  g_animating = false;
+  g_link = link;
+  LovyanGFX *g = target(lcd);
+  g->fillScreen(BG);
+  drawTopBar(g, online, ageMs, bat);
+
+  // The back row: `< back` (HAT_PICK_BACK is its touch zone), `hat`, and
+  // whose hat it is, right-aligned.
+  g->setFont(&V_RM13.font);
+  g->setTextDatum(middle_left);
+  g->setTextColor(INK, BG);
+  g->drawString("< back", DETAIL_X, DETAIL_ROW_Y);
+  g->setTextColor(DIM, BG);
+  g->drawString("hat", PICK_NAME_X, DETAIL_ROW_Y);
+  const int nameX = PICK_NAME_X + g->textWidth("hat") + 12;
+  drawLine(g, V_RM11, tile.name, DETAIL_PILL_RIGHT, DETAIL_ROW_Y, DETAIL_PILL_RIGHT - nameX, DIM, BG, middle_right);
+
+  const HatId cur = hatFromCode(hat);
+  const int8_t color = cur.shape >= 0 ? cur.color : 0;
+  for (int i = 0; i < HAT_PICK_CELLS; i++) {
+    const LayoutRect r = hatPickCell(i);
+    g->fillRect(r.x, r.y, r.w, r.h, PANEL);
+    bool chosen;
+    if (i == HAT_PICK_AUTO_CELL) {
+      chosen = autoOn;
+      g->setFont(&V_RM13.font);
+      g->setTextDatum(middle_center);
+      g->setTextColor(chosen ? INK : DIM, PANEL);
+      g->drawString("auto", r.x + r.w / 2, r.y + r.h / 2);
+    } else {
+      const bool none = i == HAT_PICK_NONE_CELL;
+      chosen = !autoOn && (none ? cur.shape < 0 : cur.shape == i);
+      const HatId h = none ? HatId{-1, 0} : HatId{(int8_t)i, color};
+      drawCritter(g, Pose::Idle, h, 0, r.x + r.w / 2 - TILE_CRIT_X * PICK_CELL, r.y + PICK_CRIT_Y, PICK_CELL,
+                  CritterInks{DIM_RGB, PANEL_RGB});
+      if (none) {
+        g->setFont(&V_RM11.font);
+        g->setTextDatum(top_center);
+        g->setTextColor(chosen ? INK : DIM, PANEL);
+        g->drawString("none", r.x + r.w / 2, r.y + 3);
+      }
+    }
+    pickOutline(g, r, chosen);
+  }
+
+  // The colours: inert (dimmed, none chosen) while the folder wears no hat.
+  for (int i = 0; i < HAT_PICK_COLORS; i++) {
+    const LayoutRect r = hatPickSwatch(i);
+    const uint32_t rgb = hatMainRgb((int8_t)i);
+    g->fillRect(r.x, r.y, r.w, r.h, cur.shape >= 0 ? to565(rgb) : blend565(rgb, BG_RGB, 77));
+    if (cur.shape >= 0 && i == cur.color) {
+      for (int k = 0; k < PICK_MARK; k++) g->drawRect(r.x + k, r.y + k, r.w - 2 * k, r.h - 2 * k, INK);
+      g->drawRect(r.x + PICK_MARK, r.y + PICK_MARK, r.w - 2 * PICK_MARK, r.h - 2 * PICK_MARK, BG);
+    }
+  }
   present(lcd);
 }
 

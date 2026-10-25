@@ -39,7 +39,10 @@
 #include "../src/battery.h"
 #include "../src/ble.h"
 #include "../src/buzzer.h"
+#include "../src/detail_layout.h"
+#include "../src/detail_frame.h"
 #include "../src/detail_view.h"
+#include "../src/hat_picker_layout.h"
 #include "../src/display.h"
 #include "../src/imu.h"
 #include "../src/net.h"
@@ -61,6 +64,7 @@ uint8_t benchCardIndex();  // main.cpp
 bool benchNavActive();     // main.cpp
 bool benchPromptOpen();    // main.cpp
 bool benchPayloadViaBle(); // main.cpp
+bool benchDetailOpen();    // main.cpp: the detail screen or its hat picker
 extern bool g_benchAnimOff;  // main.cpp: the still run never animates the critters
 
 namespace {
@@ -151,7 +155,9 @@ struct Scenario {
   // AGENTS_HANDOVER has it waiting from the start. AGENTS_DECK is a payload that
   // never changes, the Agents card first (the card boot lands on): two at work,
   // a hungry one, an idle one, nobody waiting (so no alert).
-  enum : uint8_t { AGENTS_NONE, AGENTS_RUNNING, AGENTS_ALERT, AGENTS_HANDOVER, AGENTS_DECK } agents;
+  // AGENTS_DETAIL is AGENTS_DECK whose checkout-api (l00002) waits, then goes,
+  // in the windows the `detail` scenario names.
+  enum : uint8_t { AGENTS_NONE, AGENTS_RUNNING, AGENTS_ALERT, AGENTS_HANDOVER, AGENTS_DECK, AGENTS_DETAIL } agents;
   // CUBE_POWER=battery for the run (batteryOnExternal() false; usb otherwise),
   // and the still variant: the critter pacer forced off.
   bool battery;
@@ -170,8 +176,18 @@ uint8_t g_endCard = 0;
 uint32_t g_start = 0;  // millis() when the scenario's clock starts (after setup)
 bool g_running = false;
 
-// `detail`: when the tile is tapped, back is tapped, and the tile again.
+// `detail`: when the tile is tapped, back is tapped, and the tile again; then
+// the hat picker (critter, a shape, a colour, back to the detail); the tile
+// waits during [DETAIL_WAIT_MS, DETAIL_WAIT_END_MS) (the payload closes the
+// detail); open again, the tile is gone during [DETAIL_GONE_MS,
+// DETAIL_GONE_END_MS) (closed again); open again with the picker up and
+// left: the screen's sleep closes both.
 constexpr uint32_t DETAIL_OPEN_MS = 2000, DETAIL_CLOSE_MS = 20000, DETAIL_REOPEN_MS = 22000;
+constexpr uint32_t DETAIL_PICKER_MS = 26000, DETAIL_SHAPE_MS = 28000, DETAIL_COLOR_MS = 30000,
+                   DETAIL_PICK_BACK_MS = 32000;
+constexpr uint32_t DETAIL_WAIT_MS = 38000, DETAIL_WAIT_END_MS = 48000, DETAIL_OPEN2_MS = 52000;
+constexpr uint32_t DETAIL_GONE_MS = 58000, DETAIL_GONE_END_MS = 68000, DETAIL_OPEN3_MS = 72000,
+                   DETAIL_PICKER2_MS = 74000;
 
 Stroke tapAt(uint32_t t, int x, int y) { return {t, 80, (int16_t)x, (int16_t)y, (int16_t)x, (int16_t)y}; }
 Stroke swipe(uint32_t t, int x0, int y0, int x1, int y1) {
@@ -263,14 +279,24 @@ Scenario makeScenario(const std::string &name) {
     s.battery = true;
     s.agents = Scenario::AGENTS_DECK;
   } else if (name == "detail") {
-    s.what = "Agents card: tap a working tile (0A), no d arrives (0A again every 5 s), back (0A 00), open again: sleeps at 2 min";
-    s.seconds = 150;
+    s.what = "Agents card: tap a working tile (0A, again every 5 s), back (0A 00); open, pick a hat (0B x2); the tile "
+             "waits, then goes (0A 00 each); picker left open: sleep at 2 min closes it (0A 00)";
+    s.seconds = 210;
     s.sleepMin = 2;
     s.mustSleep = true;
-    s.agents = Scenario::AGENTS_DECK;
+    s.agents = Scenario::AGENTS_DETAIL;
+    const LayoutRect wizard = hatPickCell(4), yellow = hatPickSwatch(2);
+    const int critX = DETAIL_CRITTER.x + DETAIL_CRITTER.w / 2, critY = DETAIL_CRITTER.y + DETAIL_CRITTER.h / 2;
     s.strokes.push_back(tapAt(DETAIL_OPEN_MS, 177, 100));   // tile 1, checkout-api, running
     s.strokes.push_back(tapAt(DETAIL_CLOSE_MS, 40, 44));    // back
-    s.strokes.push_back(tapAt(DETAIL_REOPEN_MS, 177, 100));  // the same tile, left open
+    s.strokes.push_back(tapAt(DETAIL_REOPEN_MS, 177, 100));  // the same tile
+    s.strokes.push_back(tapAt(DETAIL_PICKER_MS, critX, critY));  // its critter: the picker
+    s.strokes.push_back(tapAt(DETAIL_SHAPE_MS, wizard.x + wizard.w / 2, wizard.y + wizard.h / 2));
+    s.strokes.push_back(tapAt(DETAIL_COLOR_MS, yellow.x + yellow.w / 2, yellow.y + yellow.h / 2));
+    s.strokes.push_back(tapAt(DETAIL_PICK_BACK_MS, 40, 44));  // back to the detail, which stays open
+    s.strokes.push_back(tapAt(DETAIL_OPEN2_MS, 177, 100));    // after the wait: open again
+    s.strokes.push_back(tapAt(DETAIL_OPEN3_MS, 177, 100));    // after it was gone: open again
+    s.strokes.push_back(tapAt(DETAIL_PICKER2_MS, critX, critY));  // the picker, left up
   } else if (name == "sleep") {
     s.what = "Mac gone: WiFi fetches fail, screen sleeps after the timeout (2 min)";
     s.seconds = 600;
@@ -294,10 +320,18 @@ constexpr double ANIM_BUDGET = 1.2;  // agents-battery's MCU mA over agents-batt
 // `lan`: the variant WiFi gets, without the prompt.
 std::string agentsJson(uint32_t sinceStartMs, bool lan) {
   if (S.agents == Scenario::AGENTS_NONE) return "";
-  if (S.agents == Scenario::AGENTS_DECK) {  // still: no comma in front, payloadJson puts it first
-    return "{\"t\":\"AGENTS\",\"v\":\"4\",\"s1\":\"2 WORKING\",\"s2\":\"\",\"c\":\"ink\",\"a\":["
-           "{\"i\":\"l00001\",\"n\":\"infra-network\",\"l\":\"bash . 12% ctx\",\"k\":\"run\",\"p\":\"bash\",\"x\":12,\"h\":10},"
-           "{\"i\":\"l00002\",\"n\":\"checkout-api\",\"l\":\"edit . 41% ctx\",\"k\":\"run\",\"p\":\"write\",\"x\":41,\"h\":17},"
+  if (S.agents == Scenario::AGENTS_DECK || S.agents == Scenario::AGENTS_DETAIL) {
+    // no comma in front: payloadJson puts it first
+    const bool detail = S.agents == Scenario::AGENTS_DETAIL;
+    const bool waits = detail && sinceStartMs >= DETAIL_WAIT_MS && sinceStartMs < DETAIL_WAIT_END_MS;
+    const bool gone = detail && sinceStartMs >= DETAIL_GONE_MS && sinceStartMs < DETAIL_GONE_END_MS;
+    const char *second =
+        gone    ? ""
+        : waits ? "{\"i\":\"l00002\",\"n\":\"checkout-api\",\"l\":\"allow bash?\",\"k\":\"wait\",\"p\":\"wait\",\"x\":41,\"h\":17},"
+                : "{\"i\":\"l00002\",\"n\":\"checkout-api\",\"l\":\"edit . 41% ctx\",\"k\":\"run\",\"p\":\"write\",\"x\":41,\"h\":17},";
+    return std::string("{\"t\":\"AGENTS\",\"v\":\"4\",\"s1\":\"2 WORKING\",\"s2\":\"\",\"c\":\"ink\",\"a\":["
+                       "{\"i\":\"l00001\",\"n\":\"infra-network\",\"l\":\"bash . 12% ctx\",\"k\":\"run\",\"p\":\"bash\",\"x\":12,\"h\":10},") +
+           second +
            "{\"i\":\"l00003\",\"n\":\"docs-site\",\"l\":\"hungry . feed me\",\"k\":\"idle\",\"p\":\"hungry\",\"x\":3,\"u\":1,\"h\":63},"
            "{\"i\":\"l00004\",\"n\":\"claude-status...\",\"l\":\"idle\",\"k\":\"idle\",\"p\":\"idle\",\"x\":8,\"h\":30}]}";
   }
@@ -332,12 +366,13 @@ std::string agentsJson(uint32_t sinceStartMs, bool lan) {
 // The usage card from fixtures/usage.json, with the countdown running down a
 // minute at a time and the 5h percentage creeping up, as the bridge sends it,
 // then the scenario's Agents card.
-// For AGENTS_DECK the Agents card comes first, so the deck starts on it.
+// For AGENTS_DECK (and AGENTS_DETAIL) the Agents card comes first, so the deck starts on it.
 std::string payloadJson(uint32_t nowMs, bool lan = false) {
   const std::string agents = agentsJson(g_running ? nowMs - g_start : 0, lan);
   static std::string usage;
   static int cachedMin = -1;
-  const int min = (int)(nowMs / 60000);
+  // `detail` keeps it still: its sleep must come from the script alone, not a gauge step.
+  const int min = S.agents == Scenario::AGENTS_DETAIL ? 0 : (int)(nowMs / 60000);
   if (min != cachedMin) {
     cachedMin = min;
     const int left = 249 - min > 0 ? 249 - min : 0;
@@ -354,7 +389,7 @@ std::string payloadJson(uint32_t nowMs, bool lan = false) {
     usage = buf;
   }
   const std::string head = "{\"v\":1,\"ts\":0,\"src\":\"oauth\",\"cards\":[";
-  if (S.agents == Scenario::AGENTS_DECK) return head + agents + "," + usage + "]}";
+  if (S.agents == Scenario::AGENTS_DECK || S.agents == Scenario::AGENTS_DETAIL) return head + agents + "," + usage + "]}";
   return head + usage + agents + "]}";
 }
 
@@ -563,10 +598,9 @@ bool bleSendAnswer(const char *, const char *, char) {
 void bleSendNavPan(int16_t, int16_t) {}
 uint32_t g_details = 0;  // Control 0A sends
 // Control 0A with an agent: the first few, in ms into the run; and 0A 00 (closed).
-constexpr int DETAIL_LOG = 16;
-uint32_t g_detailAt[DETAIL_LOG];
+constexpr int DETAIL_LOG = 64;
+uint32_t g_detailAt[DETAIL_LOG], g_detailCloseAt[DETAIL_LOG];
 uint32_t g_detailOpens = 0, g_detailCloses = 0;
-uint32_t g_detailCloseAt = 0;
 bool bleSendDetail(const char *agent) {
   g_details++;
   if (!g_running) return true;
@@ -575,13 +609,19 @@ bool bleSendDetail(const char *agent) {
     if (g_detailOpens < DETAIL_LOG) g_detailAt[g_detailOpens] = t;
     g_detailOpens++;
   } else {
+    if (g_detailCloses < DETAIL_LOG) g_detailCloseAt[g_detailCloses] = t;
     g_detailCloses++;
-    g_detailCloseAt = t;
   }
   return true;
 }
-uint32_t g_hats = 0;  // Control 0B sends
-bool bleSendHat(const char *, uint8_t) {
+uint32_t g_hats = 0;  // Control 0B sends, and the first two: agent and hat
+uint8_t g_hatSent[2];
+char g_hatAgent[2][16];
+bool bleSendHat(const char *agent, uint8_t hat) {
+  if (g_hats < 2) {
+    g_hatSent[g_hats] = hat;
+    snprintf(g_hatAgent[g_hats], sizeof(g_hatAgent[0]), "%s", agent ? agent : "");
+  }
   g_hats++;
   return true;
 }
@@ -952,6 +992,11 @@ int main(int argc, char **argv) {
   }
   // The detail: one 0A as the tap lifts, again 5 s later while no `d` came,
   // so four before back; back sends 0A 00 once; the reopen sends 0A at once.
+  // The picker: a shape keeps the tile's colour (h 17 = shape 2, colour 1),
+  // a colour keeps the picked shape, both for the open agent; its back leaves
+  // the detail open. Then each way out sends one 0A 00: the tile waiting (and
+  // the alert's prompt then opens as before: one beep), the tile gone, and the
+  // screen's sleep with the picker up, after which nothing is open.
   if (!strcmp(S.name, "detail")) {
     uint32_t before = 0, reopenAt = 0;
     const uint32_t n = g_detailOpens < DETAIL_LOG ? g_detailOpens : DETAIL_LOG;
@@ -959,16 +1004,38 @@ int main(int argc, char **argv) {
       if (g_detailAt[i] < DETAIL_CLOSE_MS) before++;
       else if (!reopenAt) reopenAt = g_detailAt[i];
     }
+    // The first 0A at or after `from`, or 0.
+    auto openAfter = [&](uint32_t from) -> uint32_t {
+      for (uint32_t i = 0; i < n; i++)
+        if (g_detailAt[i] >= from) return g_detailAt[i];
+      return 0;
+    };
+    const uint32_t *c = g_detailCloseAt;
+    const uint32_t sleepAt = DETAIL_PICKER2_MS + 2u * 60000u;
     const bool firstOk = n >= 2 && g_detailAt[0] >= DETAIL_OPEN_MS && g_detailAt[0] < DETAIL_OPEN_MS + 300;
     const bool resendOk = firstOk && g_detailAt[1] - g_detailAt[0] >= DETAIL_RESEND_MS &&
                           g_detailAt[1] - g_detailAt[0] < DETAIL_RESEND_MS + 100;
-    const bool closeOk = g_detailCloses == 1 && g_detailCloseAt >= DETAIL_CLOSE_MS && g_detailCloseAt < DETAIL_CLOSE_MS + 300;
     const bool reopenOk = reopenAt >= DETAIL_REOPEN_MS && reopenAt < DETAIL_REOPEN_MS + 300;
-    if (!firstOk || !resendOk || before != 4 || !closeOk || !reopenOk) {
+    const bool closesOk = g_detailCloses == 4 && c[0] >= DETAIL_CLOSE_MS && c[0] < DETAIL_CLOSE_MS + 300 &&
+                          c[1] >= DETAIL_WAIT_MS && c[1] < DETAIL_WAIT_END_MS &&  // the payload that waits
+                          c[2] >= DETAIL_GONE_MS && c[2] < DETAIL_GONE_END_MS &&  // the payload without it
+                          c[3] >= sleepAt && c[3] < sleepAt + 2000;               // the screen's sleep
+    // Opened again only by the taps, each at once.
+    const uint32_t o2 = openAfter(c[1]), o3 = openAfter(c[2]);
+    const bool opensOk = o2 >= DETAIL_OPEN2_MS && o2 < DETAIL_OPEN2_MS + 300 && o3 >= DETAIL_OPEN3_MS &&
+                         o3 < DETAIL_OPEN3_MS + 300 && openAfter(c[3]) == 0;
+    const bool hatsOk = g_hats == 2 && g_hatSent[0] == 4 * 8 + 1 && g_hatSent[1] == 4 * 8 + 2 &&
+                        !strcmp(g_hatAgent[0], "l00002") && !strcmp(g_hatAgent[1], "l00002");
+    if (!firstOk || !resendOk || before != 4 || !reopenOk || !closesOk || !opensOk || !hatsOk ||
+        g_attention != 1 || benchDetailOpen()) {
       fprintf(stderr, "%s: 0A sends at", S.name);
       for (uint32_t i = 0; i < n; i++) fprintf(stderr, " %u", (unsigned)g_detailAt[i]);
-      fprintf(stderr, " ms (%u before back, expected 4); %u 0A 00 sends (expected 1), the last at %u ms\n",
-              (unsigned)before, (unsigned)g_detailCloses, (unsigned)g_detailCloseAt);
+      fprintf(stderr, " ms (%u before back, expected 4); 0A 00 sends at", (unsigned)before);
+      for (uint32_t i = 0; i < g_detailCloses && i < (uint32_t)DETAIL_LOG; i++) fprintf(stderr, " %u", (unsigned)c[i]);
+      fprintf(stderr, " ms (expected 4: back, wait, gone, sleep at %u)\n", (unsigned)sleepAt);
+      fprintf(stderr, "%s: %u 0B sends (expected 2: 33 then 34)", S.name, (unsigned)g_hats);
+      for (uint32_t i = 0; i < g_hats && i < 2; i++) fprintf(stderr, " %s:%u", g_hatAgent[i], (unsigned)g_hatSent[i]);
+      fprintf(stderr, "; %u beeps (expected 1); open at the end=%d\n", (unsigned)g_attention, (int)benchDetailOpen());
       return 1;
     }
   }

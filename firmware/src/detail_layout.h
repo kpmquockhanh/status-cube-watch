@@ -10,7 +10,7 @@
 // `< back` at the left of the y 44 row; the zone is taller than the text.
 constexpr LayoutRect DETAIL_BACK = {0, 30, 96, 30};
 // The agent's critter, cell 3, its hat included (a tap opens the hat picker).
-constexpr LayoutRect DETAIL_CRITTER = {4, 58, 80, 56};
+constexpr LayoutRect DETAIL_CRITTER = {4, 60, 80, 54};
 
 constexpr int DETAIL_HIT_BACK = 1;
 constexpr int DETAIL_HIT_CRITTER = 2;
@@ -22,7 +22,7 @@ constexpr bool detailIn(const LayoutRect &r, int16_t x, int16_t y) {
 
 // What a tap at (x, y) on the detail screen hits: DETAIL_HIT_BACK,
 // DETAIL_HIT_CRITTER, or 0 for nothing. The zones overlap on rows 58-59
-// (x 4..95): back wins there.
+// 30..59), so the zones never overlap.
 constexpr int detailHit(int16_t x, int16_t y) {
   return detailIn(DETAIL_BACK, x, y) ? DETAIL_HIT_BACK : detailIn(DETAIL_CRITTER, x, y) ? DETAIL_HIT_CRITTER : 0;
 }

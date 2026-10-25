@@ -22,9 +22,11 @@
 #include "cpu_policy.h"
 #include "deck_util.h"
 #include "detail_layout.h"
+#include "detail_frame.h"  // HAT_NONE, HAT_AUTO
 #include "detail_view.h"
 #include "display.h"
 #include "gesture.h"
+#include "hat_picker_layout.h"
 #include "idle_sleep.h"
 #include "nav_pan.h"
 #include "nav_session.h"
@@ -380,10 +382,76 @@ void openDetail(const char *agent, uint32_t now) {
   dirty = true;
 }
 
+// The payload says the open agent's folder wears the automatic hat: only when
+// its `d` (BLE only) is this agent's; unknown reads as not automatic.
+bool detailHatAuto() {
+  const AgentDetail &d = payload.agents.detail;
+  return payloadViaBle && d.present && !strcmp(d.id, detailView.agent()) && d.hatAuto;
+}
+
+// A tap on the picker: Control 0B to the Mac, and the pick is drawn while it
+// travels (DetailView holds it until the payload shows it or 4 s pass). A
+// shape keeps the current colour, a colour the current shape (nothing while
+// the folder wears no hat). A send that cannot go out is logged by
+// bleSendHat and still shown for its hold.
+void pickHat(HatPick p, uint32_t now) {
+  const AgentTile *t = agentsTile(payload.agents, detailView.agent());
+  if (!t) return;
+  constexpr int16_t PICK_AUTO = -2;  // detail_view.h's code for "automatic"
+  const int16_t shown = detailView.shownHat(t->hat, now);
+  const int shape = shown >= 0 ? shown / 8 : -1, color = shown >= 0 ? shown % 8 : 0;
+  int16_t code;
+  uint8_t wire;
+  switch (p.kind) {
+    case HatPick::Shape:
+      code = (int16_t)(p.index * 8 + color);
+      wire = (uint8_t)code;
+      break;
+    case HatPick::Color:
+      if (shape < 0) return;
+      code = (int16_t)(shape * 8 + p.index);
+      wire = (uint8_t)code;
+      break;
+    case HatPick::None:
+      code = -1;
+      wire = HAT_NONE;
+      break;
+    case HatPick::Auto:
+      code = PICK_AUTO;
+      wire = HAT_AUTO;
+      break;
+    default:
+      return;
+  }
+  if (!bleSendHat(t->id, wire)) Serial.println("[agents] hat pick shown, not sent");
+  detailView.pick(code, now);
+  dirty = true;
+}
+
+// The hat picker: a swipe right or `< back` returns to the detail screen.
+void pickerGesture(Gesture g, uint32_t now) {
+  if (g == Gesture::SwipePrev) {
+    detailView.closePicker();
+    dirty = true;
+  } else if (g == Gesture::Tap) {
+    const HatPick p = hatPickerAt(gestures.startX(), gestures.startY());
+    if (p.kind == HatPick::Back) {
+      detailView.closePicker();
+      dirty = true;
+    } else {
+      pickHat(p, now);
+    }
+  }
+}
+
 // The detail screen: a swipe right or `< back` closes it, a tap on the critter
-// opens the hat picker (drawn by a later task: until then the detail stays).
+// opens the hat picker, drawn in its place until it closes.
 // The other gestures do nothing, so the display panel does not open over it.
 void detailGesture(Gesture g, uint32_t now) {
+  if (detailView.pickerOpen()) {
+    pickerGesture(g, now);
+    return;
+  }
   if (g == Gesture::SwipePrev) {
     closeDetail(now);
   } else if (g == Gesture::Tap) {
@@ -466,7 +534,9 @@ void routePromptTap(uint32_t now) {
   dirty = true;
 }
 
-void pollTouch() {
+// `now` is the pass's: everything the touch starts (a detail's 0A, a hat pick)
+// is timed on the same clock the rest of the pass reads, never ahead of it.
+void pollTouch(uint32_t now) {
   int16_t x = 0, y = 0;
   const bool down = touch.read(x, y);
   const bool landing = down && !touchDown;
@@ -481,7 +551,6 @@ void pollTouch() {
     pairWaitDismissed = true;
     dirty = true;
   }
-  const uint32_t now = millis();
   if (down && idle.touch(now)) swallowTouch = true;
   if (swallowTouch) {
     if (!down) swallowTouch = false;
@@ -801,7 +870,7 @@ void loop() {
   const uint32_t now = millis();
 
   buzzerUpdate(now);  // every pass, before the screen-off return below
-  pollTouch();
+  pollTouch(now);
   pollOrientation(now);
   batteryUpdate(now);
 #ifdef BATTERY_LOG
@@ -1006,6 +1075,7 @@ void loop() {
       lcd.setBrightness(0);
       lcd.sleep();
       drawnPrompt.shown = false;  // nothing is on the glass now
+      closeDetail(now);           // with its picker; tells the Mac (0a 00)
       setCpu(CPU_MHZ_SLOW);
     }
   }
@@ -1020,7 +1090,9 @@ void loop() {
   // it does not raise the clock: only touch and the ring/slide animations do.
   const AgentTile *promptTile = nullptr, *detailTile = nullptr;
   const Shown shown = shownScreen(now, &promptTile, &detailTile);
-  bool animOn = shown == Shown::Prompt || shown == Shown::Detail || (shown == Shown::Deck && onAgentsCard());
+  // (The hat picker's critters stand still.)
+  bool animOn = shown == Shown::Prompt || (shown == Shown::Detail && !detailView.pickerOpen()) ||
+                (shown == Shown::Deck && onAgentsCard());
 #ifdef SIM_BENCH
   if (g_benchAnimOff) animOn = false;
 #endif
@@ -1066,6 +1138,9 @@ void loop() {
         drawnPrompt.scroll = pv.scroll;
         drawnPrompt.layout = layout;
       }
+    } else if (shown == Shown::Detail && detailView.pickerOpen()) {
+      uiHatPicker(lcd, *detailTile, detailView.shownHat(detailTile->hat, now),
+                  detailView.pickedAuto(detailHatAuto(), now), now, online, age, bv, link);
     } else if (shown == Shown::Detail) {
       uiAgentDetail(lcd, payload.agents, *detailTile, detailView.shownHat(detailTile->hat, now), payloadViaBle, online,
                     age, bv, link);
@@ -1096,4 +1171,5 @@ uint8_t benchCardIndex() { return cardIndex; }
 bool benchNavActive() { return navSession.active(); }
 bool benchPromptOpen() { return drawnPrompt.shown; }
 bool benchPayloadViaBle() { return payloadViaBle; }
+bool benchDetailOpen() { return detailView.isOpen() || detailView.pickerOpen(); }
 #endif
