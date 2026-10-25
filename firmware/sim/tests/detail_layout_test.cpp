@@ -3,7 +3,7 @@
 
 int main() {
   CHECK(DETAIL_BACK.x == 0 && DETAIL_BACK.y == 30 && DETAIL_BACK.w == 96 && DETAIL_BACK.h == 30);
-  CHECK(DETAIL_CRITTER.x == 4 && DETAIL_CRITTER.y == 60 && DETAIL_CRITTER.w == 80 && DETAIL_CRITTER.h == 54);
+  CHECK(DETAIL_CRITTER.x == 0 && DETAIL_CRITTER.y == 60 && DETAIL_CRITTER.w == 90 && DETAIL_CRITTER.h == 58);
   CHECK(DETAIL_HIT_BACK == 1 && DETAIL_HIT_CRITTER == 2);
 
   CHECK(detailHit(10, 40) == DETAIL_HIT_BACK);
@@ -21,9 +21,11 @@ int main() {
   CHECK(detailHit(4, 60) == DETAIL_HIT_CRITTER);
   CHECK(detailIn(DETAIL_CRITTER, 4, 60) && !detailIn(DETAIL_CRITTER, 4, 59));
   CHECK(detailHit(83, 113) == DETAIL_HIT_CRITTER);
-  CHECK(detailHit(84, 80) == 0);
-  CHECK(detailHit(40, 114) == 0);
-  CHECK(detailHit(3, 80) == 0);
+  CHECK(detailHit(89, 80) == DETAIL_HIT_CRITTER);
+  CHECK(detailHit(90, 80) == 0);
+  CHECK(detailHit(40, 117) == DETAIL_HIT_CRITTER);  // the feet reach y 116
+  CHECK(detailHit(40, 118) == 0);
+  CHECK(detailHit(0, 80) == DETAIL_HIT_CRITTER);
   CHECK(detailHit(-1, -1) == 0);
 
   return checksDone("detail_layout");

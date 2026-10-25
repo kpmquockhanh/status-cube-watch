@@ -13,9 +13,13 @@ int main() {
   CHECK(hatPickCell(3).x == 12 + 3 * 56 && hatPickCell(3).y == 60);
   CHECK(hatPickCell(4).x == 12 && hatPickCell(4).y == 106);
   CHECK(hatPickCell(14).x == 12 + 2 * 56 && hatPickCell(14).y == 60 + 3 * 46);
-  // Swatches: 26 x 22 at x = 12 + i * 28, y = 250.
-  CHECK(hatPickSwatch(0).x == 12 && hatPickSwatch(0).y == 250 && hatPickSwatch(0).w == 26 && hatPickSwatch(0).h == 22);
-  CHECK(hatPickSwatch(7).x == 12 + 7 * 28);
+  // Swatches: 24 x 20 at x = 16 + i * 26, y = 246, clear of the glass's rounded
+  // bottom corners (radius 40): the outer corners (16, 265) and (221, 265) are
+  // inside the arc.
+  CHECK(hatPickSwatch(0).x == 16 && hatPickSwatch(0).y == 246 && hatPickSwatch(0).w == 24 && hatPickSwatch(0).h == 20);
+  CHECK(hatPickSwatch(7).x == 16 + 7 * 26);
+  CHECK((16 - 40) * (16 - 40) + (265 - 240) * (265 - 240) < 40 * 40);
+  CHECK((16 + 7 * 26 + 23 - 200) * (16 + 7 * 26 + 23 - 200) + (265 - 240) * (265 - 240) < 40 * 40);
 
   CHECK(is(hatPickerAt(13, 61), HatPick::Shape, 0));
   CHECK(is(hatPickerAt(12 + 3 * 56 + 1, 60 + 1), HatPick::Shape, 3));
@@ -23,8 +27,8 @@ int main() {
   CHECK(kind(hatPickerAt(12 + 1 * 56 + 10, 60 + 3 * 46 + 10), HatPick::None));     // cell 13
   CHECK(kind(hatPickerAt(12 + 2 * 56 + 10, 60 + 3 * 46 + 10), HatPick::Auto));     // cell 14
   CHECK(kind(hatPickerAt(12 + 3 * 56 + 10, 60 + 3 * 46 + 10), HatPick::Nothing));  // no cell 15
-  CHECK(is(hatPickerAt(12 + 7 * 28 + 1, 251), HatPick::Color, 7));
-  CHECK(is(hatPickerAt(12, 250), HatPick::Color, 0));
+  CHECK(is(hatPickerAt(16 + 7 * 26 + 1, 247), HatPick::Color, 7));
+  CHECK(is(hatPickerAt(16, 246), HatPick::Color, 0));
 
   // Edges: left/top inside, right/bottom outside; the gaps are nothing.
   CHECK(is(hatPickerAt(12 + 53, 60 + 43), HatPick::Shape, 0));
@@ -35,11 +39,12 @@ int main() {
   CHECK(kind(hatPickerAt(30, 60 + 45), HatPick::Nothing));
   CHECK(is(hatPickerAt(30, 60 + 46), HatPick::Shape, 4));
   CHECK(kind(hatPickerAt(11, 70), HatPick::Nothing));
-  CHECK(kind(hatPickerAt(12 + 26, 255), HatPick::Nothing));  // between swatches
-  CHECK(kind(hatPickerAt(12 + 27, 255), HatPick::Nothing));
-  CHECK(kind(hatPickerAt(20, 249), HatPick::Nothing));
-  CHECK(kind(hatPickerAt(20, 272), HatPick::Nothing));
-  CHECK(kind(hatPickerAt(12 + 7 * 28 + 26, 255), HatPick::Nothing));
+  CHECK(kind(hatPickerAt(16 + 24, 255), HatPick::Nothing));  // between swatches
+  CHECK(kind(hatPickerAt(16 + 25, 255), HatPick::Nothing));
+  CHECK(kind(hatPickerAt(15, 255), HatPick::Nothing));
+  CHECK(kind(hatPickerAt(20, 245), HatPick::Nothing));
+  CHECK(kind(hatPickerAt(20, 266), HatPick::Nothing));
+  CHECK(kind(hatPickerAt(16 + 7 * 26 + 24, 255), HatPick::Nothing));
   CHECK(kind(hatPickerAt(-1, -1), HatPick::Nothing));
 
   CHECK(kind(hatPickerAt(10, 40), HatPick::Back));

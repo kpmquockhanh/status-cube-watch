@@ -16,8 +16,9 @@ constexpr int HAT_PICK_NONE_CELL = 13, HAT_PICK_AUTO_CELL = 14;
 constexpr int HAT_PICK_COLS = 4;
 constexpr int HAT_PICK_X = 12, HAT_PICK_Y = 60, HAT_PICK_W = 54, HAT_PICK_H = 44;
 constexpr int HAT_PICK_PITCH_X = 56, HAT_PICK_PITCH_Y = 46;
-// The colour swatches, one row under the cells.
-constexpr int HAT_SWATCH_X = 12, HAT_SWATCH_Y = 250, HAT_SWATCH_W = 26, HAT_SWATCH_H = 22, HAT_SWATCH_PITCH = 28;
+// The colour swatches, one row under the cells, clear of the glass's rounded
+// bottom corners (radius 40).
+constexpr int HAT_SWATCH_X = 16, HAT_SWATCH_Y = 246, HAT_SWATCH_W = 24, HAT_SWATCH_H = 20, HAT_SWATCH_PITCH = 26;
 // `< back` at the left of the y 44 row, as on the detail screen.
 constexpr LayoutRect HAT_PICK_BACK = {0, 30, 96, 30};
 

@@ -9,8 +9,9 @@
 
 // `< back` at the left of the y 44 row; the zone is taller than the text.
 constexpr LayoutRect DETAIL_BACK = {0, 30, 96, 30};
-// The agent's critter, cell 3, its hat included (a tap opens the hat picker).
-constexpr LayoutRect DETAIL_CRITTER = {4, 60, 80, 54};
+// The agent's critter, cell 4, its hat and feet included (a tap opens the hat
+// picker); it ends at x 90, short of the title (x 92).
+constexpr LayoutRect DETAIL_CRITTER = {0, 60, 90, 58};
 
 constexpr int DETAIL_HIT_BACK = 1;
 constexpr int DETAIL_HIT_CRITTER = 2;

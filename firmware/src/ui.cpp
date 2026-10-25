@@ -1055,11 +1055,14 @@ void drawCritter(LovyanGFX *g, Pose pose, HatId hat, uint32_t ms, float ox, floa
       case CritterInk::HatHighlight: rgb = hatHighlightRgb(); break;
       default: rgb = hatDarkRgb(); break;
     }
+    // Size rounded once, apart from the position: a shape moved by half a
+    // cell (the bob) then shifts whole, instead of growing or shrinking by a
+    // pixel from frame to frame, which reads as blur on the panel.
     const int x0 = (int)lroundf(ox + r[i].x * cell), y0 = (int)lroundf(oy + r[i].y * cell);
-    int x1 = (int)lroundf(ox + (r[i].x + r[i].w) * cell), y1 = (int)lroundf(oy + (r[i].y + r[i].h) * cell);
-    if (x1 <= x0) x1 = x0 + 1;
-    if (y1 <= y0) y1 = y0 + 1;
-    g->fillRect(x0, y0, x1 - x0, y1 - y0, r[i].alpha == 255 ? to565(rgb) : blend565(rgb, k.cut, r[i].alpha));
+    int w = (int)lroundf(r[i].w * cell), h = (int)lroundf(r[i].h * cell);
+    if (w < 1) w = 1;
+    if (h < 1) h = 1;
+    g->fillRect(x0, y0, w, h, r[i].alpha == 255 ? to565(rgb) : blend565(rgb, k.cut, r[i].alpha));
   }
 }
 
@@ -1750,13 +1753,18 @@ namespace {
 constexpr int DETAIL_ROW_Y = 44;  // `< back` and the status pill
 constexpr int DETAIL_X = 16, DETAIL_W = LCD_WIDTH - 2 * DETAIL_X;
 constexpr int DETAIL_PILL_RIGHT = 224, DETAIL_PILL_H = 16, DETAIL_PILL_PAD = 5, DETAIL_PILL_MAX_W = 120;
-constexpr int DETAIL_CELL = 3;
-constexpr int DETAIL_TITLE_X = 88, DETAIL_TITLE_W = 232 - DETAIL_TITLE_X, DETAIL_TITLE_Y = 60, DETAIL_TITLE_LINE_H = 20;
-constexpr int DETAIL_DOING_LABEL_Y = 122, DETAIL_DOING_Y = 136;
-constexpr int DETAIL_CTX_Y = 156, DETAIL_BAR_Y = 170, DETAIL_BAR_H = 4;
-constexpr int DETAIL_PROMPT_LABEL_Y = 182, DETAIL_PROMPT_Y = 196, DETAIL_PROMPT_LINE_H = 15;
-constexpr uint8_t DETAIL_PROMPT_LINES = 4;
-constexpr int DETAIL_META_Y = 266;
+// 4 px cells, as agents-deck's 240x280 port draws its critters: the half-cell
+// bob is then exactly 2 px. Cell 0 at (16, 80): the cap's brim reaches x 4,
+// the hat y 54, the feet y 116, the bubble x 88, short of the title.
+constexpr int DETAIL_CELL = 4, DETAIL_CRIT_X = 16, DETAIL_CRIT_Y = 80;
+constexpr int DETAIL_TITLE_X = 92, DETAIL_TITLE_W = 232 - DETAIL_TITLE_X, DETAIL_TITLE_Y = 60, DETAIL_TITLE_LINE_H = 20;
+constexpr int DETAIL_DOING_LABEL_Y = 128, DETAIL_DOING_Y = 142;
+constexpr int DETAIL_CTX_Y = 162, DETAIL_BAR_Y = 176, DETAIL_BAR_H = 4;
+constexpr int DETAIL_PROMPT_LABEL_Y = 188, DETAIL_PROMPT_Y = 202, DETAIL_PROMPT_LINE_H = 15;
+constexpr uint8_t DETAIL_PROMPT_LINES = 3;
+// The last line sits clear of the glass's rounded bottom corners (radius 40):
+// centred, 192 px wide, at y 252, where the arc is under 16 px in.
+constexpr int DETAIL_META_Y = 252, DETAIL_META_W = 192;
 
 // A small label (rm11, lower-case), its left edge at x; returns its width.
 int detailLabel(LovyanGFX *g, const char *text, int x, int y, uint16_t color) {
@@ -1808,14 +1816,13 @@ void uiAgentDetail(Display &lcd, const AgentsData &a, const AgentTile &tile, int
   const bool wait = tile.kind == AgentKind::Wait, hungry = tileHungry(tile);
   detailPill(g, has && d.status[0] ? d.status : tile.line, wait || hungry ? ACCENT : INK);
 
-  // The critter in its pose and (shown) hat, centred in DETAIL_CRITTER,
-  // coloured as on its tile but on black.
+  // The critter in its pose and (shown) hat, inside DETAIL_CRITTER, coloured
+  // as on its tile but on black.
   const uint32_t body = wait || tile.kind == AgentKind::Run || hungry ? ACCENT_RGB
                         : tile.kind == AgentKind::Err                 ? INK_RGB
                                                                       : DIM_RGB;
-  const LayoutRect &cr = DETAIL_CRITTER;
-  drawCritter(g, poseFromName(tile.pose), hatFromCode(hat), now, cr.x + cr.w / 2 - TILE_CRIT_X * DETAIL_CELL,
-              cr.y + 23, DETAIL_CELL, CritterInks{body, BG_RGB});
+  drawCritter(g, poseFromName(tile.pose), hatFromCode(hat), now, DETAIL_CRIT_X, DETAIL_CRIT_Y, DETAIL_CELL,
+              CritterInks{body, BG_RGB});
 
   // The title (rb18, two lines) and the subagents under it.
   char lines[DETAIL_PROMPT_LINES][LINE_CAP];
@@ -1842,7 +1849,7 @@ void uiAgentDetail(Display &lcd, const AgentsData &a, const AgentTile &tile, int
   const int fill = DETAIL_W * (tile.ctx > 100 ? 100 : tile.ctx) / 100;
   if (fill > 0) g->fillRect(DETAIL_X, DETAIL_BAR_Y, fill, DETAIL_BAR_H, INK);
 
-  // The last prompt, wrapped to four lines.
+  // The last prompt, wrapped to three lines.
   detailLabel(g, "last prompt", DETAIL_X, DETAIL_PROMPT_LABEL_Y, DIM);
   g->setFont(&V_RM13.font);
   const uint8_t nPrompt = wrapText(g, has ? d.prompt : waitCopy, DETAIL_W, DETAIL_PROMPT_LINES, lines);
@@ -1851,7 +1858,7 @@ void uiAgentDetail(Display &lcd, const AgentsData &a, const AgentTile &tile, int
   for (uint8_t i = 0; i < nPrompt; i++) g->drawString(lines[i], DETAIL_X, DETAIL_PROMPT_Y + i * DETAIL_PROMPT_LINE_H);
 
   // Model, folder, branch.
-  if (has && d.meta[0]) drawLine(g, V_RM11, d.meta, DETAIL_X, DETAIL_META_Y, DETAIL_W, DIM, BG, middle_left);
+  if (has && d.meta[0]) drawLine(g, V_RM11, d.meta, LCD_WIDTH / 2, DETAIL_META_Y, DETAIL_META_W, DIM, BG, middle_center);
   present(lcd);
 }
 
