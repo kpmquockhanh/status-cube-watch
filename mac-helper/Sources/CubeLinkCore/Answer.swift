@@ -73,7 +73,14 @@ extension BridgeClient {
     /// Sent once, never retried. May be called on any queue.
     public func answer(agent: String, prompt: String, key: Character, _ done: @escaping (Int?, String?) -> Void) {
         let req = BridgeClient.answerRequest(port: port, agent: agent, prompt: prompt, key: key)
-        session.dataTask(with: req) { _, resp, err in
+        // A fresh session per answer: URLSession may silently resend a request on a kept-alive
+        // connection the server closed, and an answer types keys, so it must reach the bridge once.
+        let cfg = URLSessionConfiguration.ephemeral
+        cfg.timeoutIntervalForRequest = 5
+        cfg.waitsForConnectivity = false
+        let once = URLSession(configuration: cfg)
+        defer { once.finishTasksAndInvalidate() }
+        once.dataTask(with: req) { _, resp, err in
             if let http = resp as? HTTPURLResponse { return done(http.statusCode, nil) }
             done(nil, err?.localizedDescription ?? "no HTTP response")
         }.resume()
