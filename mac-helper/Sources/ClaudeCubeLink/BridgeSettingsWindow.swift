@@ -28,7 +28,7 @@ final class BridgeSettingsWindow: NSObject, NSWindowDelegate {
         window.isReleasedWhenClosed = false
         window.delegate = self
 
-        let grid = NSGridView(views: [
+        let rows: [[NSView]] = [
             [header("Usage")],
             [NSGridCell.emptyContentView, extraCards],
             [NSGridCell.emptyContentView, agents],
@@ -41,13 +41,16 @@ final class BridgeSettingsWindow: NSObject, NSWindowDelegate {
             [label("App password"), gmailPassword],
             [header("Network")],
             [NSGridCell.emptyContentView, lan],
-        ])
+        ]
+        let grid = NSGridView(views: rows)
         grid.rowSpacing = 8
         grid.columnSpacing = 12
         grid.column(at: 0).xPlacement = .trailing
-        for r in [0, 6, 9] {
+        // A heading is a row of one view: it spans both columns from the left, with space above all but the first.
+        for (r, row) in rows.enumerated() where row.count == 1 {
             grid.row(at: r).mergeCells(in: NSRange(location: 0, length: 2))
             grid.row(at: r).topPadding = r == 0 ? 0 : 10
+            grid.cell(atColumnIndex: 0, rowIndex: r).xPlacement = .leading  // not the label column's trailing
         }
         source.addItems(withTitles: ["Local Claude Code logs", "Admin API (organisation)"])  // order = Source.allCases
         for f in [adminKey, oauthToken, gmailUser, gmailPassword] {

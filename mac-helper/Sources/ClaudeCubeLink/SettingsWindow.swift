@@ -40,7 +40,7 @@ final class SettingsWindow: NSObject, NSWindowDelegate {
         window.isReleasedWhenClosed = false
         window.delegate = self
 
-        let grid = NSGridView(views: [
+        let rows: [[NSView]] = [
             [header("Display")],
             [label("Brightness"), backlight],
             [label("Screen sleep (min, 0 = never)"), sleep],
@@ -52,16 +52,19 @@ final class SettingsWindow: NSObject, NSWindowDelegate {
             [label("WiFi password"), wifiPass],
             [label("Bridge URL"), bridge],
             [label("OTA password"), otaPass],
-        ])
+        ]
+        let grid = NSGridView(views: rows)
         grid.rowSpacing = 8
         grid.columnSpacing = 12
         grid.column(at: 0).xPlacement = .trailing
-        for r in [0, 6] {
+        // A heading is a row of one view: it spans both columns from the left, with space above all but the first.
+        for (r, row) in rows.enumerated() where row.count == 1 {
             grid.row(at: r).mergeCells(in: NSRange(location: 0, length: 2))
             grid.row(at: r).topPadding = r == 0 ? 0 : 10
+            grid.cell(atColumnIndex: 0, rowIndex: r).xPlacement = .leading  // not the label column's trailing
         }
         sound.addItems(withTitles: ["Off", "Low", "Medium", "High"])  // index = level
-        soundRow = grid.row(at: 5)
+        soundRow = grid.row(at: rows.firstIndex { $0.last === sound }!)
         soundRow?.isHidden = true
         for f in [ssid, wifiPass, bridge, otaPass] { f.widthAnchor.constraint(equalToConstant: 220).isActive = true }
         backlight.widthAnchor.constraint(equalToConstant: 220).isActive = true
