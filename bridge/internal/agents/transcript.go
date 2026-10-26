@@ -259,18 +259,18 @@ func subagents(transcript string, now time.Time, window, toolWindow time.Duratio
 
 // transcriptTurn reads the end of a session transcript: whether a turn is in
 // progress (the last message isn't Claude's final reply, and the file was
-// written within window or a tool call is still out), and the tool of the
-// latest call.
-func transcriptTurn(path string, now time.Time, window time.Duration) (running bool, tool string) {
+// written within window or a tool call is still out), the tool of the
+// latest call, and whether the last message is Claude's final reply (done).
+func transcriptTurn(path string, now time.Time, window time.Duration) (running bool, tool string, done bool) {
 	st, err := os.Stat(path)
 	if err != nil {
-		return false, ""
+		return false, "", false
 	}
 	done, inTool, tool, _ := subagentTail(path, st.Size())
 	if done {
-		return false, ""
+		return false, "", true
 	}
-	return inTool || now.Sub(st.ModTime()) < window, tool
+	return inTool || now.Sub(st.ModTime()) < window, tool, false
 }
 
 // subagentTail reads the end of a subagent transcript: whether its last
@@ -292,12 +292,13 @@ func subagentTail(path string, size int64) (done, inTool bool, tool string, star
 	var m struct {
 		Type    string `json:"type"`
 		Message *struct {
-			StopReason string `json:"stop_reason"`
-			Content    []struct {
-				Type string `json:"type"`
-				Name string `json:"name"`
-			} `json:"content"`
+			StopReason string          `json:"stop_reason"`
+			Content    json.RawMessage `json:"content"` // blocks, or a plain string (a typed prompt, a task notification)
 		} `json:"message"`
+	}
+	type block struct {
+		Type string `json:"type"`
+		Name string `json:"name"`
 	}
 	decided := false
 	for i := len(lines) - 1; i >= 0 && (tool == "" || !decided); i-- {
@@ -305,16 +306,18 @@ func subagentTail(path string, size int64) (done, inTool bool, tool string, star
 		if json.Unmarshal(lines[i], &m) != nil || m.Message == nil {
 			continue
 		}
+		var content []block
+		_ = json.Unmarshal(m.Message.Content, &content) // a string leaves it empty
 		if !decided && (m.Type == "assistant" || m.Type == "user") {
 			decided = true
 			done = m.Type == "assistant" && m.Message.StopReason == "end_turn"
 			// Tool calls usually carry no stop_reason: look for the block.
-			for _, c := range m.Message.Content {
+			for _, c := range content {
 				inTool = inTool || (m.Type == "assistant" && c.Type == "tool_use")
 			}
 		}
 		if m.Type == "assistant" && tool == "" {
-			for _, c := range m.Message.Content {
+			for _, c := range content {
 				if c.Type == "tool_use" {
 					tool = c.Name
 				}

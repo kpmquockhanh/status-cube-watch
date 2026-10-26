@@ -342,6 +342,7 @@ type syncJob struct {
 	tailChanged bool
 	subs        []Subagent
 	running     bool // hookless: transcript says a turn is going on
+	done        bool // hookless: the transcript ends in Claude's final reply
 	tool        string
 	menu        bool // screen was captured for a menu scan
 	screen      string
@@ -364,7 +365,7 @@ func (j *syncJob) run(ctx context.Context, tm *Tmux, now time.Time) {
 	j.tailChanged = tail(&j.tailed, now)
 	j.subs = subagents(j.snap.Transcript, now, subWindow, subToolWindow)
 	if !j.snap.HookSeen && j.snap.Transcript != "" {
-		j.running, j.tool = transcriptTurn(j.snap.Transcript, now, turnWindow)
+		j.running, j.tool, j.done = transcriptTurn(j.snap.Transcript, now, turnWindow)
 	}
 	if j.snap.Pane != "" && (j.snap.Status == Starting || j.snap.Menu) {
 		j.menu, j.screen = true, tm.Capture(ctx, j.snap.Pane, 0)
@@ -389,7 +390,7 @@ func (t *Tracker) applyJob(j *syncJob, now time.Time) bool {
 		changed = scanMenu(e, j.screen, now) || changed
 	}
 	if !e.HookSeen && !e.Menu {
-		changed = liveStatus(e, j.running, j.tool, now) || changed
+		changed = liveStatus(e, j.running, j.done, j.tool, now) || changed
 	}
 	return applySubagents(e, j.subs, now) || changed
 }
@@ -459,8 +460,9 @@ func afterMenu(e *entry) Status {
 
 // liveStatus reads the state of a session that sends no hooks off the end of
 // its transcript: working until Claude's final reply of the turn, then idle
-// (unseen once a turn finishes while we watch).
-func liveStatus(e *entry, running bool, tool string, now time.Time) bool {
+// (unseen once a turn finishes while we watch). done: the transcript ends in
+// that final reply.
+func liveStatus(e *entry, running, done bool, tool string, now time.Time) bool {
 	changed := false
 	if e.Status == Starting {
 		if e.Transcript == "" {
@@ -469,8 +471,10 @@ func liveStatus(e *entry, running bool, tool string, now time.Time) bool {
 		e.SetStatus(Idle, now) // past any opening dialog
 		changed = true
 	}
-	if l := e.Live; l != nil && l.Reported { // Claude Code's own report beats the transcript
-		running = l.Busy
+	if l := e.Live; l != nil && l.Reported { // Claude Code's own report beats the transcript,
+		// except after Claude's final reply: a session busy only on a background
+		// task (a Monitor, a background shell) has finished its turn.
+		running = l.Busy && !done
 		if l.Blocked {
 			if e.Status != Waiting {
 				e.SetStatus(Waiting, now)

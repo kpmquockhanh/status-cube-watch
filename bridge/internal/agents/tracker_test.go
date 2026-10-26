@@ -264,6 +264,26 @@ func TestHooklessStatus(t *testing.T) {
 		t.Fatalf("finished while watched: %+v", a)
 	}
 
+	// Busy by Claude Code's report, but the transcript ends in Claude's final
+	// reply: only a background task (a Monitor) keeps it busy, so still idle.
+	env.disc.set([]Live{{TTY: "/dev/ttys003", Cwd: "/work/proj", SessionID: sidA, Transcript: tp, Reported: true, Busy: true}})
+	tr.Sync(context.Background())
+	if a := only(t, tr); a.Status != Idle {
+		t.Fatalf("busy on a background task: %+v", a)
+	}
+	// A new turn (the Monitor's event arrives as a user message): running.
+	writeLines(t, tp, `{"type":"user","message":{"content":"<task-notification>event</task-notification>"}}`)
+	tr.Sync(context.Background())
+	if a := only(t, tr); a.Status != Running {
+		t.Fatalf("new turn: %+v", a)
+	}
+	writeLines(t, tp,
+		`{"type":"assistant","message":{"id":"m3","model":"claude-opus-5-5","stop_reason":"end_turn","content":[{"type":"text","text":"noted"}],"usage":{"input_tokens":30,"output_tokens":5}}}`)
+	tr.Sync(context.Background())
+	if a := only(t, tr); a.Status != Idle {
+		t.Fatalf("turn ended, monitor still busy: %+v", a)
+	}
+
 	// Claude Code's own report: blocked means it needs you.
 	env.disc.set([]Live{{TTY: "/dev/ttys003", Cwd: "/work/proj", SessionID: sidA, Transcript: tp, Reported: true, Busy: true, Blocked: true}})
 	tr.Sync(context.Background())

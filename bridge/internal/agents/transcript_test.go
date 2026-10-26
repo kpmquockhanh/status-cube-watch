@@ -204,25 +204,25 @@ func TestTranscriptTurn(t *testing.T) {
 	final := `{"type":"assistant","message":{"stop_reason":"end_turn","content":[{"type":"text","text":"ok"}]}}`
 	result := `{"type":"user","message":{"content":[{"type":"tool_result"}]}}`
 	now := time.Now()
-	if running, _ := transcriptTurn(path, now, time.Minute); running {
+	if running, _, _ := transcriptTurn(path, now, time.Minute); running {
 		t.Fatal("missing file")
 	}
 	appendTo(t, path, call+"\n")
 	old := now.Add(-time.Hour)
 	os.Chtimes(path, old, old)
-	if running, tool := transcriptTurn(path, now, time.Minute); !running || tool != "Bash" {
+	if running, tool, _ := transcriptTurn(path, now, time.Minute); !running || tool != "Bash" {
 		t.Fatalf("tool call out: %v %q", running, tool)
 	}
 	os.WriteFile(path, []byte(call+"\n"+result+"\n"), 0o600)
 	os.Chtimes(path, old, old)
-	if running, _ := transcriptTurn(path, now, time.Minute); running {
+	if running, _, _ := transcriptTurn(path, now, time.Minute); running {
 		t.Fatal("quiet after a result")
 	}
-	if running, _ := transcriptTurn(path, old.Add(10*time.Second), time.Minute); !running {
+	if running, _, _ := transcriptTurn(path, old.Add(10*time.Second), time.Minute); !running {
 		t.Fatal("recent write")
 	}
 	os.WriteFile(path, []byte(call+"\n"+final+"\n"), 0o600)
-	if running, _ := transcriptTurn(path, time.Now(), time.Minute); running {
+	if running, _, _ := transcriptTurn(path, time.Now(), time.Minute); running {
 		t.Fatal("final reply")
 	}
 }
