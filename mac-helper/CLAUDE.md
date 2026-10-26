@@ -10,6 +10,7 @@ Scope: `mac-helper/`. The repo-root `CLAUDE.md` describes what the app does: it 
 swift test                                  # all tests (Swift Testing, free @Test functions)
 swift test --filter encodesTheGoldenFrames  # one test, by function name
 swift test --filter SettingsTests           # one file's tests, by file name
+./build-saver.sh                            # "build/Claude Cube.saver" (CubeSaver dylib + Info.plist with CubePort = CUBE_PORT); install.sh install copies it to ~/Library/Screen Savers
 ./build-app.sh                              # release build -> build/ClaudeCubeLink.app (adds Info.plist + icon; signed with CUBE_SIGN_IDENTITY, else the keychain's Apple Development identity, else ad-hoc)
 ./install.sh install                        # rebuild, stop the running copy, reinstall to ~/Applications, reload the LaunchAgent
 ./install.sh logs                           # tail ~/Library/Logs/claude-cube-link.log
@@ -20,17 +21,20 @@ When you try a new build by hand, stop the installed copy first (`./install.sh u
 
 Running unbundled (`swift run`) works for the bridge and the menu. For anything that depends on `Info.plist`, use `build-app.sh`. That covers `LSUIElement`, the Bluetooth usage string, and the bundle id that doubles as the defaults domain.
 
-## Two targets
+## Targets
 
 - **`CubeLinkCore`** (library, no AppKit) holds every decision, written as pure functions or value types. Inputs are injected: env dictionaries, `exists:` closures in place of the filesystem, `now` in place of the clock. The tests in `Tests/CubeLinkCoreTests` cover these:
   - `BridgeSupervisor.decide`, `findBridgeDir`, `announcement` and `shouldResetBackoff`
   - `PushPolicy`, `Backoff`, `encodeFrames`, `ControlMessage.parse`, `encodeVolume`, `foldVolumeName`, `UnlockPolicy`, `AnswerPolicy` and `PollPolicy`
-  - `CubeSettings` (`parse`, `patch`, `rebase`, `needsReboot`), `MenuModel` and `Critter`
+  - `CubeSettings` (`parse`, `patch`, `rebase`, `needsReboot`), `MenuModel`, `Board` and `Critter`
   - `BridgeSettings` (`environment`, `problem`, `imported`; `agents` becomes `CUBE_AGENTS`)
   - `validatePayloadBody`
 
   The stateful halves are not tested: `CubeLink` (CoreBluetooth) and the `Process` side of `BridgeSupervisor`. Put new logic in a testable static or struct, and have those classes call it.
 - **`ClaudeCubeLink`** (executable) is AppKit glue. `main.swift` is a top-level script that builds every object and connects them through `onX` callback closures, so no component holds a reference to another. `StatusMenu` and `MenuRows` render a `MenuModel`, `SettingsWindow` edits a `CubeSettings`, `BridgeSettingsWindow` edits a `BridgeSettings` (saved by `BridgeSettingsStore`: defaults + one Keychain item); `SystemVolume` reads and sets the default output through CoreAudio and reports changes (coalesced 30 ms), and `main.swift` writes them to the cube with `CubeLink.writeVolume` (also once on `onReady`) and applies `onVolumeRequest`; `MediaKeys` sends play/pause, next and previous for `onMediaKey` as MediaRemote commands from a one-shot `osascript` (no permission needed), and `NowPlaying` keeps one `osascript` child reading MediaRemote's playing state (Apple-signed processes only, since macOS 15.4) whose changes go out in the Volume frame's flags bits 3-4; `ScreenLock` follows the session's lock notifications and `Unlocker` keeps the login password (Keychain service `com.claude-cube.link`, account `unlock`, checked with OpenDirectory on entry and before each use) and types it into the lock screen as CGEvents for `onUnlock` when `UnlockPolicy` agrees; the lock state goes to the cube as the Volume frame's bit 5 (`UnlockPolicy.offer`) and, whenever the screen is locked, bit 6 (`MacVolume.screenLocked`); `BridgeClient.answer` turns Control `09` into one POST to the bridge's `/api/answer` for `onAnswer`, when `AnswerPolicy` agrees (not locked, none in flight). `BridgeClient.setHat` turns Control `0B` into one POST to `/api/hat` (`{"agent","hat": 0-103 | -1 | null}`, `X-Cube-Client: 1`, 5 s, fresh session, never retried), logs `hat for <agent>: <outcome>` and forces a tick.
+
+- **`CubeLinkUI`** (AppKit) is `TileRenderer`: one agent tile drawn as the web board's, at a moment of the shared uptime clock, in a flipped view. `AgentTilesView` (the menu) and the screen saver both draw with it.
+- **`CubeSaver`** (a dynamic library product; `build-saver.sh` wraps it in `Claude Cube.saver`, principal class `CubeSaverView`) is the screen saver. It runs inside macOS's sandboxed `legacyScreenSaver`, not in the app, so it shares nothing with the app at run time: it reads `/api/board` itself (`Board.parse`), at the port in its Info.plist (`CubePort`). `legacyScreenSaver` keeps a stopped saver's view and may never call `stopAnimation`, so the view also stops on the `com.apple.screensaver.willstop` notification; `install.sh` kills `legacyScreenSaver` after copying, or it keeps the old bundle loaded. It logs whether the bridge answers under the subsystem `com.claude-cube.saver`.
 
 Everything runs on the main queue. `CBCentralManager` is created with `queue: .main`, and `BridgeClient` and `Process` callbacks hop to main before touching state.
 

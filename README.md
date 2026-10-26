@@ -286,10 +286,19 @@ listens on `127.0.0.1` as well, so any `host` works.
 
 **Menu bar.** The item shows the 5-hour percentage, tinted amber at 60% and red at 85%, with an orange
 dot after it while an agent needs you; the dropdown shows the 5-hour and weekly windows, the agents
-as tiles like the web board's (up to four, the ones waiting for you first; a click, or **Open board in
-browser**, opens the board), and whether the bridge and the cube are up. **Send now** pushes the payload
+as tiles like the web board's (up to four, in the order of their tmux panes, one waiting for you always
+among them; a click, or **Open board in browser**, opens the board), and whether the bridge and the cube are up. **Send now** pushes the payload
 at once. Under **Troubleshoot**, **Restart bridge** restarts the bridge the app runs, **Show log** opens
 the log, and **Forget cube** is described below.
+
+**Screen saver.** `install.sh install` also installs a **Claude Cube** screen saver in
+`~/Library/Screen Savers`; pick it in System Settings > Screen Saver. It shows every agent's tile, animated,
+filling the screen, so they stay in view over the lock screen until you wake the Mac. It reads the bridge
+on `127.0.0.1` every 2 s (the port is fixed when it is built, from `CUBE_PORT`) and says "cube bridge not
+running" when it gets no answer. To see it while locked, start the screen saver instead of locking: set a hot corner to
+**Start Screen Saver** and "Require password after screen saver begins" to **Immediately** (Lock Screen
+settings). A plain lock (⌃⌘Q, a "Lock Screen" hot corner) shows only the lock screen, and an app that keeps the
+Mac awake (Caffeine) stops the idle start. Unlocking from the cube stops a running screen saver first. Its log lines are in `log show --predicate 'subsystem == "com.claude-cube.saver"'`.
 **Bridge settings…** edits the bridge's own settings (above), and **Unlock Mac with cube…** is
 described [below](#unlocking-the-mac-from-the-cube).
 **Cube settings…** edits what the setup portal
@@ -422,8 +431,11 @@ bridge/
 mac-helper/           Swift app: runs the bridge, pushes /api/status to the cube over BLE
   install.sh          install/remove the LaunchAgent
   build-app.sh        builds ClaudeCubeLink.app with the bridge inside
+  build-saver.sh      builds the Claude Cube screen saver
   Sources/CubeLinkCore    pure logic (framing, push policy, menu model), unit-tested
+  Sources/CubeLinkUI      the agent tiles' drawing, shared by the menu and the screen saver
   Sources/ClaudeCubeLink  the app: menu bar, settings windows, volume, unlock
+  Sources/CubeSaver       the screen saver
 firmware/
   src/board_pins.h    all board-specific pins — check this first
   src/config.h        your WiFi + bridge URL (gitignored)

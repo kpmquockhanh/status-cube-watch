@@ -9,6 +9,7 @@ HERE="$(cd "$(dirname "$0")" && pwd)"
 REPO="$(cd "$HERE/.." && pwd)"
 LABEL="com.claude-cube.link"
 APP_DST="$HOME/Applications/ClaudeCubeLink.app"
+SAVER_DIR="$HOME/Library/Screen Savers"
 APP_BIN="$APP_DST/Contents/MacOS/ClaudeCubeLink"
 BUNDLE_ID="com.claude-cube.link"  # Info.plist CFBundleIdentifier, i.e. the app's defaults domain
 PLIST="$HOME/Library/LaunchAgents/$LABEL.plist"
@@ -96,6 +97,13 @@ case "${1:-}" in
     rm -rf "$APP_DST"
     cp -R "$HERE/build/ClaudeCubeLink.app" "$APP_DST"
     hooks_install "${CUBE_PORT:-8787}"
+    # The "Claude Cube" screen saver (pick it in System Settings > Screen Saver). legacyScreenSaver keeps the
+    # bundle it loaded, so it is stopped to pick up the new one.
+    "$HERE/build-saver.sh"
+    mkdir -p "$SAVER_DIR"
+    rm -rf "$SAVER_DIR/Claude Cube.saver"
+    cp -R "$HERE/build/Claude Cube.saver" "$SAVER_DIR/"
+    killall legacyScreenSaver 2>/dev/null || true
     write_plist "$PLIST"
     record_paths
 
@@ -122,7 +130,7 @@ case "${1:-}" in
     stop_app
     hooks_uninstall  # needs the app's bridge binary, so before it is deleted
     rm -f "$PLIST"
-    rm -rf "$APP_DST"
+    rm -rf "$APP_DST" "$SAVER_DIR/Claude Cube.saver"
     defaults delete "$BUNDLE_ID" bridgeDir 2>/dev/null || true
     defaults delete "$BUNDLE_ID" nodePath 2>/dev/null || true
     defaults delete "$BUNDLE_ID" importConfig 2>/dev/null || true

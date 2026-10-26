@@ -231,7 +231,7 @@ link.onUnlock = {
                                trusted: unlocker.isTrusted, now: Date()) {
     case .type:
         log("unlocking: tapped on the cube")
-        unlocker.unlock()
+        unlocker.unlock(saverStopped: RunningSaver.stop())
     case .ignore(let why):
         log("unlock request ignored: \(why)")
     }

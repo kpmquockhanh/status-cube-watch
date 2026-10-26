@@ -60,9 +60,10 @@ final class Unlocker {
     }
 
     /// Wakes the display and types the password + Return. Call only when `UnlockPolicy` says `.type`.
-    func unlock() {
+    /// `saverStopped`: a screen saver was just stopped, and the lock screen needs a moment to take keys.
+    func unlock(saverStopped: Bool = false) {
         guard let pw = password else { return }
-        let asleep = CGDisplayIsAsleep(CGMainDisplayID()) != 0
+        let asleep = CGDisplayIsAsleep(CGMainDisplayID()) != 0 || saverStopped
         var id: IOPMAssertionID = 0
         IOPMAssertionDeclareUserActivity("Claude Cube unlock" as CFString, kIOPMUserActiveLocal, &id)
         // A display that was off drops the first keys while the lock screen comes up.

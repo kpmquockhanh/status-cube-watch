@@ -153,7 +153,7 @@ public struct MenuModel: Equatable {
                          cubeLine: cube, cubeConnected: link == .connected, bridgeUp: bridgeUp, link: link)
     }
 
-    private static func tile(_ t: [String: Any]) -> AgentTile? {
+    static func tile(_ t: [String: Any]) -> AgentTile? {
         guard let id = t["i"] as? String ?? (t["i"] as? NSNumber)?.stringValue else { return nil }
         return AgentTile(id: id, name: t["n"] as? String ?? "", line: t["l"] as? String ?? "", kind: t["k"] as? String ?? "",
                          pose: t["p"] as? String ?? "", context: min(max((t["x"] as? NSNumber)?.intValue ?? 0, 0), 100),
