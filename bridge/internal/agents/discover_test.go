@@ -217,3 +217,34 @@ func TestDiscoveryFailure(t *testing.T) {
 		t.Fatalf("a failed discovery: %v %#v", ok, got)
 	}
 }
+
+// A login shell that does not name claude (~/.local/bin added only in
+// ~/.zshrc, which zsh -l skips) falls back to the installers' locations
+// before the process scan.
+func TestDiscoveryClaudeCandidates(t *testing.T) {
+	dir := t.TempDir()
+	notExec := filepath.Join(dir, "plain", "claude")
+	bin := filepath.Join(dir, "bin", "claude")
+	for _, p := range []string{notExec, bin} {
+		_ = os.MkdirAll(filepath.Dir(p), 0o700)
+	}
+	_ = os.WriteFile(notExec, []byte("#!/bin/sh\n"), 0o600)
+	_ = os.WriteFile(bin, []byte("#!/bin/sh\n"), 0o700)
+
+	f := newFakeRun()
+	f.fail["/bin/zsh -lc command -v 'claude'"] = true
+	f.set(bin+" agents --json", "[]")
+	d := &Discovery{Run: f.run, Projects: t.TempDir(), Now: time.Now,
+		Candidates: []string{filepath.Join(dir, "missing", "claude"), notExec, bin}}
+	if lives, _, ok := d.Sessions(context.Background()); !ok || len(lives) != 0 {
+		t.Fatalf("got %v %+v", ok, lives)
+	}
+	if len(f.matching(bin+" agents --json")) != 1 || len(f.matching("/bin/ps")) != 0 {
+		t.Fatal("want `claude agents` from the candidate, not the process scan")
+	}
+
+	got := claudeCandidates("/Users/me")
+	if got[0] != "/Users/me/.local/bin/claude" || len(claudeCandidates("")) != 2 {
+		t.Fatalf("candidates %v", got)
+	}
+}

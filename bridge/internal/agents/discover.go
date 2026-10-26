@@ -59,6 +59,9 @@ type Discovery struct {
 	Projects string // transcript folder (~/.claude/projects)
 	Now      func() time.Time
 	Logf     func(format string, args ...any) // nil = silent
+	// Candidates are where claude is looked for when the login shell does
+	// not name it (nil = nowhere else; NewDiscovery fills in claudeCandidates).
+	Candidates []string
 
 	mu          sync.Mutex
 	claudeBin   string    // resolved from the login shell; "" = not (yet) found
@@ -82,7 +85,31 @@ func (d *Discovery) nextRun() uint64 {
 
 // NewDiscovery is the real discoverer over transcripts in projects.
 func NewDiscovery(projects string) *Discovery {
-	return &Discovery{Run: execRunner, Projects: projects, Now: time.Now, Logf: log.Printf}
+	home, _ := os.UserHomeDir()
+	return &Discovery{Run: execRunner, Projects: projects, Now: time.Now, Logf: log.Printf,
+		Candidates: claudeCandidates(home)}
+}
+
+// claudeCandidates are where Claude Code's installers put claude. A login
+// shell (zsh -l) reads ~/.zprofile but not ~/.zshrc, and the native installer
+// often adds ~/.local/bin to PATH only in the latter, so under launchd the
+// lookup can miss a claude every terminal finds.
+func claudeCandidates(home string) []string {
+	var c []string
+	if home != "" {
+		c = append(c, filepath.Join(home, ".local", "bin", "claude"), filepath.Join(home, ".claude", "local", "claude"))
+	}
+	return append(c, "/opt/homebrew/bin/claude", "/usr/local/bin/claude")
+}
+
+// firstExecutable is the first of paths that is an executable file.
+func firstExecutable(paths []string) string {
+	for _, p := range paths {
+		if st, err := os.Stat(p); err == nil && st.Mode().IsRegular() && st.Mode().Perm()&0o111 != 0 {
+			return p
+		}
+	}
+	return ""
 }
 
 func (d *Discovery) Sessions(ctx context.Context) ([]Live, uint64, bool) {
@@ -110,13 +137,18 @@ func (d *Discovery) Sessions(ctx context.Context) ([]Live, uint64, bool) {
 	return lives, d.nextRun(), lives != nil
 }
 
-// claude is the claude binary, looked up through the login shell; after a
-// failed lookup it is looked up again at most every lookRetry.
+// claude is the claude binary, looked up through the login shell, else in
+// d.Candidates; after a failed lookup it is looked up again at most every
+// lookRetry.
 func (d *Discovery) claude(ctx context.Context, now time.Time) string {
 	if bin, look := d.needLookup(now); !look {
 		return bin
 	}
-	return d.looked(lookPathLogin(ctx, d.Run, "claude"), now)
+	bin := lookPathLogin(ctx, d.Run, "claude")
+	if bin == "" {
+		bin = firstExecutable(d.Candidates)
+	}
+	return d.looked(bin, now)
 }
 
 func (d *Discovery) needLookup(now time.Time) (bin string, look bool) {
