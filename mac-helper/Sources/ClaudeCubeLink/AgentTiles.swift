@@ -128,7 +128,7 @@ final class AgentTilesView: NSView {
         r.fill()
         ctx.saveGState()
         ctx.clip(to: r)
-        if t.hungry && t.kind != "wait" { drawStripes(r, ms: ms, ctx) } else if t.kind == "run" { drawRunGround(r, ms: ms) }
+        if t.hungry && t.kind != "wait" { drawStripes(r, ms: ms, ctx) } else if t.kind == "run" { drawRunGround(r, clear: textBoxes(t, width: r.width), ms: ms) }
         ctx.restoreGState()
         if let b = l.border { b.setStroke(); NSBezierPath(rect: r.insetBy(dx: 0.5, dy: 0.5)).stroke() }
         if hovered {
@@ -150,9 +150,9 @@ final class AgentTilesView: NSView {
         let origin = NSPoint(x: (r.midX - 9 * c).rounded(), y: r.minY + 20 + 4 * c)
         drawCritter(t, at: origin, look: l, ms: ms)
 
-        drawText(t.name, size: 12, weight: .medium, color: l.label, at: NSPoint(x: r.minX + 8, y: r.minY + Self.textBand.lowerBound + 4),
+        drawText(t.name, size: Self.nameSize, weight: .medium, color: l.label, at: NSPoint(x: r.minX + 8, y: r.minY + Self.nameY),
                  maxW: r.width - 16)
-        drawText(t.line, size: 11, color: l.meta, at: NSPoint(x: r.minX + 8, y: r.minY + Self.textBand.lowerBound + 22), maxW: r.width - 16)
+        drawText(t.line, size: Self.lineSize, color: l.meta, at: NSPoint(x: r.minX + 8, y: r.minY + Self.lineY), maxW: r.width - 16)
     }
 
     private func drawCritter(_ t: AgentTile, at o: NSPoint, look l: Look, ms: UInt64) {
@@ -196,25 +196,40 @@ final class AgentTilesView: NSView {
         ctx.restoreGState()
     }
 
-    /// The name and status line's band, in tile coordinates: the ground stops behind it, as on the cube.
-    private static let textBand: ClosedRange<CGFloat> = 72...112
+    private static let nameSize: CGFloat = 12, lineSize: CGFloat = 11
+    private static let nameY: CGFloat = 76, lineY: CGFloat = 94
+
+    /// The boxes behind the name and the status line, in tile coordinates, as wide as the text: the ground stops
+    /// there and nowhere else, as the cube's text boxes do.
+    private func textBoxes(_ t: AgentTile, width w: CGFloat) -> [NSRect] {
+        func box(_ s: String, _ font: NSFont, y: CGFloat, h: CGFloat) -> NSRect {
+            let tw = min((s as NSString).size(withAttributes: [.font: font]).width, w - 16)
+            return NSRect(x: (w - tw) / 2 - 4, y: y - 1, width: tw + 8, height: h)
+        }
+        return [box(t.name, .monospacedSystemFont(ofSize: Self.nameSize, weight: .medium), y: Self.nameY, h: 18),
+                box(t.line, .monospacedSystemFont(ofSize: Self.lineSize, weight: .regular), y: Self.lineY, h: 17)]
+    }
 
     /// Running: agents-deck's dot matrix, faint accent dots that a diagonal wave brightens, and four rising specks.
-    private func drawRunGround(_ r: NSRect, ms: UInt64) {
+    private func drawRunGround(_ r: NSRect, clear: [NSRect], ms: UInt64) {
+        func covered(_ x: CGFloat, _ y: CGFloat, _ size: CGFloat) -> Bool {
+            clear.contains { $0.intersects(NSRect(x: x, y: y, width: size, height: size)) }
+        }
         var y = TileGround.dotInset
         while y < r.height - 2 {
-            if Self.textBand.contains(y) { y += TileGround.dotPitch; continue }
             var x = TileGround.dotInset
             while x < r.width - 2 {
-                Self.accent.withAlphaComponent(TileGround.dotAlpha(dx: x, dy: y, w: r.width, h: r.height, ms: ms)).setFill()
-                NSRect(x: r.minX + x, y: r.minY + y, width: 1.5, height: 1.5).fill(using: .sourceOver)
+                if !covered(x, y, 1.5) {
+                    Self.accent.withAlphaComponent(TileGround.dotAlpha(dx: x, dy: y, w: r.width, h: r.height, ms: ms)).setFill()
+                    NSRect(x: r.minX + x, y: r.minY + y, width: 1.5, height: 1.5).fill(using: .sourceOver)
+                }
                 x += TileGround.dotPitch
             }
             y += TileGround.dotPitch
         }
         for i in 0..<4 {
             let p = TileGround.particle(i, w: r.width, h: r.height, ms: ms)
-            guard p.alpha > 0, !Self.textBand.contains(p.y), !Self.textBand.contains(p.y + TileGround.particleSize) else { continue }
+            guard p.alpha > 0, !covered(p.x, p.y, TileGround.particleSize) else { continue }
             Self.accent.withAlphaComponent(p.alpha).setFill()
             NSRect(x: r.minX + p.x, y: r.minY + p.y, width: TileGround.particleSize, height: TileGround.particleSize)
                 .fill(using: .sourceOver)
