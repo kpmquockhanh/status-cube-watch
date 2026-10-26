@@ -83,12 +83,14 @@ func (f *fakeRun) matching(prefix string) []string {
 	return out
 }
 
+const listPanes = "tmux list-panes -a -F #{pane_tty} #{pane_id} #{session_id} #{window_index} #{pane_left} #{pane_top}"
+
 func TestTmuxPanes(t *testing.T) {
 	f := newFakeRun()
-	f.set("tmux list-panes -a -F #{pane_tty} #{pane_id}", "/dev/ttys012 %12\n/dev/ttys003 %3\n\ngarbage\n")
+	f.set(listPanes, "/dev/ttys012 %12 $0 1 0 0\n/dev/ttys003 %3 $0 1 81 0\n\ngarbage\n")
 	tm := &Tmux{Bin: "tmux", Run: f.run}
 	got := tm.Panes(context.Background())
-	if len(got) != 2 || got["/dev/ttys012"] != "%12" || got["/dev/ttys003"] != "%3" {
+	if len(got) != 2 || got["/dev/ttys012"] != (Pane{"%12", 0}) || got["/dev/ttys003"] != (Pane{"%3", 1}) {
 		t.Fatalf("panes %v", got)
 	}
 
@@ -96,6 +98,36 @@ func TestTmuxPanes(t *testing.T) {
 	tm = &Tmux{Bin: "tmux", Run: newFakeRun().run}
 	if got := tm.Panes(context.Background()); got == nil || len(got) != 0 {
 		t.Fatalf("no server: %v", got)
+	}
+}
+
+// Panes are ordered as they sit on screen: sessions in tmux's order, then
+// windows, then left to right, then top to bottom, whatever their ids; a
+// swap swaps the order.
+func TestTmuxPaneOrder(t *testing.T) {
+	f := newFakeRun()
+	f.set(listPanes, strings.Join([]string{
+		"/dev/ttys001 %1 $2 0 0 0",   // session $2 is listed first
+		"/dev/ttys002 %7 $2 0 90 0",  // right column, top
+		"/dev/ttys003 %4 $2 0 90 30", // right column, bottom
+		"/dev/ttys004 %2 $2 0 45 0",  // middle
+		"/dev/ttys005 %3 $2 1 0 0",   // second window
+		"/dev/ttys006 %9 $0 0 0 0",   // a later session
+	}, "\n"))
+	tm := &Tmux{Bin: "tmux", Run: f.run}
+	got := tm.Panes(context.Background())
+	want := map[string]int{"%1": 0, "%2": 1, "%7": 2, "%4": 3, "%3": 4, "%9": 5}
+	for _, p := range got {
+		if want[p.ID] != p.Order {
+			t.Errorf("%s at %d, want %d", p.ID, p.Order, want[p.ID])
+		}
+	}
+
+	// Swap %1 and %2: the two panes trade places, so their order follows.
+	f.set(listPanes, "/dev/ttys004 %2 $2 0 0 0\n/dev/ttys001 %1 $2 0 45 0\n")
+	got = tm.Panes(context.Background())
+	if got["/dev/ttys004"].Order != 0 || got["/dev/ttys001"].Order != 1 {
+		t.Fatalf("after swap %v", got)
 	}
 }
 

@@ -46,7 +46,7 @@ func (e *testEnv) advance(d time.Duration) { e.mu.Lock(); e.now = e.now.Add(d); 
 func newTestTracker(t *testing.T) (*Tracker, *testEnv) {
 	t.Helper()
 	env := &testEnv{run: newFakeRun(), disc: &fakeDisc{}, projects: t.TempDir(), now: time.Now()}
-	env.run.set("tmux list-panes -a -F #{pane_tty} #{pane_id}", "/dev/ttys003 %3\n")
+	env.run.set(listPanes, "/dev/ttys003 %3 $0 0 0 0\n")
 	env.run.set("tmux capture-pane", "")
 	env.run.set("tmux send-keys", "")
 	tr := NewTracker(TrackerDeps{
@@ -455,7 +455,7 @@ func TestTranscriptPathValidated(t *testing.T) {
 // goroutines: go test -race must stay clean.
 func TestConcurrentUse(t *testing.T) {
 	env := &testEnv{run: newFakeRun(), disc: &fakeDisc{}, projects: t.TempDir(), now: time.Now()}
-	env.run.set("tmux list-panes -a -F #{pane_tty} #{pane_id}", "/dev/ttys003 %3\n")
+	env.run.set(listPanes, "/dev/ttys003 %3 $0 0 0 0\n")
 	env.run.set("tmux capture-pane", permissionPane)
 	env.run.set("tmux send-keys", "")
 	tp := filepath.Join(env.projects, "-work-proj", sidA+".jsonl")

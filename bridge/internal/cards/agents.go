@@ -5,6 +5,7 @@ import (
 	"cmp"
 	"encoding/json"
 	"math"
+	"slices"
 	"sort"
 	"strconv"
 	"strings"
@@ -129,9 +130,10 @@ func rank(s agents.Status) int {
 	return statusRank[agents.Idle]
 }
 
-// sortAgents: by status group; waiting agents longest-waiting first; then
-// folder name, then id.
-func sortAgents(list []agents.Agent) []agents.Agent {
+// byPriority: by status group; waiting agents longest-waiting first; then
+// folder name, then id. It decides which agents get one of the MaxTiles
+// places and which prompt is q.
+func byPriority(list []agents.Agent) []agents.Agent {
 	out := append([]agents.Agent(nil), list...)
 	sort.SliceStable(out, func(i, j int) bool {
 		a, b := out[i], out[j]
@@ -149,12 +151,28 @@ func sortAgents(list []agents.Agent) []agents.Agent {
 	return out
 }
 
+// sortAgents is the order the tiles are drawn in: agents in tmux as their
+// panes sit on screen (sessions, windows, left to right, top to bottom; see
+// agents.Pane), so swapping two panes swaps their tiles; then the others in
+// byPriority's order.
+func sortAgents(list []agents.Agent) []agents.Agent {
+	out := byPriority(list)
+	sort.SliceStable(out, func(i, j int) bool {
+		a, b := out[i], out[j]
+		if (a.Pane != "") != (b.Pane != "") {
+			return a.Pane != ""
+		}
+		return a.Pane != "" && a.PaneOrder < b.PaneOrder
+	})
+	return out
+}
+
 // agentsCardOf builds the Agents card; nil when no agent is open.
 func agentsCardOf(list []agents.Agent, full bool, now time.Time, hats func(string) (int, bool)) *Card {
 	if len(list) == 0 {
 		return nil
 	}
-	sorted := sortAgents(list)
+	sorted := byPriority(list)
 	waiting, running := 0, 0
 	for _, a := range sorted {
 		switch a.Status {
@@ -173,7 +191,7 @@ func agentsCardOf(list []agents.Agent, full bool, now time.Time, hats func(strin
 	case running > 0:
 		c.S1, c.C = strconv.Itoa(running)+" RUNNING", "blue"
 	}
-	for _, a := range sorted[:min(len(sorted), MaxTiles)] {
+	for _, a := range sortAgents(sorted[:min(len(sorted), MaxTiles)]) {
 		c.A = append(c.A, tileOf(a, now, hats))
 	}
 	if full {
@@ -364,7 +382,7 @@ func promptWith(a agents.Agent, titleN, detailN, optsN int) *AgentPrompt {
 
 // fitBudget trims p until it marshals to at most budget bytes, one step at a
 // time, least valuable first: the extra cards from the end, the prompt's
-// detail (q.cut = 1), options beyond 4, tiles from the end down to 4, the
+// detail (q.cut = 1), options beyond 4, tiles down to 4 (the last one not waiting each time), the
 // prompt (qc = 1), and as a last resort (unreachable with today's field
 // limits) the Agents card. agentsAt is the Agents card's index (-1: none);
 // cards from extraFrom on are the extra cards.
@@ -399,7 +417,15 @@ func fitBudget(p *Payload, agentsAt, extraFrom, budget int) {
 		},
 		func() bool {
 			if c := ac(); c != nil && len(c.A) > 4 {
-				c.A = c.A[:len(c.A)-1]
+				// The last tile that is not waiting, so a waiting one stays.
+				drop := len(c.A) - 1
+				for i := drop; i >= 0; i-- {
+					if c.A[i].K != "wait" {
+						drop = i
+						break
+					}
+				}
+				c.A = slices.Delete(c.A, drop, drop+1)
 				return true
 			}
 			return false

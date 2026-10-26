@@ -79,14 +79,14 @@ private func payload(_ g1: Int?, _ g2: Int? = 10) -> Data {
     #expect(a.tiles[2].hungry)          // idle and unseen
     #expect(!a.tiles[0].hungry)
     #expect(a.waiting)
-    #expect(a.shown.map(\.id) == ["a2", "a1", "a3"])  // the waiting one first
+    #expect(a.shown.map(\.id) == ["a1", "a2", "a3"])  // the bridge's order
     #expect(a.hidden == 0)
 }
 
 @Test func agentsGridShowsFourAndCountsTheRest() {
     let tiles = (1...6).map { AgentTile(id: "\($0)", name: "n\($0)", line: "", kind: $0 == 5 ? "wait" : "run", pose: "run", context: 0) }
     let a = AgentsSection(caption: "", tiles: tiles)
-    #expect(a.shown.map(\.id) == ["5", "1", "2", "3"])
+    #expect(a.shown.map(\.id) == ["1", "2", "3", "5"])  // the waiting one keeps a place, in its place
     #expect(a.hidden == 2)
     #expect(MenuModel.make(payload: payload(10), bridgeUp: true, link: .connected).agents == nil)
 }

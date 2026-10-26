@@ -36,6 +36,7 @@ type Agent struct {
 	Subagents   []Subagent
 	Unseen      bool   // finished a turn nobody looked at
 	Pane        string // tmux pane id ("%12"), "" = not in tmux
+	PaneOrder   int    // the pane's place among all tmux panes (Pane.Order); 0 when not in tmux
 }
 
 type Activity struct{ Tool, Detail string }

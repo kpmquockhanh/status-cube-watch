@@ -239,7 +239,7 @@ func (t *Tracker) Sync(ctx context.Context) {
 }
 
 // syncStart folds discovery and the tmux panes in and makes the read jobs.
-func (t *Tracker) syncStart(lives []Live, run uint64, ok bool, panes map[string]string, now time.Time) (bool, []syncJob) {
+func (t *Tracker) syncStart(lives []Live, run uint64, ok bool, panes map[string]Pane, now time.Time) (bool, []syncJob) {
 	t.mu.Lock()
 	defer t.mu.Unlock()
 	var changed bool
@@ -319,15 +319,15 @@ func (t *Tracker) countMisses(seen map[string]bool, now time.Time) {
 }
 
 // mapPanes matches each session's terminal to a tmux pane.
-func (t *Tracker) mapPanes(panes map[string]string) bool {
+func (t *Tracker) mapPanes(panes map[string]Pane) bool {
 	changed := false
 	for _, e := range t.entries {
-		p := ""
-		if e.TTY != "" && paneRe.MatchString(panes[e.TTY]) {
+		var p Pane
+		if e.TTY != "" && paneRe.MatchString(panes[e.TTY].ID) {
 			p = panes[e.TTY]
 		}
-		if p != e.Pane {
-			e.Pane = p
+		if p.ID != e.Pane || p.Order != e.PaneOrder {
+			e.Pane, e.PaneOrder = p.ID, p.Order
 			changed = true
 		}
 	}

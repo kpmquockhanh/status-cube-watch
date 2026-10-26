@@ -231,6 +231,85 @@ func TestNotInTmux(t *testing.T) {
 	}
 }
 
+// Tiles follow the tmux panes left to right (agents.Pane's order), whatever
+// their status; agents outside tmux come after, by status.
+func TestAgentsPaneOrder(t *testing.T) {
+	at := func(a agents.Agent, pane string, order int) agents.Agent {
+		a.Pane, a.PaneOrder = pane, order
+		return a
+	}
+	list := []agents.Agent{
+		at(agent("w", "waits", agents.Waiting, time.Minute), "%5", 2),
+		at(agent("i", "idles", agents.Idle, time.Minute), "%9", 0),
+		at(agent("r", "runs", agents.Running, time.Minute), "%2", 1),
+		at(agent("x", "outside", agents.Waiting, time.Minute), "", 0),
+		at(agent("y", "outside-idle", agents.Idle, time.Minute), "", 0),
+	}
+	ids := func(c *Card) string {
+		var s []string
+		for _, t := range c.A {
+			s = append(s, t.I)
+		}
+		return strings.Join(s, " ")
+	}
+	c := agentsCard(t, Build(nil, Opts{Agents: list, ShowAgents: true, Full: true}, agentsNow))
+	if got := ids(c); got != "i r w x y" {
+		t.Errorf("tiles %q, want panes left to right, then the rest by status", got)
+	}
+	if c.Q == nil || c.Q.I != "w" && c.Q.I != "x" {
+		t.Errorf("q = %+v", c.Q)
+	}
+
+	// Swapping two panes swaps their tiles.
+	list[1].PaneOrder, list[2].PaneOrder = 1, 0
+	if got := ids(agentsCard(t, Build(nil, Opts{Agents: list, ShowAgents: true}, agentsNow))); got != "r i w x y" {
+		t.Errorf("after swap %q", got)
+	}
+
+	// The board lists every agent in the same order.
+	var board []string
+	for _, a := range BuildBoard(list, agentsNow, nil).Agents {
+		board = append(board, a.I)
+	}
+	if got := strings.Join(board, " "); got != "r i w x y" {
+		t.Errorf("board %q", got)
+	}
+}
+
+// With more agents than tiles, a waiting one in the rightmost pane still gets
+// a tile, drawn in its place.
+func TestAgentsPaneOrderKeepsWaiting(t *testing.T) {
+	var list []agents.Agent
+	for i := range MaxTiles + 2 {
+		a := agent(fmt.Sprint("r", i), fmt.Sprintf("f%02d", i), agents.Idle, time.Minute)
+		a.PaneOrder = i
+		list = append(list, a)
+	}
+	list[len(list)-1].Status = agents.Waiting
+	list[len(list)-1].Waiting = agent("x", "x", agents.Waiting, time.Minute).Waiting
+	c := agentsCard(t, Build(nil, Opts{Agents: list, ShowAgents: true}, agentsNow))
+	last := fmt.Sprint("r", MaxTiles+1)
+	if len(c.A) != MaxTiles || c.A[0].I != "r0" || c.A[MaxTiles-1].I != last {
+		t.Errorf("tiles = %+v", c.A)
+	}
+
+	// The budget drops tiles down to 4, never the waiting one.
+	p := build(nil, Opts{Agents: list, ShowAgents: true}, agentsNow, 1<<20)
+	b, _ := Marshal(p)
+	for n := len(b) - 1; n > 0; n -= 40 {
+		c := agentsCard(t, build(nil, Opts{Agents: list, ShowAgents: true}, agentsNow, n))
+		if c == nil {
+			break
+		}
+		if c.A[len(c.A)-1].I != last {
+			t.Fatalf("budget %d dropped the waiting tile: %+v", n, c.A)
+		}
+		if len(c.A) == 4 {
+			break
+		}
+	}
+}
+
 func TestNoAgentsNoCard(t *testing.T) {
 	base := Opts{Limits: &limits.Limits{Error: "timeout"}, ExtraCards: true}
 	plain := Build(nil, base, agentsNow)

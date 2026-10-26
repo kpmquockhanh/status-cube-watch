@@ -7,6 +7,7 @@ import (
 	"errors"
 	"os"
 	"os/exec"
+	"sort"
 	"strconv"
 	"strings"
 	"time"
@@ -76,20 +77,63 @@ func (t *Tmux) run(ctx context.Context, args ...string) (string, error) {
 	return strings.TrimRight(string(out), "\n"), err
 }
 
-// Panes maps every pane's terminal ("/dev/ttys012") to its pane id ("%12");
-// empty when no tmux server runs.
-func (t *Tmux) Panes(ctx context.Context) map[string]string {
-	panes := map[string]string{}
+// Pane is a tmux pane: its id ("%12") and where it sits among all of them
+// (Order 0 first): sessions in tmux's own order, then windows by index, then
+// left to right, then top to bottom. Swapping two panes swaps their Order.
+type Pane struct {
+	ID    string
+	Order int
+}
+
+// Panes maps every pane's terminal ("/dev/ttys012") to its pane; empty when
+// no tmux server runs.
+func (t *Tmux) Panes(ctx context.Context) map[string]Pane {
+	panes := map[string]Pane{}
 	// Space-separated: without a UTF-8 locale (launchd) tmux turns tabs into "_".
-	out, err := t.run(ctx, "list-panes", "-a", "-F", "#{pane_tty} #{pane_id}")
+	// Every field is free of spaces (session_id, not the session's name).
+	out, err := t.run(ctx, "list-panes", "-a", "-F",
+		"#{pane_tty} #{pane_id} #{session_id} #{window_index} #{pane_left} #{pane_top}")
 	if err != nil {
 		return panes
 	}
+	type place struct {
+		tty, id                    string
+		session, window, left, top int
+	}
+	var all []place
+	sessions := map[string]int{} // session id -> rank, in the order tmux lists them
 	for _, l := range strings.Split(out, "\n") {
 		f := strings.Fields(l)
-		if len(f) == 2 && strings.HasPrefix(f[0], "/dev/") && strings.HasPrefix(f[1], "%") {
-			panes[f[0]] = f[1]
+		if len(f) < 2 || !strings.HasPrefix(f[0], "/dev/") || !strings.HasPrefix(f[1], "%") {
+			continue
 		}
+		p := place{tty: f[0], id: f[1]}
+		if len(f) == 6 {
+			if _, ok := sessions[f[2]]; !ok {
+				sessions[f[2]] = len(sessions)
+			}
+			p.session = sessions[f[2]]
+			p.window, _ = strconv.Atoi(f[3])
+			p.left, _ = strconv.Atoi(f[4])
+			p.top, _ = strconv.Atoi(f[5])
+		}
+		all = append(all, p)
+	}
+	sort.SliceStable(all, func(i, j int) bool {
+		a, b := all[i], all[j]
+		if a.session != b.session {
+			return a.session < b.session
+		}
+		if a.window != b.window {
+			return a.window < b.window
+		}
+		if a.left != b.left {
+			return a.left < b.left
+		}
+		return a.top < b.top
+	})
+	for i, p := range all {
+		panes[p.tty] = Pane{ID: p.id, Order: i}
 	}
 	return panes
 }

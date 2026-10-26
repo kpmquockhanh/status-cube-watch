@@ -59,9 +59,16 @@ public struct AgentsSection: Equatable {
         self.tiles = tiles
     }
 
-    /// The tiles the menu shows: waiting ones first, then the bridge's order, at most `maxTiles`.
+    /// The tiles the menu shows, at most `maxTiles`, in the bridge's order (its tmux panes, left to right):
+    /// waiting ones always get a place, the others fill the rest from the start.
     public var shown: [AgentTile] {
-        Array((tiles.filter { $0.kind == "wait" } + tiles.filter { $0.kind != "wait" }).prefix(Self.maxTiles))
+        let waiting = tiles.filter { $0.kind == "wait" }.prefix(Self.maxTiles)
+        var others = Self.maxTiles - waiting.count
+        return tiles.filter { t in
+            if t.kind == "wait" { return waiting.contains(t) }
+            others -= 1
+            return others >= 0
+        }
     }
     public var hidden: Int { max(0, tiles.count - Self.maxTiles) }
     public var waiting: Bool { tiles.contains { $0.kind == "wait" } }
