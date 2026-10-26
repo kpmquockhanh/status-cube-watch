@@ -27,4 +27,6 @@ The web board (`bridge/board/`) adapts agents-deck's web dashboard at the same c
 - `backend/internal/web/static/app.css`: as `board.css`, trimmed
 - `backend/internal/web/static/index.html`: the page's skeleton
 
-No licence was published; copied with the owner of this private repository's consent. Do not make this repository public without the agents-deck author's permission.
+The firmware's critter and hat art (`firmware/src/critter.cpp`, `hat_art.cpp`) is a port of the same sprite code, and the Agents card's tiles and detail screen follow its board and panel views.
+
+agents-deck is the work of its author, [brushknight](https://github.com/brushknight); all credit for these parts goes to that project. agents-deck publishes no licence, so this notice grants none for the code adapted from it.
