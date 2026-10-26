@@ -95,27 +95,33 @@
   }
   .device.text .name { top: 60px; }
 
-  /* The combined usage card (a card with `g2`): a second, inner ring for the 7d
-     window, the session countdown in the middle, the unread-mail badge in the
-     gap of the rings and a legend line per window. Positions are the DUAL_* /
-     ROW* / MAIL_* numbers in drawDualCard in firmware/src/ui.cpp. */
-  .device:not(.dual) .ring2, .device:not(.dual) .mail, .device:not(.dual) .rows { display: none; }
-  .device.dual .read, .device.dual .name { display: none; }
-  .device.dual .mid { top: 106px; gap: 10px; }
-  .device.dual .mid .value { font-size: 24px; }
+  /* The combined usage card (a card with `g2`): one tile per window, 108 x 156
+     in the Agents card's columns, the percentage large, the key above, the reset
+     and the caption below, and the reading as a 4 px gauge round the tile's
+     edge cut at 60/85; the unread mail under them. Positions are the USAGE_* /
+     MAIL_CY numbers in drawDualCard in firmware/src/ui.cpp. */
+  .device:not(.dual) .usage, .device:not(.dual) .mail { display: none; }
+  .device.dual .ring, .device.dual .mid, .device.dual .read, .device.dual .name { display: none; }
+  .u-cap { text-transform: lowercase; position: absolute; top: 36px; left: 0; width: 240px; text-align: center; font-size: 13px; color: var(--dim); font-family: "Share Tech Mono", ui-monospace, Menlo, monospace; }
+  .ut { position: absolute; top: 54px; width: 108px; height: 156px; background: var(--tile); text-align: center; }
+  .ut svg { position: absolute; inset: 0; width: 108px; height: 156px; }
+  .ut path { fill: none; stroke-width: 4; stroke-linejoin: miter; }
+  .ut .rt { stroke: #2a2925; }
+  .ut .rf { transition: stroke-dasharray 260ms var(--ease-out), stroke 400ms var(--ease-out); }
+  .ut .rn { stroke: var(--bg); }
+  .ut div { position: absolute; left: 0; right: 0; line-height: 1; }
+  .ut .k, .ut .sub { text-transform: lowercase; font-size: 13px; color: var(--dim); font-family: "Share Tech Mono", ui-monospace, Menlo, monospace; }
+  .ut .k { top: 15px; }
+  .ut .p { top: 52px; font-size: 32px; font-weight: 700; font-variant-numeric: tabular-nums; }
+  .ut .r { top: 103px; font-size: 18px; font-weight: 700; }
+  .ut .sub { top: 125px; }
   .mail {
-    position: absolute; top: 167px; left: 0; width: 240px; height: 18px;
+    position: absolute; top: 225px; left: 0; width: 240px; height: 18px;
     display: flex; align-items: center; justify-content: center; gap: 6px;
     font-size: 15px; font-weight: 700; font-variant-numeric: tabular-nums;
   }
   .mail:empty { display: none; }
   .mail svg { width: 16px; height: 11px; fill: none; stroke: currentColor; stroke-width: 1; }
-  .rows { position: absolute; top: 203px; left: 34px; right: 34px; }
-  .rows .row { height: 22px; display: flex; align-items: center; }
-  .rows .sw { width: 7px; height: 7px; border-radius: 0; margin-right: 6px; flex: none; }
-  .rows .k { text-transform: lowercase; width: 25px; font-size: 9px; font-weight: 500; letter-spacing: 0; color: var(--dim); }
-  .rows .p { font-size: 15px; font-weight: 700; font-variant-numeric: tabular-nums; }
-  .rows .r { margin-left: auto; font-size: 9px; font-weight: 500; letter-spacing: 0; color: var(--dim); }
 
   .dots { position: absolute; bottom: 12px; left: 0; width: 240px; display: flex; gap: 6px; justify-content: center; }
   .dots b { width: 5px; height: 5px; border-radius: 0; background: var(--faint); }
@@ -133,7 +139,7 @@
      and copy mirror ui.cpp; the critter is a plain block. */
   .agentsview { display: none; position: absolute; inset: 0; }
   .device.agents .agentsview { display: block; }
-  .device.agents .ring, .device.agents .mid, .device.agents .mail, .device.agents .rows, .device.agents .read, .device.agents .name { display: none; }
+  .device.agents .ring, .device.agents .mid, .device.agents .mail, .device.agents .usage, .device.agents .read, .device.agents .name { display: none; }
   .ag-cap { text-transform: lowercase; position: absolute; top: 36px; left: 0; width: 240px; text-align: center; font-size: 14px; font-weight: 700; }
   .ag-view { position: absolute; top: 54px; left: 0; width: 240px; height: 200px; overflow-y: auto; scrollbar-width: none; }
   .ag-view::-webkit-scrollbar { display: none; }
@@ -211,14 +217,6 @@
               transform="rotate(135 120 128)"></circle>
       <line class="notch" x1="147.24" y1="74.54" x2="153.14" y2="62.96" stroke="#000000" stroke-width="2"></line>
       <line class="notch" x1="179.82" y1="132.71" x2="192.77" y2="133.73" stroke="#000000" stroke-width="2"></line>
-      <!-- inner ring of the combined usage card: r 47..55 (RING2_* in ui.cpp) -->
-      <circle class="ring2" cx="120" cy="128" r="51" fill="none" stroke="#262622" stroke-width="8"
-              pathLength="100" stroke-dasharray="75 100" transform="rotate(135 120 128)"></circle>
-      <circle class="arc ring2" id="arc2" cx="120" cy="128" r="51" fill="none" stroke-width="8"
-              pathLength="100" stroke-dasharray="75 100" stroke-dashoffset="75"
-              transform="rotate(135 120 128)"></circle>
-      <line class="notch ring2" x1="140.88" y1="87.01" x2="145.42" y2="78.10" stroke="#000000" stroke-width="2"></line>
-      <line class="notch ring2" x1="165.86" y1="131.61" x2="175.83" y2="132.39" stroke="#000000" stroke-width="2"></line>
     </svg>
     <div class="mid">
       <div class="value" id="v">--</div>
@@ -226,7 +224,7 @@
     </div>
     <div class="agentsview" id="agentsview"><div class="ag-cap" id="agcap"></div><div class="ag-view" id="agview"><div class="ag-grid" id="aggrid"></div></div><div class="prompt" id="prompt"></div></div>
     <div class="mail" id="mail"></div>
-    <div class="rows" id="rows"></div>
+    <div class="usage" id="usage"></div>
     <div class="read"><span class="pct" id="pct"></span><span class="label" id="s2"></span></div>
     <div class="name" id="nm"></div>
     <div class="dots" id="dots"></div>
@@ -352,15 +350,28 @@ function paint() {
 
   if (dual) {
     const col2 = `var(${COLORS[card.c2] || '--ink'})`;
-    arc2.style.strokeDashoffset = card.g2 < 0 ? 75 : (75 * (1 - Math.min(100, card.g2) / 100)).toFixed(2);
-    arc2.style.stroke = col2;
-    const esc = (x) => String(x ?? '').replace(/[&<>]/g, (ch) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;' }[ch]));
+    // One tile per window (drawUsageTile): the gauge runs clockwise from the
+    // top centre, the notches are 2 px of the 528 px edge at 60 and 85 %.
+    const D = 'M54 2H106V154H2V2Z';
+    const tile = (r, g, col, x) => {
+      const has = typeof g === 'number' && g >= 0;
+      const pctVal = has ? Math.max(0, Math.min(100, g)) : 0;
+      const lo = r && r.r ? [r.r, card.s1] : [card.s1, card.s2];
+      return `<div class="ut" style="left:${x}px"><svg viewBox="0 0 108 156" aria-hidden="true">` +
+        `<path class="rt" d="${D}"/><path class="rf" d="${D}" pathLength="100" stroke="${col}" stroke-dasharray="${pctVal} 100"/>` +
+        `<path class="rn" d="${D}" pathLength="100" stroke-dasharray="0 59.8 0.4 24.6 0.4 200"/></svg>` +
+        (r ? `<div class="k">${esc(r.k)}</div><div class="p" style="color:${has ? col : '#4a4842'}">${esc(r.p)}</div>` +
+          (r.r ? `<div class="r" style="color:${has ? 'var(--ink)' : '#4a4842'}">${esc(lo[0])}</div>`
+            : `<div class="sub" style="top:105px">${esc(lo[0] || '')}</div>`) +
+          `<div class="sub">${esc(lo[1] || '')}</div>` : '') + '</div>';
+    };
+    const rws = card.rows || [];
+    usage.innerHTML = `<div class="u-cap">${esc(card.t)}</div>` +
+      tile(rws[0], card.g, color, 9) + tile(rws[1], card.g2, col2, 123);
     mail.innerHTML = card.m
-      ? `<svg viewBox="0 0 16 11" aria-hidden="true"><rect x=".5" y=".5" width="15" height="10" rx="2"/><path d="M2.5 2.5 8 6.5l5.5-4"/></svg><span>${esc(card.m)}</span>`
+      ? `<svg viewBox="0 0 16 11" aria-hidden="true"><rect x=".5" y=".5" width="15" height="10"/><path d="M2.5 2.5 8 6.5l5.5-4"/></svg><span>${esc(card.m)}</span>`
       : '';
     mail.style.color = `var(${COLORS[card.mc] || '--ink'})`;
-    rows.innerHTML = (card.rows || []).map((r, i) =>
-      `<div class="row"><i class="sw" style="background:${i ? col2 : color}"></i><span class="k">${esc(r.k)}</span><span class="p">${esc(r.p)}</span><span class="r">${esc(r.r)}</span></div>`).join('');
   }
 
   dots.innerHTML = deck.map((_, i) => `<b class="${i === idx ? 'on' : ''}"></b>`).join('');

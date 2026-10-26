@@ -89,7 +89,7 @@ Each `sources.Event` is `{T, Model, Project, Session, Input, CacheRead, CacheWri
 - `tone()` sets the 60/85 thresholds and the ring colour: `ink` below 60, `amber` at 60-84, `accent` from 85. The thresholds must match the firmware `NOTCHES`, `preview.html` and the Mac helper's `MenuModel.tint`.
 - `windowView` treats a window whose `resets_at` has already passed as lapsed. It drops that window's percentage, drawing an empty track instead of the old full ring, and shows `reset` / `idle`.
 - `until()` (`format.go`) loses precision as the horizon grows ("47m", "4h 05m", "16h", "2d 3h"). All ring cards share one font size, set by the longest `v`, so one long value shrinks every ring.
-- A failed limits read is shortened to one caption word by `shortReason`. The full message goes in `s2`, which the firmware does not draw on a dual card; only the preview shows it.
+- A failed limits read is shortened to one caption word by `shortReason`. The full message goes in `s2`, which the usage card draws (cut to its buffer) under `s1` in each tile that has no reset.
 
 ## Other notes
 

@@ -61,10 +61,6 @@ constexpr int RING_CX = LCD_WIDTH / 2;
 constexpr int RING_CY = 128;
 constexpr int RING_R_OUT = 73;
 constexpr int RING_R_IN = 60;
-// The combined usage card adds a second, thinner ring inside the first (the 7d
-// window), 4px clear of it. Same centre, same 270 degree arc and notches.
-constexpr int RING2_R_OUT = 55;
-constexpr int RING2_R_IN = 47;
 // Inside the ring: the value, its caption below, then (in the gap the arc leaves
 // at the bottom) the percentage line, and under it all the card's name.
 constexpr int VALUE_CY = RING_CY - 13;
@@ -402,7 +398,6 @@ struct RingTable {
   float pxPerDeg() const { return (rOut + rIn) * 0.5f * 0.01745329252f; }  // at the band's middle
 };
 RingTable g_ringOuter = {RING_R_OUT, RING_R_IN, nullptr, 0};
-RingTable g_ringInner = {RING2_R_OUT, RING2_R_IN, nullptr, 0};
 
 float clamp01(float v) { return v < 0.0f ? 0.0f : (v > 1.0f ? 1.0f : v); }
 
@@ -570,19 +565,29 @@ void drawGaugeCard(LovyanGFX *g, const Card &card, uint32_t rgb,
   drawLabel(g, card.title, RING_CX, NAME_Y, DIM, middle_center);
 }
 
-// The combined usage card: both rate-limit windows as concentric rings (outer =
-// the 5h session, inner = the 7d week), the session countdown in the middle,
-// the unread-mail badge in the gap the arcs leave at the bottom, and one legend
-// line per window under them. Rings animate independently, like a gauge card's.
-constexpr int DUAL_VALUE_CY = RING_CY - 10;
-constexpr int DUAL_CAPTION_Y = RING_CY + 9;
-constexpr int DUAL_VALUE_MAX_W = 80;  // between the inner ring's edges at the value's height
-constexpr int DUAL_VALUE_MAX_H = 30;
-constexpr int MAIL_CY = RING_CY + 48;
-constexpr int ROW1_Y = RING_CY + 86;
-constexpr int ROW2_Y = RING_CY + 108;
-constexpr int ROW_LEFT = 34;
-constexpr int ROW_RIGHT = LCD_WIDTH - 34;
+// The combined usage card: the two rate-limit windows as two tiles side by
+// side, drawn like the Agents tiles (same width, same columns): each window's
+// percentage large in the middle, its key above, its reset and the card's
+// caption ("to reset") below, and the reading as a gauge round the tile's edge,
+// cut at the 60/85 thresholds. Under them the unread-mail count, an envelope
+// and the bridge's number. Gauges animate
+// independently, like a gauge card's.
+constexpr int USAGE_CAPTION_Y = 44;   // the card's name, where the Agents card has its caption
+constexpr int USAGE_TILE_Y = 54;
+constexpr int USAGE_TILE_W = 108;     // the Agents tiles' width and columns (agents_layout.h)
+constexpr int USAGE_TILE_H = 156;
+constexpr int USAGE_COL0_X = 9;
+constexpr int USAGE_COL1_X = 123;
+constexpr int USAGE_GAUGE_W = 4;      // twice a tile's context gauge: read across a desk
+constexpr int USAGE_KEY_DY = 22;      // centres, from the tile's top
+constexpr int USAGE_PCT_DY = 68;
+constexpr int USAGE_PCT_MAX_W = USAGE_TILE_W - 2 * USAGE_GAUGE_W - 12;
+constexpr int USAGE_PCT_MAX_H = 40;
+constexpr int USAGE_RESET_DY = 112;
+constexpr int USAGE_SUB_DY = 132;
+constexpr int MAIL_CY = USAGE_TILE_Y + USAGE_TILE_H + 24;
+constexpr uint32_t USAGE_TRACK_RGB = 0x2A2925;  // the tiles' gauge track (app.css --ring-track)
+constexpr int USAGE_NOTCH = 2;                  // px cut at each threshold
 
 void drawEnvelope(LovyanGFX *g, int x, int y, uint16_t col) {
   g->drawRect(x, y, 16, 11, col);
@@ -590,14 +595,65 @@ void drawEnvelope(LovyanGFX *g, int x, int y, uint16_t col) {
   g->drawLine(x + 13, y + 2, x + 8, y + 6, col);
 }
 
-void drawLegendRow(LovyanGFX *g, const LegendRow &row, int y, uint32_t swatch) {
-  g->fillRect(ROW_LEFT, y - 3, 7, 7, to565(swatch));
-  drawLabel(g, row.key, ROW_LEFT + 13, y, DIM, middle_left);
-  g->setFont(&V_RB18.font);
-  g->setTextDatum(middle_left);
-  g->setTextColor(INK, BG);
-  g->drawString(row.pct, ROW_LEFT + 38, y);
-  if (row.reset[0]) drawLabel(g, row.reset, ROW_RIGHT, y, DIM, middle_right);
+// Fills the stretch [a, b) of a `w`-wide band round the rect's edge, measured
+// clockwise from the top centre in px: the top's right half, the right side,
+// the bottom, the left side, the top's left half.
+void fillEdge(LovyanGFX *g, int x, int y, int rw, int rh, int w, int a, int b, uint16_t col) {
+  const int x2 = x + rw, y2 = y + rh, half = rw / 2;
+  int s = 0;
+  auto run = [&](int len, int dir) {  // dir: 0 right, 1 down, 2 left, 3 up, along the current side
+    const int lo = a > s ? a - s : 0, hi = b - s < len ? b - s : len;
+    if (hi > lo) {
+      switch (dir) {
+        case 0: g->fillRect(x + half + lo, y, hi - lo, w, col); break;
+        case 1: g->fillRect(x2 - w, y + lo, w, hi - lo, col); break;
+        case 2: g->fillRect(x2 - hi, y2 - w, hi - lo, w, col); break;
+        case 3: g->fillRect(x, y2 - hi, w, hi - lo, col); break;
+        case 4: g->fillRect(x + lo, y, hi - lo, w, col); break;
+      }
+    }
+    s += len;
+  };
+  run(rw - half, 0);
+  run(rh, 1);
+  run(rw, 2);
+  run(rh, 3);
+  run(half, 4);
+}
+
+void drawUsageTile(LovyanGFX *g, const LegendRow *row, const char *sub, const char *why, int x, float shown, uint32_t rgb,
+                   bool has) {
+  const int y = USAGE_TILE_Y, cx = x + USAGE_TILE_W / 2;
+  const uint16_t tile = to565(TILE_RGB);
+  g->fillRect(x, y, USAGE_TILE_W, USAGE_TILE_H, tile);
+
+  const int len = 2 * (USAGE_TILE_W + USAGE_TILE_H);
+  fillEdge(g, x, y, USAGE_TILE_W, USAGE_TILE_H, USAGE_GAUGE_W, 0, len, to565(USAGE_TRACK_RGB));
+  if (has) {
+    const float pct = shown < 0 ? 0 : shown > 100 ? 100 : shown;
+    fillEdge(g, x, y, USAGE_TILE_W, USAGE_TILE_H, USAGE_GAUGE_W, 0, (int)(len * pct / 100.0f + 0.5f), to565(rgb));
+  }
+  for (float f : NOTCHES) {
+    const int at = (int)(len * f + 0.5f);
+    fillEdge(g, x, y, USAGE_TILE_W, USAGE_TILE_H, USAGE_GAUGE_W, at - USAGE_NOTCH / 2, at + USAGE_NOTCH / 2, BG);
+  }
+
+  if (!row) return;
+  drawLabel(g, row->key, cx, y + USAGE_KEY_DY, DIM, middle_center, tile);
+  const ValueFont vf = fitFont(g, row->pct, USAGE_PCT_MAX_W, USAGE_PCT_MAX_H);
+  g->setFont(&vf->font);
+  g->setTextDatum(middle_center);
+  g->setTextColor(has ? to565(rgb) : MUTED, tile);
+  g->drawString(row->pct, cx, y + USAGE_PCT_DY);
+  if (row->reset[0]) {
+    g->setFont(&V_RB18.font);
+    g->setTextColor(has ? INK : MUTED, tile);
+    g->drawString(row->reset, cx, y + USAGE_RESET_DY);
+    if (sub[0]) drawLabel(g, sub, cx, y + USAGE_SUB_DY, DIM, middle_center, tile);
+  } else {  // no reading: the card's reason ("no data", "401") in the reset's place
+    if (sub[0]) drawLabel(g, sub, cx, y + USAGE_RESET_DY, DIM, middle_center, tile);
+    if (why[0]) drawLabel(g, why, cx, y + USAGE_SUB_DY, DIM, middle_center, tile);
+  }
 }
 
 void drawDualCard(LovyanGFX *g, const Card &card, GaugeAnim &outer, GaugeAnim &inner,
@@ -609,26 +665,20 @@ void drawDualCard(LovyanGFX *g, const Card &card, GaugeAnim &outer, GaugeAnim &i
   stepGauge(inner, has2 ? card.gauge2 : 0.0f, RGB888[card.color2 % 7], now, rgb2);
 
   drawTopBar(g, online, ageMs, bat);
-  drawRing(g, g_ringOuter, outer.shown, rgb1, has1, true);
-  drawRing(g, g_ringInner, inner.shown, rgb2, has2, true);
-
-  const ValueFont vf = fitFont(g, card.value, DUAL_VALUE_MAX_W, DUAL_VALUE_MAX_H);
-  drawIn(g, vf, card.value, RING_CX, DUAL_VALUE_CY, has1 ? INK : MUTED);
-  if (card.sub1[0]) drawLabel(g, card.sub1, RING_CX, DUAL_CAPTION_Y, DIM, top_center);
+  if (card.title[0]) drawLabel(g, card.title, LCD_WIDTH / 2, USAGE_CAPTION_Y, DIM, middle_center);
+  drawUsageTile(g, card.nRows > 0 ? &card.rows[0] : nullptr, card.sub1, card.sub2, USAGE_COL0_X, outer.shown, rgb1, has1);
+  drawUsageTile(g, card.nRows > 1 ? &card.rows[1] : nullptr, card.sub1, card.sub2, USAGE_COL1_X, inner.shown, rgb2, has2);
 
   if (card.mail[0]) {
     const uint16_t col = to565(RGB888[card.mailColor % 7]);
     g->setFont(&V_RB18.font);
     const int run = 16 + 6 + g->textWidth(card.mail);
-    const int x0 = RING_CX - run / 2;
+    const int x0 = LCD_WIDTH / 2 - run / 2;
     drawEnvelope(g, x0, MAIL_CY - 5, col);
     g->setTextDatum(middle_left);
     g->setTextColor(col, BG);
     g->drawString(card.mail, x0 + 22, MAIL_CY);
   }
-
-  if (card.nRows > 0) drawLegendRow(g, card.rows[0], ROW1_Y, rgb1);
-  if (card.nRows > 1) drawLegendRow(g, card.rows[1], ROW2_Y, rgb2);
 }
 
 // A text card: the original layout, still used by the optional spend deck,
@@ -1513,7 +1563,6 @@ void uiBegin(Display &) {
   g_canvas.setColorDepth(16);
   g_sprite = g_canvas.createSprite(LCD_WIDTH, LCD_HEIGHT) != nullptr;
   buildRingTable(g_ringOuter);
-  buildRingTable(g_ringInner);
   for (int i = 0; i < 256; i++) g_trackNo[i] = pack565(RING_TRACK, i * (1.0f / 255.0f));
   Serial.printf("[ui] framebuffer: %s\n", g_sprite ? "sprite (double buffered)" : "direct");
 }
