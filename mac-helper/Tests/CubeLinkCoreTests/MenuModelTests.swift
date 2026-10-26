@@ -58,17 +58,35 @@ private func payload(_ g1: Int?, _ g2: Int? = 10) -> Data {
     ])
 }
 
-@Test func agentsCardRow() {
+@Test func agentsCardBecomesTiles() {
     let json = """
     {"v":1,"cards":[
       {"t":"CLAUDE","v":"4h 09m","s1":"to reset","s2":"","c":"green","g":14,"g2":53,
        "rows":[{"k":"5H","p":"14%","r":"4h 09m"},{"k":"7D","p":"53%","r":"1d 1h"}]},
       {"t":"AGENTS","v":"3","s1":"1 NEEDS YOU","s2":"","c":"accent",
-       "a":[{"i":1,"n":"api","l":"WAIT","k":"wait","p":0,"x":0},{"i":2,"n":"web","l":"WORK","k":"work","p":0,"x":0}]}]}
+       "a":[{"i":"a1","n":"api","l":"edit · 41% ctx","k":"run","p":"edit","x":41,"h":42,"s":"×2"},
+            {"i":"a2","n":"web","l":"allow bash?","k":"wait","p":"wait","x":120},
+            {"i":"a3","n":"docs","l":"done · 3m ago","k":"idle","p":"idle","x":7,"u":1}]}]}
     """
     let m = MenuModel.make(payload: Data(json.utf8), bridgeUp: true, link: .connected)
     #expect(m.barTitle == "14%")  // still the usage ring
-    #expect(m.cards.count == 3)
-    #expect(m.cards[2] == CardRow(title: "AGENTS  1 NEEDS YOU", detail: "1 NEEDS YOU", label: "AGENTS", value: "3"))
-    #expect(m.cards[2].fraction == nil)
+    #expect(m.cards.count == 2)   // no AGENTS row: the card is the tile grid
+    let a = try! #require(m.agents)
+    #expect(a.caption == "1 NEEDS YOU")
+    #expect(a.tiles[0] == AgentTile(id: "a1", name: "api", line: "edit · 41% ctx", kind: "run", pose: "edit", context: 41,
+                                    hat: 42, subagents: "×2"))
+    #expect(a.tiles[1].context == 100)  // clamped
+    #expect(a.tiles[2].hungry)          // idle and unseen
+    #expect(!a.tiles[0].hungry)
+    #expect(a.waiting)
+    #expect(a.shown.map(\.id) == ["a2", "a1", "a3"])  // the waiting one first
+    #expect(a.hidden == 0)
+}
+
+@Test func agentsGridShowsFourAndCountsTheRest() {
+    let tiles = (1...6).map { AgentTile(id: "\($0)", name: "n\($0)", line: "", kind: $0 == 5 ? "wait" : "run", pose: "run", context: 0) }
+    let a = AgentsSection(caption: "", tiles: tiles)
+    #expect(a.shown.map(\.id) == ["5", "1", "2", "3"])
+    #expect(a.hidden == 2)
+    #expect(MenuModel.make(payload: payload(10), bridgeUp: true, link: .connected).agents == nil)
 }

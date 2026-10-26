@@ -1,7 +1,8 @@
 // Adapted from agents-deck (github.com/brushknight/agents-deck) @ 699bba8,
 // backend/internal/web/static/app.js (the "sprite" section: the critter, its
 // poses and the hat art), unchanged but for the exports and the think pose's
-// animation. The firmware draws the same art (critter.cpp, hat_art.cpp); edit
+// animation. The firmware draws the same art (critter.cpp, hat_art.cpp), and the
+// Mac menu a port of those (mac-helper/.../Critter.swift); edit
 // them together.
 
 // ---------------------------------------------------------------- sprite

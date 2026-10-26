@@ -281,6 +281,7 @@ link.onStateChange = {
 statusMenu.onSendNow = { tick(force: true) }
 statusMenu.onRestartBridge = { supervisor.restart() }
 statusMenu.onForgetCube = { link.forgetCube() }
+statusMenu.onOpenBoard = { NSWorkspace.shared.open(URL(string: "http://127.0.0.1:\(port)/board/")!) }
 statusMenu.logURL = logURL
 supervisor.start()
 // In .common modes, not just .default: the heartbeat must keep going while the status menu is open,

@@ -1,7 +1,7 @@
 import AppKit
 import CubeLinkCore
 
-let menuRowWidth: CGFloat = 264
+let menuRowWidth: CGFloat = 320  // two Agents tiles side by side
 private let inset: CGFloat = 16
 
 /// Orange (the accent) #FF4D00 is the deck palette's. Ink is the system text colour and yellow is #E8B94A in a dark
@@ -30,17 +30,15 @@ private func text(_ s: String, size: CGFloat, weight: NSFont.Weight = .regular, 
 
 /// A gauge row: label left, value right, a thin tinted bar, then a caption ("2h 28m to reset").
 final class UsageRowView: NSView {
-    private final class Bar: NSView {
+    final class Bar: NSView {
         var fraction = 0.0
         var color = NSColor.systemGreen
         override func draw(_ dirty: NSRect) {
-            let r = bounds.height / 2
             NSColor.labelColor.withAlphaComponent(0.12).setFill()
-            NSBezierPath(roundedRect: bounds, xRadius: r, yRadius: r).fill()
+            bounds.fill()
             guard fraction > 0 else { return }
             color.setFill()
-            let w = max(bounds.height, bounds.width * fraction)
-            NSBezierPath(roundedRect: NSRect(x: 0, y: 0, width: w, height: bounds.height), xRadius: r, yRadius: r).fill()
+            NSRect(x: 0, y: 0, width: max(2, bounds.width * fraction), height: bounds.height).fill()
         }
     }
 
@@ -76,6 +74,52 @@ final class UsageRowView: NSView {
     required init?(coder: NSCoder) { fatalError() }
 }
 
+/// One usage window on one line: "5H 38%", a bar, and the countdown ("1h 58m") at the right.
+final class CompactUsageRowView: NSView {
+    /// Fits rows whose countdown is short; a longer caption (the extra cards' "$1.20 · today") keeps `UsageRowView`.
+    static func fits(_ row: CardRow) -> Bool { row.fraction != nil && row.detail.count <= 8 }
+
+    init(_ row: CardRow) {
+        super.init(frame: NSRect(x: 0, y: 0, width: menuRowWidth, height: 22))
+        let label = text(row.label, size: 13, weight: .semibold)
+        label.setFrameOrigin(NSPoint(x: inset, y: (22 - label.frame.height) / 2))
+        addSubview(label)
+        let value = text(row.value, size: 13, weight: .semibold, color: tintColor(row.tint), mono: true)
+        value.setFrameOrigin(NSPoint(x: label.frame.maxX + 5, y: label.frame.minY))
+        addSubview(value)
+
+        let detailW: CGFloat = 52
+        let caption = text(row.detail, size: 11, color: .secondaryLabelColor, mono: true)
+        caption.alignment = .right
+        caption.frame = NSRect(x: menuRowWidth - inset - detailW, y: (22 - caption.frame.height) / 2, width: detailW,
+                               height: caption.frame.height)
+        addSubview(caption)
+
+        let x0 = max(inset + 72, value.frame.maxX + 10)
+        let bar = UsageRowView.Bar(frame: NSRect(x: x0, y: 9, width: caption.frame.minX - 10 - x0, height: 4))
+        bar.fraction = row.fraction ?? 0
+        bar.color = tintColor(row.tint)
+        addSubview(bar)
+    }
+
+    required init?(coder: NSCoder) { fatalError() }
+}
+
+/// "Agents" with the bridge's caption ("1 needs you") at the right.
+final class HeadingRowView: NSView {
+    init(_ title: String, detail: String) {
+        super.init(frame: NSRect(x: 0, y: 0, width: menuRowWidth, height: 26))
+        let t = text(title, size: 13, weight: .semibold)
+        t.setFrameOrigin(NSPoint(x: inset, y: 4))
+        addSubview(t)
+        let d = text(detail, size: 12, color: .secondaryLabelColor)
+        d.setFrameOrigin(NSPoint(x: menuRowWidth - inset - d.frame.width, y: 5))
+        addSubview(d)
+    }
+
+    required init?(coder: NSCoder) { fatalError() }
+}
+
 /// "● Bridge: running" with a coloured dot.
 final class StatusRowView: NSView {
     init(_ s: String, dot: NSColor) {
@@ -91,13 +135,4 @@ final class StatusRowView: NSView {
     }
 
     required init?(coder: NSCoder) { fatalError() }
-}
-
-/// Small uppercase section caption.
-func sectionHeader(_ s: String) -> NSView {
-    let v = NSView(frame: NSRect(x: 0, y: 0, width: menuRowWidth, height: 22))
-    let t = text(s.uppercased(), size: 10, weight: .semibold, color: .tertiaryLabelColor)
-    t.setFrameOrigin(NSPoint(x: inset, y: 4))
-    v.addSubview(t)
-    return v
 }

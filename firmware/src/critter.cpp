@@ -5,6 +5,8 @@
 // original's `bubble` flag is on for every tile here). Stroked eyes and the
 // font "z" become short runs of small squares in Cut/Body ink; a hat row's run
 // of one colour is one rectangle (the same pixels as the original's cells).
+// The Mac menu's tiles draw a Swift port of this file and hat_art.cpp
+// (mac-helper/Sources/CubeLinkCore/Critter.swift): edit them together.
 #include "critter.h"
 
 #include <string.h>

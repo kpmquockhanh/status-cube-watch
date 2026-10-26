@@ -284,9 +284,12 @@ working directory (`swift run`).
 The app talks to the bridge on `127.0.0.1`; a bridge whose `host` is pinned to a LAN address
 listens on `127.0.0.1` as well, so any `host` works.
 
-**Menu bar.** The item shows the 5-hour percentage, tinted amber at 60% and red at 85%; the dropdown
-repeats the cards and shows whether the bridge and the cube are up. **Send now** pushes the payload
-at once, **Restart bridge** restarts the bridge the app runs, and **Show log** opens the log.
+**Menu bar.** The item shows the 5-hour percentage, tinted amber at 60% and red at 85%, with an orange
+dot after it while an agent needs you; the dropdown shows the 5-hour and weekly windows, the agents
+as tiles like the web board's (up to four, the ones waiting for you first; a click, or **Open board in
+browser**, opens the board), and whether the bridge and the cube are up. **Send now** pushes the payload
+at once. Under **Troubleshoot**, **Restart bridge** restarts the bridge the app runs, **Show log** opens
+the log, and **Forget cube** is described below.
 **Bridge settings…** edits the bridge's own settings (above), and **Unlock Mac with cube…** is
 described [below](#unlocking-the-mac-from-the-cube).
 **Cube settings…** edits what the setup portal
@@ -295,7 +298,7 @@ it as an open network and forgets the stored password. **Forget cube** drops the
 scans again, for when you replace it (also remove the old "Claude Cube" in System Settings >
 Bluetooth). **Quit** also stops the bridge the app started.
 For verbose diagnostics (BLE state changes, frames and ACKs, bridge health checks and child exits,
-HTTP timings, push decisions) set `CUBE_TRACE=1`, pass `--trace`, or tick **Verbose trace** in the menu (until the app quits); lines tagged `[trace:...]`
+HTTP timings, push decisions) set `CUBE_TRACE=1`, pass `--trace`, or tick **Troubleshoot > Verbose trace** in the menu (until the app quits); lines tagged `[trace:...]`
 go to stderr, i.e. `./install.sh logs`.
 
 While a Mac is paired and data arrives over Bluetooth (a payload every 5 s) the cube turns WiFi off

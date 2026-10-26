@@ -25,7 +25,7 @@ Running unbundled (`swift run`) works for the bridge and the menu. For anything 
 - **`CubeLinkCore`** (library, no AppKit) holds every decision, written as pure functions or value types. Inputs are injected: env dictionaries, `exists:` closures in place of the filesystem, `now` in place of the clock. The tests in `Tests/CubeLinkCoreTests` cover these:
   - `BridgeSupervisor.decide`, `findBridgeDir`, `announcement` and `shouldResetBackoff`
   - `PushPolicy`, `Backoff`, `encodeFrames`, `ControlMessage.parse`, `encodeVolume`, `foldVolumeName`, `UnlockPolicy`, `AnswerPolicy` and `PollPolicy`
-  - `CubeSettings` (`parse`, `patch`, `rebase`, `needsReboot`), and `MenuModel`
+  - `CubeSettings` (`parse`, `patch`, `rebase`, `needsReboot`), `MenuModel` and `Critter`
   - `BridgeSettings` (`environment`, `problem`, `imported`; `agents` becomes `CUBE_AGENTS`)
   - `validatePayloadBody`
 
@@ -43,7 +43,7 @@ Everything runs on the main queue. `CBCentralManager` is created with `queue: .m
   3. If the link is ready, `PushPolicy` decides whether to send (on change, every 5 s, or when forced), and `CubeLink.send` sends.
 
   The cube's Control `01` ("send now", sent on subscribe) and the menu's Send now both force a tick.
-- **Payload bytes are passed through untouched.** `validatePayloadBody` only rejects an empty body, a body over 2048 bytes, or one that is not a JSON object. The helper never re-encodes the payload. `MenuModel` parses it separately for the menu: it reads `t`, `g`, `v`, `s1`, `s2`, `rows[{k,p,r}]` and `m` (and `a`, only to list the Agents card as one `AGENTS  <s1>` row), and mirrors the 60/85 notches. A change to the payload contract in `bridge/internal/cards` can therefore need a matching change in `MenuModel`.
+- **Payload bytes are passed through untouched.** `validatePayloadBody` only rejects an empty body, a body over 2048 bytes, or one that is not a JSON object. The helper never re-encodes the payload. `MenuModel` parses it separately for the menu: it reads `t`, `g`, `v`, `s1`, `s2`, `rows[{k,p,r}]` and `m` (and the Agents card's `s1` and tiles `a` as `AgentsSection`, which `AgentTilesView` draws as up to 4 board-style tiles, waiting ones first; `Critter` is the sprite and hats at a moment, ported from the firmware's `critter.cpp` / `hat_art.cpp`, and `TileGround` the running dot wave, specks and hungry stripes from `agents_layout.h`; the view redraws at 20 frames/s from a `.common`-mode timer only while the menu is open), and mirrors the 60/85 notches. A change to the payload contract in `bridge/internal/cards` can therefore need a matching change in `MenuModel`.
 - **`CubeLink` connection sequence.**
   1. Scan by service UUID, or reconnect by the identifier stored in defaults (`cubeIdentifier`).
   2. Connect and discover characteristics.
