@@ -1181,6 +1181,19 @@ void drawStripes(LovyanGFX *g, const LayoutRect &r, uint32_t now) {
   }
 }
 
+// A running tile's ground (agents_layout.h): the dot matrix with its wave,
+// then the rising specks, all accent over the tile colour.
+void drawRunGround(LovyanGFX *g, const LayoutRect &r, uint32_t now) {
+  for (int16_t y = RUN_DOT_INSET; y < r.h - RUN_DOT_INSET; y += RUN_DOT_PITCH)
+    for (int16_t x = RUN_DOT_INSET; x < r.w - RUN_DOT_INSET; x += RUN_DOT_PITCH)
+      g->drawPixel(r.x + x, r.y + y, blend565(ACCENT_RGB, TILE_RGB, runDotAlpha(x, y, r.w, r.h, now)));
+  for (uint8_t i = 0; i < RUN_PARTICLES; i++) {
+    const RunParticle p = runParticle(i, r.w, r.h, now);
+    if (p.alpha)
+      g->fillRect(r.x + p.x, r.y + p.y, RUN_PARTICLE_SIZE, RUN_PARTICLE_SIZE, blend565(ACCENT_RGB, TILE_RGB, p.alpha));
+  }
+}
+
 bool tileHungry(const AgentTile &t) {
   return t.kind == AgentKind::Idle && (t.unseen || poseFromName(t.pose) == Pose::Hungry);
 }
@@ -1237,14 +1250,11 @@ void drawSubs(LovyanGFX *g, const AgentTile &t, const LayoutRect &r, uint32_t no
 void drawTile(LovyanGFX *g, const AgentTile &t, const LayoutRect &r, uint32_t now) {
   const bool wait = t.kind == AgentKind::Wait, hungry = tileHungry(t);
   const bool quiet = (t.kind == AgentKind::Idle && !hungry) || t.kind == AgentKind::Exit || t.kind == AgentKind::Start;
-  // A running tile breathes a warm tint (runGlowAlpha), so it never looks idle.
-  const uint32_t bgRgb = wait                         ? ACCENT_RGB
-                         : t.kind == AgentKind::Exit ? EMPTY_RGB
-                         : t.kind == AgentKind::Run  ? lerpRgb(TILE_RGB, ACCENT_RGB, runGlowAlpha(now) * (1.0f / 255.0f))
-                                                      : TILE_RGB;
+  const uint32_t bgRgb = wait ? ACCENT_RGB : t.kind == AgentKind::Exit ? EMPTY_RGB : TILE_RGB;
   const uint16_t bg = to565(bgRgb);
   g->fillRect(r.x, r.y, r.w, r.h, bg);
   if (hungry) drawStripes(g, r, now);
+  if (t.kind == AgentKind::Run) drawRunGround(g, r, now);
 
   g->fillRect(r.x + r.w - CHIP_INSET - CHIP, r.y + CHIP_INSET, CHIP, CHIP, wait ? BG : to565(CHIP_RGB));
 

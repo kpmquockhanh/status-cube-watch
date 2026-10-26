@@ -538,15 +538,42 @@ body.offline .main { opacity: 0.4; }
 @keyframes zebra { from { background-position: 0 0 } to { background-position: 34px 0 } }
 
 /* ---------- the bridge's additions ---------- */
-/* running: the ground breathes a warm tint, 8 % to 18 % accent over the panel
-   every 2 s, so a working agent never sits on a blank ground like an idle one
-   (the cube's runGlowAlpha, agents_layout.h). --t-bg is registered as a colour
-   so it animates, and the critter's cut-outs (--cut) follow it. Static at the
-   middle with reduced motion; pressing still shows the ink fill. */
-@property --t-bg { syntax: "<color>"; inherits: true; initial-value: #141412; }
-@keyframes run-glow { 0%, 100% { --t-bg: #271911; } 50% { --t-bg: #3E1E0F; } }
-.tile.st-running { --t-bg: #321B10; animation: run-glow 2s ease-in-out infinite; }
-.tile.st-running:active { animation: none; --t-bg: var(--ink); }
+/* running: agents-deck's dot matrix, faint accent dots that a soft diagonal
+   wave brightens (bottom-left to top-right in 1.8 s, then 0.6 s still), and
+   four thought specks rising at their own pace, fading in, holding, fading out
+   before the top. The cube draws the same (agents_layout.h runDotAlpha,
+   runParticle). Behind the tile's content (isolation + z-index -1); on press
+   the ink fill covers it. With reduced motion only the still dots remain. */
+.tile { isolation: isolate; }
+.tile .fx { display: none; position: absolute; inset: 0; z-index: -1; pointer-events: none; overflow: hidden; }
+.tile.st-running .fx { display: block; }
+.tile.st-running:active .fx { display: none; }
+.tile .fx::before, .tile .fx::after {
+  content: ""; position: absolute; inset: 6px;
+  background-image: radial-gradient(circle, var(--accent) 0.8px, transparent 1.3px); background-size: 8px 8px;
+}
+.tile .fx::before { opacity: .15; }
+.tile .fx::after {
+  opacity: .63;
+  -webkit-mask-image: linear-gradient(45deg, transparent 41.7%, #000 50%, transparent 58.3%); -webkit-mask-size: 300% 300%; -webkit-mask-position: 100% 0%;
+  mask-image: linear-gradient(45deg, transparent 41.7%, #000 50%, transparent 58.3%); mask-size: 300% 300%; mask-position: 100% 0%;
+  animation: run-wave 2.4s linear infinite;
+}
+@keyframes run-wave {
+  0% { -webkit-mask-position: 100% 0%; mask-position: 100% 0%; }
+  75%, 100% { -webkit-mask-position: 0% 100%; mask-position: 0% 100%; }
+}
+.tile .fx i { position: absolute; top: 6px; bottom: 6px; width: 3px; margin-left: -1.5px; opacity: 0; animation: run-speck 3s linear infinite; }
+.tile .fx i::before { content: ""; position: absolute; left: 0; bottom: 0; width: 3px; height: 3px; background: var(--accent); }
+.tile .fx i:nth-child(1) { left: 22%; animation-duration: 3s; }
+.tile .fx i:nth-child(2) { left: 71%; animation-duration: 3.6s; animation-delay: -1.4s; }
+.tile .fx i:nth-child(3) { left: 46%; animation-duration: 2.7s; animation-delay: -0.7s; }
+.tile .fx i:nth-child(4) { left: 88%; animation-duration: 3.3s; animation-delay: -2.2s; }
+@keyframes run-speck {
+  0% { transform: translateY(0); opacity: 0; }
+  15%, 60% { opacity: .78; }
+  100% { transform: translateY(calc(-100% + 3px)); opacity: 0; }
+}
 /* think: a slow bob, a chin tap, and thought dots that rise, hold and pop
    (critter.js; the cube's Pose::Think has the same timing) */
 .ponder { animation-duration: 1.2s !important; }

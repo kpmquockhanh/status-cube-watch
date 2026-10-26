@@ -12,6 +12,7 @@
 //                                   # @detail, @detail-loading|wifi|err|long, @hat-pick, @hat-pick-set|none
 //
 // Reads the payload JSON from the file named on the command line, or stdin.
+// CUBE_SHOT_MS=<ms> renders at that point of the animation clock (see render).
 
 #include <zlib.h>
 
@@ -429,6 +430,13 @@ int render(bool *running) {
   lcd.init();
   lcd.setRotation(0);
   uiBegin(lcd);
+  // CUBE_SHOT_MS=<ms>: wait until the animation clock (millis()) reaches it,
+  // so an animated screen can be shot mid-cycle (the critters, the running
+  // tiles' dot wave and specks).
+  if (const char *e = getenv("CUBE_SHOT_MS")) {
+    const uint32_t at = (uint32_t)strtoul(e, nullptr, 10);
+    while (millis() < at) delay(1);
+  }
 
   if (g_json && g_json[0] == '@') {
     if (!renderSpecial(lcd, g_json + 1)) {

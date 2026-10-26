@@ -95,7 +95,10 @@ function makeTile(a) {
   const subs = h('span', { class: 'subs', 'aria-hidden': 'true', hidden: true });
   const bar = h('span', { class: 'ctxbar', 'aria-hidden': 'true' }); // the ring, as a bar, on phones
   const chip = h('span', { class: 'chip', 'aria-hidden': 'true' });
-  const el = h('button', { type: 'button', class: 'tile', 'data-id': a.i }, chip, subs, spr, name, meta, ring.svg, bar);
+  // A running tile's ground: the dot matrix and its wave (::before, ::after)
+  // and four rising specks (board.css .fx).
+  const fx = h('span', { class: 'fx', 'aria-hidden': 'true' }, h('i'), h('i'), h('i'), h('i'));
+  const el = h('button', { type: 'button', class: 'tile', 'data-id': a.i }, fx, chip, subs, spr, name, meta, ring.svg, bar);
   el.addEventListener('click', () => openDetail(a.i));
   return { el, spr, name, meta, subs, bar, ring: ring.fill, subsKey: null, dash: '', cls: '', label: '' };
 }

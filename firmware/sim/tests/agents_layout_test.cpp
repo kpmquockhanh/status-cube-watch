@@ -124,14 +124,53 @@ int main() {
   CHECK(p.backY() == 20 + 8 + 18 + 8);
   CHECK(p.buttonAt(120, PROMPT_VIEW_Y + 1000, 0) == -1);
 
-  // runGlowAlpha: a running tile's ground breathes between 8 % and 18 %.
-  CHECK(runGlowAlpha(0) == RUN_GLOW_MIN);
-  CHECK(runGlowAlpha(RUN_GLOW_MS / 2) == RUN_GLOW_MAX);
-  CHECK(runGlowAlpha(RUN_GLOW_MS) == RUN_GLOW_MIN);
-  CHECK(runGlowAlpha(RUN_GLOW_MS / 4) > RUN_GLOW_MIN && runGlowAlpha(RUN_GLOW_MS / 4) < RUN_GLOW_MAX);
-  for (uint32_t ms = 0; ms < 3 * RUN_GLOW_MS; ms += 7)
-    CHECK(runGlowAlpha(ms) >= RUN_GLOW_MIN && runGlowAlpha(ms) <= RUN_GLOW_MAX);
-  CHECK(runGlowAlpha(0xFFFFFFFFu) >= RUN_GLOW_MIN);  // a millis() wrap is harmless
+  // runDotAlpha: base everywhere outside the sweep and off the crest; the
+  // crest reaches the peak, and walks from bottom-left to top-right.
+  CHECK(runDotAlpha(50, 50, TILE_W, TILE_H, RUN_WAVE_SWEEP_MS + 1) == RUN_DOT_BASE);  // the pause
+  // The crest enters from just off the corner: it is on the bottom-left dot
+  // (f = 0) and later on the top-right one (f = 1).
+  {
+    auto crestAt = [](float f) {
+      return (uint32_t)((f + RUN_WAVE_BAND) / (1 + 2 * RUN_WAVE_BAND) * RUN_WAVE_SWEEP_MS + 0.5f);
+    };
+    CHECK(runDotAlpha(0, TILE_H - 1, TILE_W, TILE_H, 0) == RUN_DOT_BASE);
+    CHECK(runDotAlpha(0, TILE_H - 1, TILE_W, TILE_H, crestAt(0)) >= RUN_DOT_PEAK - 1);
+    CHECK(runDotAlpha(TILE_W - 1, 0, TILE_W, TILE_H, crestAt(0)) == RUN_DOT_BASE);  // top-right: not yet
+    CHECK(runDotAlpha(TILE_W - 1, 0, TILE_W, TILE_H, crestAt(1)) >= RUN_DOT_PEAK - 1);
+    CHECK(runDotAlpha(0, TILE_H - 1, TILE_W, TILE_H, crestAt(1)) == RUN_DOT_BASE);
+  }
+  {
+    uint8_t hi = 0;
+    for (uint32_t ms = 0; ms < 2 * RUN_WAVE_MS; ms += 5)
+      for (int16_t y = 0; y < TILE_H; y += RUN_DOT_PITCH)
+        for (int16_t x = 0; x < TILE_W; x += RUN_DOT_PITCH) {
+          const uint8_t v = runDotAlpha(x, y, TILE_W, TILE_H, ms);
+          CHECK(v >= RUN_DOT_BASE && v <= RUN_DOT_PEAK);
+          if (v > hi) hi = v;
+        }
+    CHECK(hi >= RUN_DOT_PEAK - 2);
+  }
+  CHECK(runDotAlpha(1, 1, 1, 1, 100) == RUN_DOT_BASE);  // a degenerate tile does not divide by zero
+
+  // runParticle: inside the tile, rising, faded at both ends, never in step.
+  for (uint8_t i = 0; i < RUN_PARTICLES; i++) {
+    RunParticle prev = runParticle(i, TILE_W, TILE_H, 0);
+    for (uint32_t ms = 0; ms < 10000; ms += 10) {
+      const RunParticle p = runParticle(i, TILE_W, TILE_H, ms);
+      CHECK(p.x >= 2 && p.x + RUN_PARTICLE_SIZE <= TILE_W - 2);
+      CHECK(p.y >= 2 && p.y + RUN_PARTICLE_SIZE <= TILE_H - 2);
+      CHECK(p.alpha <= RUN_PARTICLE_ALPHA);
+      if (p.alpha > 0 && prev.alpha > 0 && p.y > prev.y) CHECK(prev.y < 12 || p.alpha < 20);  // only a wrap moves it down
+      prev = p;
+    }
+  }
+  {
+    const RunParticle a = runParticle(0, TILE_W, TILE_H, 0), b = runParticle(0, TILE_W, TILE_H, 1500);
+    CHECK(a.alpha == 0 && b.alpha == RUN_PARTICLE_ALPHA && b.y < a.y);
+    CHECK(runParticle(0, TILE_W, TILE_H, 500).y != runParticle(1, TILE_W, TILE_H, 500).y);
+    CHECK(runParticle(RUN_PARTICLES, TILE_W, TILE_H, 0).alpha == 0);
+    CHECK(runParticle(2, TILE_W, TILE_H, 0xFFFFFFFFu).alpha <= RUN_PARTICLE_ALPHA);  // a millis() wrap is harmless
+  }
 
   return checksDone("agents_layout");
 }

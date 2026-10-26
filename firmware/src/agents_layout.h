@@ -85,19 +85,60 @@ struct ScrollY {
   bool _held = false;
 };
 
-// A running tile's ground breathes: the accent over the tile colour, from
-// RUN_GLOW_MIN to RUN_GLOW_MAX (of 255) and back every RUN_GLOW_MS, eased,
-// so a working agent never sits on a blank ground like an idle one. The web
-// board's .tile.st-running breathes the same way (board.css).
-constexpr uint32_t RUN_GLOW_MS = 2000;
-constexpr uint8_t RUN_GLOW_MIN = 20;  // 8 %
-constexpr uint8_t RUN_GLOW_MAX = 46;  // 18 %
+// A running tile's ground (agents-deck's dot-matrix look): faint accent dots
+// every RUN_DOT_PITCH px that a soft diagonal wave brightens, bottom-left to
+// top-right over RUN_WAVE_SWEEP_MS, then a pause to RUN_WAVE_MS; and
+// RUN_PARTICLES thought specks rising from the bottom at their own pace,
+// fading in, holding, fading out before the top. A working agent never sits
+// on a blank ground like an idle one. The web board draws the same
+// (board.css .fx); ui.cpp draws these numbers.
+constexpr int16_t RUN_DOT_PITCH = 6;   // a 1 px dot every 6 px
+constexpr int16_t RUN_DOT_INSET = 4;   // the first dot this far in: clear of the 2 px gauge
+constexpr uint32_t RUN_WAVE_MS = 2400;
+constexpr uint32_t RUN_WAVE_SWEEP_MS = 1800;
+constexpr uint8_t RUN_DOT_BASE = 38;   // ~15 % accent
+constexpr uint8_t RUN_DOT_PEAK = 160;  // ~63 % on the wave's crest
+constexpr float RUN_WAVE_BAND = 0.25f; // the crest's half-width, in diagonal units (0..1 across the tile)
+constexpr uint8_t RUN_PARTICLES = 4;
+constexpr int16_t RUN_PARTICLE_SIZE = 2;
+constexpr uint8_t RUN_PARTICLE_ALPHA = 200;  // ~78 % at full
 
-// The accent's alpha over a running tile's ground at `ms`: RUN_GLOW_MIN at 0.
-inline uint8_t runGlowAlpha(uint32_t ms) {
-  const float t = (float)(ms % RUN_GLOW_MS) / (float)RUN_GLOW_MS;
-  const float k = 0.5f - 0.5f * cosf(t * 6.2831853f);  // 0 -> 1 -> 0
-  return (uint8_t)(RUN_GLOW_MIN + k * (RUN_GLOW_MAX - RUN_GLOW_MIN) + 0.5f);
+// The accent's alpha over the tile for the dot at (dx, dy) inside a w x h
+// tile at `ms`: RUN_DOT_BASE, raised towards RUN_DOT_PEAK near the wave's crest.
+inline uint8_t runDotAlpha(int16_t dx, int16_t dy, int16_t w, int16_t h, uint32_t ms) {
+  const uint32_t t = ms % RUN_WAVE_MS;
+  if (t >= RUN_WAVE_SWEEP_MS || w + h <= 2) return RUN_DOT_BASE;
+  // The crest runs from just before the bottom-left corner to just past the top-right one.
+  const float f = -RUN_WAVE_BAND + (1 + 2 * RUN_WAVE_BAND) * (float)t / (float)RUN_WAVE_SWEEP_MS;
+  const float d = (float)(dx + (h - 1 - dy)) / (float)(w + h - 2);  // 0 bottom-left .. 1 top-right
+  float k = 1 - fabsf(d - f) / RUN_WAVE_BAND;
+  if (k <= 0) return RUN_DOT_BASE;
+  k = k * k * (3 - 2 * k);  // smoothstep: a soft crest
+  return (uint8_t)(RUN_DOT_BASE + k * (RUN_DOT_PEAK - RUN_DOT_BASE) + 0.5f);
+}
+
+// One rising speck: its top-left inside the tile, and its alpha (0: not drawn).
+struct RunParticle {
+  int16_t x, y;
+  uint8_t alpha;
+};
+
+// Speck `i` (0..RUN_PARTICLES-1) of a w x h tile at `ms`. Each has its own
+// column, period and start, so they never move in step.
+inline RunParticle runParticle(uint8_t i, int16_t w, int16_t h, uint32_t ms) {
+  static const uint8_t X_PCT[RUN_PARTICLES] = {22, 71, 46, 88};
+  static const uint16_t PERIOD_MS[RUN_PARTICLES] = {3000, 3600, 2700, 3300};
+  static const uint16_t OFFSET_MS[RUN_PARTICLES] = {0, 1400, 700, 2200};
+  RunParticle p = {0, 0, 0};
+  if (i >= RUN_PARTICLES) return p;
+  const float t = (float)((ms + OFFSET_MS[i]) % PERIOD_MS[i]) / (float)PERIOD_MS[i];
+  const int16_t bottom = (int16_t)(h - 6 - RUN_PARTICLE_SIZE), top = 6;  // inside the gauge, with air
+  p.x = (int16_t)(w * X_PCT[i] / 100 - RUN_PARTICLE_SIZE / 2);
+  p.y = (int16_t)(bottom - t * (bottom - top) + 0.5f);
+  // In over the first 15 %, held to 60 %, out by the end: linear.
+  const float a = t < 0.15f ? t / 0.15f : t > 0.6f ? (1 - t) / 0.4f : 1;
+  p.alpha = (uint8_t)(a * RUN_PARTICLE_ALPHA + 0.5f);
+  return p;
 }
 
 // The prompt screen: a column that scrolls under a fixed header (the tile's
