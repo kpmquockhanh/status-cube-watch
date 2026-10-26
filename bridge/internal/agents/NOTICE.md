@@ -23,7 +23,7 @@ Source files used by this plan:
 
 The web board (`bridge/board/`) adapts agents-deck's web dashboard at the same commit:
 
-- `backend/internal/web/static/app.js`: the "sprite" section (critter, poses, hat art) as `critter.js`, unchanged but for its exports; the tiles, detail panel, hat picker and prompt in `board.js`
+- `backend/internal/web/static/app.js`: the "sprite" section (critter, poses, hat art) as `critter.js`, unchanged but for its exports and the `think` pose, which this project animates (a slow bob, a chin tap, thought dots that pop); the tiles, detail panel, hat picker and prompt in `board.js`
 - `backend/internal/web/static/app.css`: as `board.css`, trimmed
 - `backend/internal/web/static/index.html`: the page's skeleton
 

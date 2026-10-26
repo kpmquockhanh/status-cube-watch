@@ -1,7 +1,8 @@
 // Adapted from agents-deck (github.com/brushknight/agents-deck) @ 699bba8,
 // backend/internal/web/static/app.js (the "sprite" section: the critter, its
-// poses and the hat art), unchanged but for the exports. The firmware draws the
-// same art (critter.cpp, hat_art.cpp); edit them together.
+// poses and the hat art), unchanged but for the exports and the think pose's
+// animation. The firmware draws the same art (critter.cpp, hat_art.cpp); edit
+// them together.
 
 // ---------------------------------------------------------------- sprite
 // Pixel critter (viewBox 0 -4 18 13; mirrors critter.dart on the panel): Claude's flat
@@ -294,8 +295,14 @@ export function spriteSVG(pose, species = 'claude', hat = null, opts = {}) {
   let arms = arm(2, 2), held = '';
   switch (pose) {
     case 'think':
-      eyes = `<g class="glance">${eyesOpenAt(1, 1.5)}</g>`; arms = arm(2, 1);
-      bubble = '<rect class="b t1" x="14.3" y="-0.9" width="0.6" height="0.6"/><rect class="b t2" x="15.3" y="-2.1" width="0.9" height="0.9"/><rect class="b t3" x="16.5" y="-3.8" width="1.3" height="1.3"/>';
+      // The bridge's change (agents-deck keeps it still): pondering, not asleep.
+      // A slow bob on the glance's 1.2 s, the raised hand tapping the chin
+      // (rows 1 and 0), and the thought dots popping before they rise again.
+      // Mirrors critter.cpp's Pose::Think.
+      eyes = `<g class="glance">${eyesOpenAt(1, 1.5)}</g>`; grp = 'bob ponder';
+      arms = bot ? arm(2, 1) : '<rect class="b" x="0" y="2" width="1" height="2"/>' +
+        '<rect class="b la tap" x="13" y="1" width="1" height="2"/><rect class="b lb tap" x="13" y="0" width="1" height="2"/>';
+      bubble = '<rect class="b p1" x="14.3" y="-0.9" width="0.6" height="0.6"/><rect class="b p2" x="15.3" y="-2.1" width="0.9" height="0.9"/><rect class="b p3" x="16.5" y="-3.8" width="1.3" height="1.3"/>';
       break;
     case 'read':
       eyes = `<g class="scan">${eyesOpen(2)}</g>`;

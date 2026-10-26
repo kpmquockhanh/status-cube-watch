@@ -232,7 +232,13 @@ size_t critterShapes(Pose pose, HatId hatId, uint32_t ms, CritterRect *out, size
   bool noArms = false, noFeet = false;
 
   switch (pose) {
-    case Pose::Think: face = Face::Glance; ar = 1; break;
+    case Pose::Think:
+      // Pondering, not asleep: a slow bob on the glance's 1.2 s, and the raised
+      // hand taps the chin (rows 1 and 0, 400 ms each).
+      face = Face::Glance;
+      ar = laOn(o, 800) ? 1 : 0;
+      if (!laOn(o, 1200)) g = moved(g, 0, -0.5f);
+      break;
     case Pose::Read: face = Face::Scan; break;
     case Pose::Bash:
       face = Face::Open2;
@@ -350,7 +356,9 @@ size_t critterShapes(Pose pose, HatId hatId, uint32_t ms, CritterRect *out, size
   const Pen b = root;
   switch (pose) {
     case Pose::Think: {
+      // The thought rises dot by dot, holds, then pops and starts again.
       float pp = phase(o, 1200);
+      if (pp >= 0.85f) break;
       put(o, b, 14.3f, -0.9f, 0.6f, 0.6f, CritterInk::Body);
       if (pp >= 0.25f) put(o, b, 15.3f, -2.1f, 0.9f, 0.9f, CritterInk::Body);
       if (pp >= 0.5f) put(o, b, 16.5f, -3.8f, 1.3f, 1.3f, CritterInk::Body);

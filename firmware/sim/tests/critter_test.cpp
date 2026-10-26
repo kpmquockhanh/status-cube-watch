@@ -153,6 +153,29 @@ int main() {
   CHECK(a[0].y == 0 && b[0].y == -1.5f);  // the body, hopping
   CHECK(minAlpha(b, nb, CritterInk::Body) == 115);
 
+  // thinkMoves: not idle-still. The body bobs on a slow 1.2 s, the raised hand
+  // taps (row 1, then row 0), and the thought dots build up and then pop.
+  {
+    auto dots = [](const CritterRect *r, size_t n) {
+      int k = 0;
+      for (size_t i = 0; i < n; i++)
+        if (r[i].ink == CritterInk::Body && r[i].x >= 14) k++;
+      return k;
+    };
+    auto rightArmY = [](const CritterRect *r, size_t n) {
+      for (size_t i = 0; i < n; i++)
+        if (r[i].ink == CritterInk::Body && r[i].x == 13 && r[i].w == 1) return r[i].y;
+      return -99.0f;
+    };
+    na = critterShapes(Pose::Think, NO_HAT, 0, a, CRITTER_MAX_RECTS);
+    nb = critterShapes(Pose::Think, NO_HAT, 700, b, CRITTER_MAX_RECTS);
+    CHECK(a[0].y == 0 && b[0].y == -0.5f);  // the body, bobbing
+    CHECK(rightArmY(a, na) == 1 && rightArmY(b, nb) == -0.5f);  // the tap, row 0 on a bobbing body
+    CHECK(dots(a, na) == 1 && dots(b, nb) == 3);
+    na = critterShapes(Pose::Think, NO_HAT, 1100, a, CRITTER_MAX_RECTS);
+    CHECK(dots(a, na) == 0);  // popped
+  }
+
   // A short buffer is filled, not overrun.
   CritterRect c[4];
   CHECK(critterShapes(Pose::Idle, NO_HAT, 0, c, 3) == 3);
