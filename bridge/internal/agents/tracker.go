@@ -50,7 +50,12 @@ type TrackerDeps struct {
 	Projects string // ~/.claude/projects (or $CLAUDE_CONFIG_DIR/projects)
 	Now      func() time.Time
 	After    func(time.Duration, func()) // time.AfterFunc seam for the option re-scan
+	Log      func(string)                // one line per session lifecycle hook (lifecycleHooks); nil = none
 }
+
+// lifecycleHooks are the hooks logged through TrackerDeps.Log: a couple of
+// lines per turn, enough to tell later whether a turn's end reached the bridge.
+var lifecycleHooks = map[string]bool{"SessionStart": true, "UserPromptSubmit": true, "Stop": true, "SessionEnd": true}
 
 // Tracker holds every known Claude Code session. One mutex guards the
 // entries; it is never held while a command runs or a transcript is read.
@@ -123,7 +128,10 @@ func (t *Tracker) Hook(body []byte) error {
 	subagent := strings.Contains(ev.TranscriptPath, "/subagents/")
 	ev.TranscriptPath = t.trustedTranscript(ev.TranscriptPath)
 	id := agentID(ev.SessionID)
-	changed, scan, pane, promptID := t.applyHookEvent(id, ev, subagent, t.d.Now())
+	changed, scan, pane, promptID, status := t.applyHookEvent(id, ev, subagent, t.d.Now())
+	if t.d.Log != nil && lifecycleHooks[ev.Name] && !subagent {
+		t.d.Log("hook " + ev.Name + ": " + id + " is " + string(status))
+	}
 	if changed {
 		t.notify()
 	}
@@ -138,7 +146,7 @@ var applyEvent = apply
 
 // applyHookEvent folds ev into agent id under the lock; pane and promptID
 // are what a re-scan needs.
-func (t *Tracker) applyHookEvent(id string, ev Event, subagent bool, now time.Time) (changed, scan bool, pane, promptID string) {
+func (t *Tracker) applyHookEvent(id string, ev Event, subagent bool, now time.Time) (changed, scan bool, pane, promptID string, status Status) {
 	t.mu.Lock()
 	defer t.mu.Unlock()
 	e := t.entries[id]
@@ -146,7 +154,7 @@ func (t *Tracker) applyHookEvent(id string, ev Event, subagent bool, now time.Ti
 	if e == nil {
 		// A subagent's hooks belong to its parent; an end is no news.
 		if subagent || ev.Name == "SessionEnd" {
-			return false, false, "", ""
+			return false, false, "", "", ""
 		}
 		e = t.newEntry(id, ev.SessionID, Starting, now)
 		created = true
@@ -161,7 +169,7 @@ func (t *Tracker) applyHookEvent(id string, ev Event, subagent bool, now time.Ti
 	if e.Waiting != nil {
 		promptID = e.Waiting.ID
 	}
-	return changed, scan, e.Pane, promptID
+	return changed, scan, e.Pane, promptID, e.Status
 }
 
 // rescan reads the pane after each of rescanWaits, replacing the guessed

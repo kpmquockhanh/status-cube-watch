@@ -148,7 +148,7 @@ func main() {
 		os.Exit(code)
 	}
 	if cmd.kind == "hook" {
-		runHook(os.Stdin, cmd.port, hookClient())
+		runHook(os.Stdin, cmd.port)
 		return
 	}
 	if cmd.kind == "hooks" {
@@ -185,6 +185,7 @@ func main() {
 			Tmux:     agents.NewTmux(),
 			Discover: agents.NewDiscovery(projects),
 			Projects: projects,
+			Log:      func(m string) { log.Println("agents:", m) },
 		})
 		deps.Hats = hatstore.Open(hatstore.DefaultPath(), func(m string) { errLog.Println(m) })
 	}

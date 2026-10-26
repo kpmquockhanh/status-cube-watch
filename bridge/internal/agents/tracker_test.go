@@ -689,3 +689,26 @@ func TestRescanKeepsToItsPrompt(t *testing.T) {
 		t.Fatalf("p4 changed by p3's re-scan: %+v", a.Waiting)
 	}
 }
+
+// Lifecycle hooks are logged, one line each with the status they leave;
+// tool hooks and subagents' are not.
+func TestHookLifecycleLog(t *testing.T) {
+	tr, _ := newTestTracker(t)
+	var lines []string
+	tr.d.Log = func(m string) { lines = append(lines, m) }
+	for _, kv := range []map[string]any{
+		{"hook_event_name": "UserPromptSubmit", "prompt": "secret prompt"},
+		{"hook_event_name": "PreToolUse", "tool_name": "Bash", "tool_input": map[string]any{"command": "ls"}},
+		{"hook_event_name": "Stop", "transcript_path": "/x/subagents/agent-1.jsonl"},
+		{"hook_event_name": "Stop"},
+	} {
+		if err := tr.Hook(hookBody(t, kv)); err != nil {
+			t.Fatal(err)
+		}
+	}
+	id := agentID(sidA)
+	want := []string{"hook UserPromptSubmit: " + id + " is running", "hook Stop: " + id + " is idle"}
+	if strings.Join(lines, "\n") != strings.Join(want, "\n") {
+		t.Fatalf("log %q", lines)
+	}
+}
