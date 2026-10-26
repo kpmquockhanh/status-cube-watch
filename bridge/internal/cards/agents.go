@@ -344,10 +344,16 @@ func contextPct(used, window int64) int {
 }
 
 func promptOf(a agents.Agent) *AgentPrompt {
+	return promptWith(a, PromptTitleChars, PromptDetailChars, PromptOptions)
+}
+
+// promptWith is a's prompt with the title, the detail and the options cut to
+// the given maxima; the other fields keep the cube's limits.
+func promptWith(a agents.Agent, titleN, detailN, optsN int) *AgentPrompt {
 	w := a.Waiting
 	q := &AgentPrompt{I: fitN(a.ID, TileIDChars), P: fitN(w.ID, PromptIDChars), K: fitN(w.Kind, PromptKindChars),
-		T: fitMarked(w.Title, PromptTitleChars), D: fitMarked(w.Detail, PromptDetailChars), C: fitN(w.Context, PromptCtxChars)}
-	for _, o := range w.Options[:min(len(w.Options), PromptOptions)] {
+		T: fitMarked(w.Title, titleN), D: fitMarked(w.Detail, detailN), C: fitN(w.Context, PromptCtxChars)}
+	for _, o := range w.Options[:min(len(w.Options), optsN)] {
 		q.O = append(q.O, PromptOption{K: fitN(o.Key, OptionKeyChars), L: fitN(o.Label, OptionLabelChars)})
 	}
 	if a.Pane == "" {
