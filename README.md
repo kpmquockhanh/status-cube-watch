@@ -212,6 +212,14 @@ what the cube gets. When the Mac app runs the bridge, the switch is "Track Claud
 in Bridge settings. The agent tracking code is adapted from
 [agents-deck](https://github.com/brushknight/agents-deck); see `bridge/internal/agents/NOTICE.md`.
 
+**Web board.** `http://127.0.0.1:8787/board/` is agents-deck's web dashboard for the agents the bridge
+tracks: every agent as a tile (no 8-tile limit), a detail panel (doing now, context, last prompt, model
+and branch), the hat picker, and each waiting agent's prompt with its answer buttons (answering works
+as from the cube: only for agents in tmux, one answer per prompt). It updates the moment an agent
+changes. It works only when opened on the Mac itself: the bridge serves its data (`GET /api/board`) and
+takes its answers and hat picks only from its own page, at `127.0.0.1` or `localhost` and the bridge's
+port, so a page from anywhere else, or the board opened through a LAN address, gets nothing.
+
 ### 2. Firmware
 
 ```bash
@@ -407,6 +415,7 @@ bridge/
   internal/sources/   local.go: incremental ~/.claude transcript reader; admin.go: Usage & Cost Admin API client
   agent.sh            build + install/remove the macOS LaunchAgent
   preview.html        browser mock of the device (also embedded in the binary, assets.go)
+  board/              the web board at /board/ (embedded too; critter.js and board.css adapted from agents-deck)
 mac-helper/           Swift app: runs the bridge, pushes /api/status to the cube over BLE
   install.sh          install/remove the LaunchAgent
   build-app.sh        builds ClaudeCubeLink.app with the bridge inside

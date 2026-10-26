@@ -21,4 +21,10 @@ Source files used by this plan:
 - `backend/internal/claude/hooks.go` (`Event`, `Apply`, prompts, `ToolDetail`, `ShortPath`, `field`, `DefaultPermissionOptions`, text helpers)
 - `backend/internal/claude/claude_test.go`, `sessions_test.go`, `live_test.go`; `backend/internal/daemon/live_test.go`
 
+The web board (`bridge/board/`) adapts agents-deck's web dashboard at the same commit:
+
+- `backend/internal/web/static/app.js`: the "sprite" section (critter, poses, hat art) as `critter.js`, unchanged but for its exports; the tiles, detail panel, hat picker and prompt in `board.js`
+- `backend/internal/web/static/app.css`: as `board.css`, trimmed
+- `backend/internal/web/static/index.html`: the page's skeleton
+
 No licence was published; copied with the owner of this private repository's consent. Do not make this repository public without the agents-deck author's permission.

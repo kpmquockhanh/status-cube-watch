@@ -345,7 +345,7 @@ func TestAnswerEndpointStale(t *testing.T) {
 	ag := newStubAgents(waitingAgent())
 	s := newAgentsTest(ag, nil)
 	browser := cubeReq("POST", "/api/answer", answerBody("a1", "p1", "1"))
-	browser.Header.Set("Origin", "http://127.0.0.1:8787")
+	browser.Header.Set("Origin", "http://evil.test")
 	noHeader := req("POST", "/api/answer", "127.0.0.1:5000", "127.0.0.1:8787", answerBody("a1", "p1", "1"))
 	rebind := cubeReq("POST", "/api/answer", answerBody("a1", "p1", "1"))
 	rebind.Host = "evil.test:8787"

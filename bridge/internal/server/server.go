@@ -2,6 +2,8 @@
 //
 //	GET /api/status  -> the payload the firmware consumes
 //	GET /            -> a browser mock of the device, for developing the UI
+//	GET /board/      -> the web board: every agent, answer prompts, pick hats
+//	GET /api/board   -> the web board's data (loopback only, agents on)
 //	GET /health      -> liveness + last refresh result. Always 200 while the
 //	                    process serves (the Mac helper reads any other status
 //	                    as "no bridge"); a degraded bridge says so in the body.
@@ -11,9 +13,12 @@
 //	GET /api/changes -> wait for the agents to change: 204 as soon as they
 //	                    do, 304 after changesWait (loopback only, agents on)
 //
-// Nothing on the LAN or in a browser may read prompt text or answer a prompt:
-// /api/status serves the full payload (with the prompt) only to a request
-// that passes loopbackRequest, and the two POSTs answer 404 to anything else.
+// Nothing on the LAN may read prompt text or answer a prompt: /api/status
+// serves the full payload (with the prompt) only to a request that passes
+// loopbackRequest, and the POSTs answer 404 to anything else. The one browser
+// page that may is the bridge's own web board, opened on this Mac at
+// http://127.0.0.1:<port>/board/ (boardRequest): /api/board, /api/answer,
+// /api/hat and /api/changes accept it, /hook never does.
 package server
 
 import (
@@ -23,10 +28,12 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"io/fs"
 	"log"
 	"net"
 	"net/http"
 	"os"
+	"path/filepath"
 	"regexp"
 	"slices"
 	"strconv"
@@ -68,8 +75,11 @@ type Deps struct {
 	}
 	Now     func() time.Time // nil = time.Now
 	Preview func() []byte    // nil = preview.html from the working directory when present, else bridge.PreviewHTML
-	Log     *log.Logger      // console.log; nil = stdout
-	ErrLog  *log.Logger      // console.warn/error; nil = stderr
+	// BoardFile is one file of the web board (index.html, board.js, ...); nil =
+	// board/<name> from the working directory when present, else bridge.Board.
+	BoardFile func(name string) ([]byte, error)
+	Log       *log.Logger // console.log; nil = stdout
+	ErrLog    *log.Logger // console.warn/error; nil = stderr
 }
 
 const (
@@ -138,6 +148,9 @@ func New(cfg config.Config, d Deps) *Server {
 	if d.Preview == nil {
 		d.Preview = defaultPreview
 	}
+	if d.BoardFile == nil {
+		d.BoardFile = defaultBoardFile
+	}
 	if d.Log == nil {
 		d.Log = log.New(os.Stdout, "", 0)
 	}
@@ -202,6 +215,14 @@ func defaultPreview() []byte {
 		return b
 	}
 	return bridge.PreviewHTML
+}
+
+// defaultBoardFile is defaultPreview for the web board's files.
+func defaultBoardFile(name string) ([]byte, error) {
+	if b, err := os.ReadFile(filepath.Join("board", name)); err == nil {
+		return b, nil
+	}
+	return fs.ReadFile(bridge.Board, "board/"+name)
 }
 
 // RefreshOnce runs one refresh. Limits and mail report their own error, so
@@ -306,7 +327,7 @@ func (s *Server) notifyChanged() {
 // changesWait passes first, and nothing when the client hangs up. Same guard
 // as /api/answer; the Mac app calls it in a loop and fetches /api/status on 204.
 func (s *Server) changes(w http.ResponseWriter, r *http.Request) {
-	if !s.cubeClient(r) {
+	if !s.boardClient(r) {
 		notFound(w)
 		return
 	}
@@ -461,6 +482,29 @@ func loopbackRequest(r *http.Request, port int) bool {
 	if _, browser := r.Header["Origin"]; browser {
 		return false
 	}
+	return fromLoopback(r, port)
+}
+
+// boardRequest is loopbackRequest for the bridge's own web board: a browser
+// may send Origin, but only the bridge's own (http:// + the Host the guard
+// already pinned to 127.0.0.1:<port> or localhost:<port>), and a browser that
+// says where the request comes from (Sec-Fetch-Site) must say same-origin.
+// Any other page is cross-origin, and a write from it would also need a
+// CORS preflight (X-Cube-Client) that the bridge never grants.
+func boardRequest(r *http.Request, port int) bool {
+	if !fromLoopback(r, port) {
+		return false
+	}
+	if site := r.Header.Get("Sec-Fetch-Site"); site != "" && site != "same-origin" {
+		return false
+	}
+	origin, browser := r.Header["Origin"]
+	return !browser || (len(origin) == 1 && origin[0] == "http://"+r.Host)
+}
+
+// fromLoopback: the connection comes from a loopback address and Host names
+// this bridge exactly.
+func fromLoopback(r *http.Request, port int) bool {
 	host, _, err := net.SplitHostPort(r.RemoteAddr)
 	if ip := net.ParseIP(host); err != nil || ip == nil || !ip.IsLoopback() {
 		return false
@@ -484,6 +528,11 @@ func (s *Server) loopback(r *http.Request) bool { return loopbackRequest(r, arri
 // or the Mac helper (loopback guard plus X-Cube-Client: 1).
 func (s *Server) cubeClient(r *http.Request) bool {
 	return s.d.Agents != nil && r.Header.Get("X-Cube-Client") == "1" && s.loopback(r)
+}
+
+// boardClient is cubeClient that also lets in the bridge's own web board.
+func (s *Server) boardClient(r *http.Request) bool {
+	return s.d.Agents != nil && r.Header.Get("X-Cube-Client") == "1" && boardRequest(r, arrivedOn(r))
 }
 
 func notFound(w http.ResponseWriter) { send(w, 404, []byte(`{"error":"not found"}`), jsonType) }
@@ -514,6 +563,10 @@ func (s *Server) route(w http.ResponseWriter, r *http.Request) {
 		sendJSON(w, 200, s.health())
 	case "/", "/index.html":
 		send(w, 200, s.d.Preview(), "text/html; charset=utf-8")
+	case "/board", "/board/", "/board/index.html", "/board/board.js", "/board/board.css", "/board/critter.js":
+		s.boardFile(w, r)
+	case "/api/board":
+		s.board(w, r)
 	case "/hook":
 		s.hook(w, r)
 	case "/api/answer":
@@ -525,6 +578,54 @@ func (s *Server) route(w http.ResponseWriter, r *http.Request) {
 	default:
 		notFound(w)
 	}
+}
+
+// boardTypes are the web board's files and how they are served.
+var boardTypes = map[string]string{
+	"index.html": "text/html; charset=utf-8",
+	"board.js":   "text/javascript; charset=utf-8",
+	"critter.js": "text/javascript; charset=utf-8",
+	"board.css":  "text/css; charset=utf-8",
+}
+
+// boardCSP keeps the board to its own files: no inline script, no other
+// origin, no framing (a framed board could be clicked into answering).
+const boardCSP = "default-src 'none'; script-src 'self'; style-src 'self'; img-src 'self' data:; " +
+	"connect-src 'self'; base-uri 'none'; form-action 'none'; frame-ancestors 'none'"
+
+// boardFile serves the web board's page and its scripts. They hold no data,
+// so anyone may load them; /api/board decides who sees agents.
+func (s *Server) boardFile(w http.ResponseWriter, r *http.Request) {
+	name := filepath.Base(r.URL.Path)
+	if name == "board" || name == "" {
+		name = "index.html"
+	}
+	b, err := s.d.BoardFile(name)
+	if err != nil {
+		panic(err)
+	}
+	h := w.Header()
+	h.Set("Content-Security-Policy", boardCSP)
+	h.Set("X-Content-Type-Options", "nosniff")
+	h.Set("Referrer-Policy", "no-referrer")
+	send(w, 200, b, boardTypes[name])
+}
+
+// board serves every agent for the web board, to the board on this Mac only.
+func (s *Server) board(w http.ResponseWriter, r *http.Request) {
+	if s.d.Agents == nil {
+		sendJSON(w, 404, errorBody{"agents are off"})
+		return
+	}
+	if !boardRequest(r, arrivedOn(r)) {
+		notFound(w)
+		return
+	}
+	var hats func(string) (int, bool)
+	if s.d.Hats != nil {
+		hats = s.d.Hats.Get
+	}
+	sendJSON(w, 200, cards.BuildBoard(s.d.Agents.Snapshot(), s.d.Now(), hats))
 }
 
 // withDetail is the full payload with agent id's detail, or nil when id is
@@ -597,7 +698,7 @@ func (s *Server) logHookError(err error) {
 
 // answer types an answer to an agent's prompt into its tmux pane.
 func (s *Server) answer(w http.ResponseWriter, r *http.Request) {
-	if !s.cubeClient(r) {
+	if !s.boardClient(r) {
 		notFound(w)
 		return
 	}
@@ -638,7 +739,7 @@ func (s *Server) answer(w http.ResponseWriter, r *http.Request) {
 // hat sets (or clears) the hat override of an agent's session (cards.HatKey).
 // hat: 0..103 = that hat, -1 = no hat, null = automatic.
 func (s *Server) hat(w http.ResponseWriter, r *http.Request) {
-	if !s.cubeClient(r) || s.d.Hats == nil {
+	if !s.boardClient(r) || s.d.Hats == nil {
 		notFound(w)
 		return
 	}
