@@ -1237,7 +1237,11 @@ void drawSubs(LovyanGFX *g, const AgentTile &t, const LayoutRect &r, uint32_t no
 void drawTile(LovyanGFX *g, const AgentTile &t, const LayoutRect &r, uint32_t now) {
   const bool wait = t.kind == AgentKind::Wait, hungry = tileHungry(t);
   const bool quiet = (t.kind == AgentKind::Idle && !hungry) || t.kind == AgentKind::Exit || t.kind == AgentKind::Start;
-  const uint32_t bgRgb = wait ? ACCENT_RGB : t.kind == AgentKind::Exit ? EMPTY_RGB : TILE_RGB;
+  // A running tile breathes a warm tint (runGlowAlpha), so it never looks idle.
+  const uint32_t bgRgb = wait                         ? ACCENT_RGB
+                         : t.kind == AgentKind::Exit ? EMPTY_RGB
+                         : t.kind == AgentKind::Run  ? lerpRgb(TILE_RGB, ACCENT_RGB, runGlowAlpha(now) * (1.0f / 255.0f))
+                                                      : TILE_RGB;
   const uint16_t bg = to565(bgRgb);
   g->fillRect(r.x, r.y, r.w, r.h, bg);
   if (hungry) drawStripes(g, r, now);

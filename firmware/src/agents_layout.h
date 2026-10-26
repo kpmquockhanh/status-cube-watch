@@ -7,6 +7,7 @@
 // All coordinates are screen pixels. `scroll` is how far the content has moved
 // up (0 = the top). A point outside the view band never hits anything, even
 // where a clipped tile or button is still drawn.
+#include <math.h>
 #include <stdint.h>
 
 struct LayoutRect {
@@ -83,6 +84,21 @@ struct ScrollY {
   int16_t _max = 0, _off = 0, _grabY = 0, _grabOff = 0;
   bool _held = false;
 };
+
+// A running tile's ground breathes: the accent over the tile colour, from
+// RUN_GLOW_MIN to RUN_GLOW_MAX (of 255) and back every RUN_GLOW_MS, eased,
+// so a working agent never sits on a blank ground like an idle one. The web
+// board's .tile.st-running breathes the same way (board.css).
+constexpr uint32_t RUN_GLOW_MS = 2000;
+constexpr uint8_t RUN_GLOW_MIN = 20;  // 8 %
+constexpr uint8_t RUN_GLOW_MAX = 46;  // 18 %
+
+// The accent's alpha over a running tile's ground at `ms`: RUN_GLOW_MIN at 0.
+inline uint8_t runGlowAlpha(uint32_t ms) {
+  const float t = (float)(ms % RUN_GLOW_MS) / (float)RUN_GLOW_MS;
+  const float k = 0.5f - 0.5f * cosf(t * 6.2831853f);  // 0 -> 1 -> 0
+  return (uint8_t)(RUN_GLOW_MIN + k * (RUN_GLOW_MAX - RUN_GLOW_MIN) + 0.5f);
+}
 
 // The prompt screen: a column that scrolls under a fixed header (the tile's
 // name, y 44).

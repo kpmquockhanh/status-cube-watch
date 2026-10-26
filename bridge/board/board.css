@@ -538,6 +538,15 @@ body.offline .main { opacity: 0.4; }
 @keyframes zebra { from { background-position: 0 0 } to { background-position: 34px 0 } }
 
 /* ---------- the bridge's additions ---------- */
+/* running: the ground breathes a warm tint, 8 % to 18 % accent over the panel
+   every 2 s, so a working agent never sits on a blank ground like an idle one
+   (the cube's runGlowAlpha, agents_layout.h). --t-bg is registered as a colour
+   so it animates, and the critter's cut-outs (--cut) follow it. Static at the
+   middle with reduced motion; pressing still shows the ink fill. */
+@property --t-bg { syntax: "<color>"; inherits: true; initial-value: #141412; }
+@keyframes run-glow { 0%, 100% { --t-bg: #271911; } 50% { --t-bg: #3E1E0F; } }
+.tile.st-running { --t-bg: #321B10; animation: run-glow 2s ease-in-out infinite; }
+.tile.st-running:active { animation: none; --t-bg: var(--ink); }
 /* think: a slow bob, a chin tap, and thought dots that rise, hold and pop
    (critter.js; the cube's Pose::Think has the same timing) */
 .ponder { animation-duration: 1.2s !important; }

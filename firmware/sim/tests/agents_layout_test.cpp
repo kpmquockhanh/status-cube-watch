@@ -124,5 +124,14 @@ int main() {
   CHECK(p.backY() == 20 + 8 + 18 + 8);
   CHECK(p.buttonAt(120, PROMPT_VIEW_Y + 1000, 0) == -1);
 
+  // runGlowAlpha: a running tile's ground breathes between 8 % and 18 %.
+  CHECK(runGlowAlpha(0) == RUN_GLOW_MIN);
+  CHECK(runGlowAlpha(RUN_GLOW_MS / 2) == RUN_GLOW_MAX);
+  CHECK(runGlowAlpha(RUN_GLOW_MS) == RUN_GLOW_MIN);
+  CHECK(runGlowAlpha(RUN_GLOW_MS / 4) > RUN_GLOW_MIN && runGlowAlpha(RUN_GLOW_MS / 4) < RUN_GLOW_MAX);
+  for (uint32_t ms = 0; ms < 3 * RUN_GLOW_MS; ms += 7)
+    CHECK(runGlowAlpha(ms) >= RUN_GLOW_MIN && runGlowAlpha(ms) <= RUN_GLOW_MAX);
+  CHECK(runGlowAlpha(0xFFFFFFFFu) >= RUN_GLOW_MIN);  // a millis() wrap is harmless
+
   return checksDone("agents_layout");
 }
