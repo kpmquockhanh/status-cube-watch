@@ -20,6 +20,26 @@ public enum TileRenderer {
     /// The animation clock: every view reads the same one, so a view rebuilt by a new payload carries on.
     public static var nowMs: UInt64 { UInt64(ProcessInfo.processInfo.systemUptime * 1000) }
 
+    /// `s` with every character the tiles' font has no glyph for drawn as `?`, so drawing it never makes CoreText
+    /// look for a fallback font (a Thai or emoji session title). Inside the screen saver's sandboxed
+    /// `legacyScreenSaver` that lookup can fail and end the process with an uncaught NSInvalidArgumentException.
+    public static func covered(_ s: String) -> String {
+        let font = NSFont.monospacedSystemFont(ofSize: 12, weight: .regular) as CTFont
+        var out = ""
+        for ch in s.precomposedStringWithCanonicalMapping {
+            let u = Array(String(ch).utf16)
+            var glyphs = [CGGlyph](repeating: 0, count: u.count)
+            out += CTFontGetGlyphsForCharacters(font, u, &glyphs, u.count) ? String(ch) : "?"
+        }
+        return out
+    }
+
+    /// The tile with its texts `covered`.
+    public static func covered(_ t: AgentTile) -> AgentTile {
+        AgentTile(id: t.id, name: covered(t.name), line: covered(t.line), kind: t.kind, pose: t.pose, context: t.context,
+                  unseen: t.unseen, hat: t.hat, subagents: t.subagents.map(covered))
+    }
+
     /// Whether any of these tiles moves.
     public static func animates(_ tiles: [AgentTile]) -> Bool {
         tiles.contains { Critter.animates(pose: $0.pose) || $0.kind == "run" || ($0.hungry && $0.kind != "wait") }
