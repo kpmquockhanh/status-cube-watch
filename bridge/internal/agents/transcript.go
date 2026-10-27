@@ -8,6 +8,7 @@ import (
 	"io"
 	"os"
 	"path/filepath"
+	"regexp"
 	"sort"
 	"strings"
 	"time"
@@ -43,6 +44,8 @@ type line struct {
 	AITitle   string `json:"aiTitle"`
 	Custom    string `json:"customTitle"`
 	IsAPIErr  bool   `json:"isApiErrorMessage"`
+	IsMeta    bool   `json:"isMeta"`
+	IsCompact bool   `json:"isCompactSummary"`
 	Message   *struct {
 		ID      string          `json:"id"`
 		Model   string          `json:"model"`
@@ -70,8 +73,9 @@ func endCompact(e *entry, now time.Time) bool {
 	return true
 }
 
-// displayTitle is a rename (unless it is just the folder), else Claude's own
-// title, else the folder.
+// displayTitle is a rename (unless it is just the folder), else the title
+// made from the recent prompts (autotitle.go), else Claude's own title (made
+// once, from the first prompt), else the folder.
 func displayTitle(e *entry) string {
 	folder := e.Folder
 	if folder == "" && e.Cwd != "" {
@@ -80,6 +84,8 @@ func displayTitle(e *entry) string {
 	switch {
 	case e.CustomTitle != "" && e.CustomTitle != folder:
 		return e.CustomTitle
+	case e.AutoTitle != "":
+		return e.AutoTitle
 	case e.AITitle != "":
 		return e.AITitle
 	case folder != "":
@@ -155,6 +161,13 @@ func tail(e *entry, now time.Time) bool {
 				if l.Custom != e.CustomTitle {
 					e.CustomTitle, changed = l.Custom, true
 				}
+			case "user":
+				if l.Message == nil || l.IsMeta || l.IsCompact {
+					continue
+				}
+				if p := typedPrompt(l.Message.Content); p != "" {
+					e.Recent, changed = appendRecent(e.Recent, p), true
+				}
 			case "assistant":
 				if l.Message == nil {
 					continue
@@ -190,6 +203,53 @@ func tail(e *entry, now time.Time) bool {
 		e.Title = displayTitle(e) // names follow Claude's titles live
 	}
 	return changed
+}
+
+// recentMax is how many typed prompts an entry keeps for its title.
+const recentMax = 6
+
+// appendRecent is recent plus p, the last recentMax, in a new slice: a
+// sync job's copy of the entry shares the old one.
+func appendRecent(recent []string, p string) []string {
+	out := make([]string, 0, recentMax)
+	if len(recent) >= recentMax {
+		recent = recent[len(recent)-recentMax+1:]
+	}
+	return append(append(out, recent...), p)
+}
+
+var commandArgsRe = regexp.MustCompile(`(?s)<command-name>(.*?)</command-name>.*?<command-args>(.*?)</command-args>`)
+
+// typedPrompt is the text of a user line that someone typed: a plain string
+// or the first text block, not a tool result, and not the tagged text Claude
+// Code adds itself (task notifications, command output, reminders). A slash
+// command reads as its name and arguments ("/review the parser").
+func typedPrompt(content json.RawMessage) string {
+	var text string
+	if json.Unmarshal(content, &text) != nil {
+		var blocks []struct {
+			Type string `json:"type"`
+			Text string `json:"text"`
+		}
+		if json.Unmarshal(content, &blocks) != nil {
+			return ""
+		}
+		for _, b := range blocks {
+			if b.Type == "tool_result" {
+				return ""
+			}
+			if b.Type == "text" && text == "" {
+				text = b.Text
+			}
+		}
+	}
+	text = strings.TrimSpace(text)
+	if m := commandArgsRe.FindStringSubmatch(text); m != nil {
+		text = strings.TrimSpace(strings.TrimSpace(m[1]) + " " + strings.TrimSpace(m[2]))
+	} else if strings.HasPrefix(text, "<") || strings.HasPrefix(text, "[Request interrupted") {
+		return ""
+	}
+	return clip(oneLine(text), 300)
 }
 
 func apiErrorText(content json.RawMessage) string {

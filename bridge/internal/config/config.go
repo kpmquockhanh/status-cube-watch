@@ -21,6 +21,7 @@ type Config struct {
 	OAuthToken    string
 	ExtraCards    bool
 	Agents        bool
+	AutoTitles    bool // agents' titles follow their recent prompts (claude -p)
 	GmailUser     string
 	GmailPassword string
 }
@@ -85,6 +86,7 @@ func Load(lookup func(string) (string, bool), file []byte, warn func(string)) Co
 		OAuthToken:    secret("ANTHROPIC_ADMIN_OAUTH_TOKEN", f["oauthToken"]),
 		ExtraCards:    boolean(warn, "extraCards", env("CUBE_EXTRA_CARDS"), f["extraCards"]),
 		Agents:        booleanDefault(warn, "agents", true, env("CUBE_AGENTS"), f["agents"]),
+		AutoTitles:    booleanDefault(warn, "autoTitles", true, env("CUBE_AUTO_TITLES"), f["autoTitles"]),
 		GmailUser:     secret("CUBE_GMAIL_USER", gmail["user"]),
 		GmailPassword: secret("CUBE_GMAIL_PASSWORD", gmail["appPassword"]),
 	}

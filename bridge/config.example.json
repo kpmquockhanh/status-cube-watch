@@ -5,6 +5,7 @@
   "refreshMs": 5000,
   "extraCards": false,
   "agents": true,
+  "autoTitles": true,
   "gmail": { "user": "", "appPassword": "" },
 
   "//source": "'local' reads ~/.claude/projects transcripts. 'admin' calls the",
@@ -14,6 +15,7 @@
   "//extraCards": "true adds the spend/token/model/project cards after the two",
   "//extraCards2": "rate-limit gauges. CUBE_EXTRA_CARDS=1 / =0 overrides this either way.",
   "//agents": "true tracks Claude Code agents (an AGENTS card; also CUBE_AGENTS=1 / =0). On by default; false turns it off.",
+  "//autoTitles": "true renames each agent from the prompts you typed most recently (a short claude -p on Haiku, at most every 5 min per session, on your own login; also CUBE_AUTO_TITLES=1 / =0). A /rename still wins.",
   "//host": "Address to listen on (or set CUBE_HOST). Empty = every interface, which a",
   "//host2": "cube polling over WiFi needs. 127.0.0.1 keeps the bridge off the LAN; the",
   "//host3": "Mac helper still reaches it there, since it always uses 127.0.0.1.",

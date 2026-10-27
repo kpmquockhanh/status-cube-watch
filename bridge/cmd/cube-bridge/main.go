@@ -181,12 +181,17 @@ func main() {
 	// Only when on: a nil Deps.Agents is what turns the feature off.
 	if cfg.Agents {
 		projects := agents.DefaultProjects() // $CLAUDE_CONFIG_DIR/projects or ~/.claude/projects
-		deps.Agents = agents.NewTracker(agents.TrackerDeps{
+		disc := agents.NewDiscovery(projects)
+		td := agents.TrackerDeps{
 			Tmux:     agents.NewTmux(),
-			Discover: agents.NewDiscovery(projects),
+			Discover: disc,
 			Projects: projects,
 			Log:      func(m string) { log.Println("agents:", m) },
-		})
+		}
+		if cfg.AutoTitles {
+			td.Title = agents.ClaudeTitler(nil, disc.Claude)
+		}
+		deps.Agents = agents.NewTracker(td)
 		deps.Hats = hatstore.Open(hatstore.DefaultPath(), func(m string) { errLog.Println(m) })
 	}
 	s := server.New(cfg, deps)

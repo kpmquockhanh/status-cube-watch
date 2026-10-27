@@ -51,6 +51,8 @@ type TrackerDeps struct {
 	Now      func() time.Time
 	After    func(time.Duration, func()) // time.AfterFunc seam for the option re-scan
 	Log      func(string)                // one line per session lifecycle hook (lifecycleHooks); nil = none
+	Title    Titler                      // titles from the recent prompts (autotitle.go); nil = off
+	Spawn    func(func())                // runs a title request (nil = a goroutine); tests run it inline
 }
 
 // lifecycleHooks are the hooks logged through TrackerDeps.Log: a couple of
@@ -70,6 +72,8 @@ type Tracker struct {
 	promptPrefix string // prefixes every prompt id: unique per tracker start
 	lastRun      uint64 // the discovery run whose misses were counted last
 	counted      bool   // lastRun is set
+
+	titling bool // a title request is out (one at a time)
 
 	subMu   sync.Mutex
 	subs    map[int]chan struct{}
@@ -100,6 +104,9 @@ func NewTracker(d TrackerDeps) *Tracker {
 	}
 	if d.Discover == nil {
 		d.Discover = NewDiscovery(d.Projects)
+	}
+	if d.Spawn == nil {
+		d.Spawn = func(f func()) { go f() }
 	}
 	return &Tracker{d: d, entries: map[string]*entry{}, subs: map[int]chan struct{}{},
 		promptPrefix: promptIDPrefix(d.Now())}
@@ -244,6 +251,7 @@ func (t *Tracker) Sync(ctx context.Context) {
 	if t.syncFinish(jobs, now) || changed {
 		t.notify()
 	}
+	t.autoTitle(ctx, now)
 }
 
 // syncStart folds discovery and the tmux panes in and makes the read jobs.
@@ -415,7 +423,7 @@ func mergeTail(e *entry, j *syncJob) bool {
 	if !j.tailChanged {
 		return false
 	}
-	e.Branch, e.AITitle, e.CustomTitle = r.Branch, r.AITitle, r.CustomTitle
+	e.Branch, e.AITitle, e.CustomTitle, e.Recent = r.Branch, r.AITitle, r.CustomTitle, r.Recent
 	e.Model, e.ModelLabel, e.Context = r.Model, r.ModelLabel, r.Context
 	if e.Status == s.Status && e.Activity == s.Activity && e.Waiting == s.Waiting &&
 		e.ErrorText == s.ErrorText && e.CompactManual == s.CompactManual {

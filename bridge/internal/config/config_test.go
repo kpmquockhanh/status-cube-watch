@@ -17,7 +17,7 @@ func load(env map[string]string, file string) (Config, []string) {
 
 func TestDefaults(t *testing.T) {
 	c, w := load(nil, "")
-	if c != (Config{Source: "local", Port: 8787, RefreshMs: 5000, Agents: true}) || len(w) != 0 {
+	if c != (Config{Source: "local", Port: 8787, RefreshMs: 5000, Agents: true, AutoTitles: true}) || len(w) != 0 {
 		t.Fatalf("got %+v %v", c, w)
 	}
 }
@@ -103,5 +103,17 @@ func TestBrokenFile(t *testing.T) {
 	c, _ := load(nil, `{not json`)
 	if c.Port != 8787 || c.Source != "local" {
 		t.Fatalf("got %+v", c)
+	}
+}
+
+func TestAutoTitles(t *testing.T) {
+	if c, _ := load(nil, `{"autoTitles": false}`); c.AutoTitles {
+		t.Fatal("config false turns it off")
+	}
+	if c, _ := load(map[string]string{"CUBE_AUTO_TITLES": "1"}, `{"autoTitles": false}`); !c.AutoTitles {
+		t.Fatal("env wins both ways")
+	}
+	if c, _ := load(map[string]string{"CUBE_AUTO_TITLES": "0"}, ""); c.AutoTitles {
+		t.Fatal("CUBE_AUTO_TITLES=0 turns it off")
 	}
 }

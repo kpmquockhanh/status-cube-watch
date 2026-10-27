@@ -137,6 +137,9 @@ func (d *Discovery) Sessions(ctx context.Context) ([]Live, uint64, bool) {
 	return lives, d.nextRun(), lives != nil
 }
 
+// Claude is the claude binary, found as for discovery ("" = not found).
+func (d *Discovery) Claude(ctx context.Context) string { return d.claude(ctx, d.Now()) }
+
 // claude is the claude binary, looked up through the login shell, else in
 // d.Candidates; after a failed lookup it is looked up again at most every
 // lookRetry.

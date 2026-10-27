@@ -21,6 +21,10 @@ type entry struct {
 	Menu          bool
 	CustomTitle   string
 	AITitle       string
+	Recent        []string  // the last recentMax prompts typed, oldest first (transcript)
+	AutoTitle     string    // made from Recent by TrackerDeps.Title ("" = none yet)
+	AutoFor       string    // the Recent (joined) AutoTitle was made from
+	AutoAt        time.Time // the last attempt at an AutoTitle
 	Background    bool
 	CompactManual bool
 	HookSeen      bool
