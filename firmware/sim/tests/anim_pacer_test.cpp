@@ -12,7 +12,7 @@ int framesIn(AnimPacer &p, uint32_t from, uint32_t to, bool animating, bool exte
 
 void pacesExternal() {
   AnimPacer p;
-  CHECK(ANIM_EXTERNAL_MS == 100);
+  CHECK(ANIM_EXTERNAL_MS == 33);
   CHECK(!p.due(1000, true, true));  // the screen that starts it was just drawn
   CHECK(!p.due(1000 + ANIM_EXTERNAL_MS - 1, true, true));
   CHECK(p.due(1000 + ANIM_EXTERNAL_MS, true, true));
@@ -23,7 +23,7 @@ void pacesExternal() {
 
 void pacesBattery() {
   AnimPacer p;
-  CHECK(ANIM_BATTERY_MS >= 500 && ANIM_BATTERY_MS <= 1000);
+  CHECK(ANIM_BATTERY_MS == 42);
   CHECK(!p.due(0, true, false));
   CHECK(!p.due(ANIM_BATTERY_MS - 1, true, false));
   CHECK(p.due(ANIM_BATTERY_MS, true, false));
@@ -33,6 +33,16 @@ void pacesBattery() {
   CHECK(!p.due(60001, true, false));
   // Plugged in mid-run: the faster period applies from the last frame.
   CHECK(p.due(60000 + ANIM_EXTERNAL_MS, true, true));
+}
+
+void keepsScheduleOnLatePasses() {
+  // A pass every 20 ms: a frame lands on the first pass past each due time, but
+  // the rate is still one per period, not one per two passes.
+  AnimPacer p;
+  CHECK(!p.due(0, true, true));
+  int n = 0;
+  for (uint32_t t = 20; t <= 10000; t += 20) n += p.due(t, true, true) ? 1 : 0;
+  CHECK(n >= (int)(10000 / ANIM_EXTERNAL_MS) - 1 && n <= (int)(10000 / ANIM_EXTERNAL_MS));
 }
 
 void stopsWhenNotAnimating() {
@@ -48,9 +58,9 @@ void stopsWhenNotAnimating() {
 
 void wrapSafe() {
   AnimPacer p;
-  const uint32_t t0 = 0xFFFFFFFFu - 50;
+  const uint32_t t0 = 0xFFFFFFFFu - 10;
   CHECK(!p.due(t0, true, true));
-  CHECK(!p.due(t0 + 60, true, true));  // wrapped past 0, 60 ms in
+  CHECK(!p.due(t0 + 20, true, true));  // wrapped past 0, 20 ms in
   CHECK(p.due(t0 + ANIM_EXTERNAL_MS, true, true));
   CHECK(!p.due(t0 + ANIM_EXTERNAL_MS + 1, true, true));
   // A stamp newer than `now` (a clock read before it) is not ~49 days old.
@@ -64,6 +74,7 @@ void wrapSafe() {
 int main() {
   pacesExternal();
   pacesBattery();
+  keepsScheduleOnLatePasses();
   stopsWhenNotAnimating();
   wrapSafe();
   return checksDone("anim_pacer");

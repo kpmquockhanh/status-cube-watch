@@ -77,19 +77,19 @@ over Bluetooth with the Mac app running, and a few Claude Code sessions (some in
 
 ## Power
 
-- [ ] Animation: the critters move about ten times a second on the wall charger and twice a second on battery,
+- [ ] Animation: the critters move smoothly (30 frames/s) on the wall charger and at 24 frames/s on battery,
       only on the Agents card or a prompt; on any other card there are no animation frames.
 - [ ] The external-power guess, with the logging build (`pio run -e batlog -t upload`, then `pio device
-      monitor -e batlog`): on the wall charger the cell reads as external (10 frames/s) within about two
+      monitor -e batlog`): on the wall charger the cell reads as external (30 frames/s) within about two
       minutes (a steady 4150 mV or more, or a rise of 20 mV in 120 s); unplugged and running on battery it
-      switches to 2 frames/s once the 120 s window shows a fall of 10 mV, even above 4150 mV. Time both cases:
+      switches to 24 frames/s once the 120 s window shows a fall of 10 mV, even above 4150 mV. Time both cases:
       (a) a half-charged cell unplugged, and (b) a full cell just unplugged (time from unplugging to the
       switch), and check that a cube with no cell fitted always counts as external.
 - [ ] Battery drain: charge to full, unplug, leave the Agents card on screen with the backlight at its usual
       level and the screen sleep off, and log the cell once a minute for an hour with the logging build; do the
       same on the usage card. The simulator's bench cannot model panel or SPI current, so this is the only
-      measure of what 2 frames/s costs. If the difference is more than a few percent per hour, lower
-      `ANIM_BATTERY_MS`'s rate to one frame a second in `anim_pacer.h`.
+      measure of what 24 frames/s costs. If the difference is more than a few percent per hour, raise
+      `ANIM_BATTERY_MS` in `anim_pacer.h` (it was 500, 2 frames/s, before October 27, 2026).
 - [ ] The frames do not keep the screen awake: with the Agents card showing, the screen still sleeps on schedule.
 
 - [ ] With waiting agents left unanswered the screen still sleeps on schedule and the beep does not repeat.

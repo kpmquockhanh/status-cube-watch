@@ -470,7 +470,7 @@ doing (wearing a hat that is the same for the same folder), its status line and 
 read the question and its answer buttons; back or a swipe right returns to the grid. When an agent starts
 waiting, the cube wakes, jumps to the card, opens the question and beeps once (set the level with SOUND).
 
-The critters move while the Agents card (or a question) is on screen: ten frames a second on USB, two on
+The critters move while the Agents card (or a question) is on screen: thirty frames a second on USB, 24 on
 battery, and the cube still goes to sleep on schedule. The board cannot tell USB from battery directly, so it
 guesses from the cell voltage (a full cell, or one that is rising, counts as plugged in; one whose voltage has
 fallen by 10 mV over the last two minutes counts as unplugged); a full cell just unplugged looks plugged in

@@ -269,13 +269,13 @@ Scenario makeScenario(const std::string &name) {
     s.agents = Scenario::AGENTS_HANDOVER;
     s.bleFromMs = 40000;
   } else if (name == "agents-usb") {
-    s.what = "Agents card on screen, external power: critters at 10 frames/s";
+    s.what = "Agents card on screen, external power: critters at 30 frames/s";
     s.seconds = 120;
     s.agents = Scenario::AGENTS_DECK;
   } else if (name == "agents-battery" || name == "agents-battery-still") {
     s.animOff = name == "agents-battery-still";
     s.what = s.animOff ? "as agents-battery, the critters never move (the budget's baseline)"
-                       : "Agents card on screen, on battery: critters at 2 frames/s, dark after 2 min";
+                       : "Agents card on screen, on battery: critters at 24 frames/s, dark after 2 min";
     s.seconds = 130;  // the first payload lands at once: ~120 s on screen, then the screen sleeps
     s.sleepMin = 2;
     s.mustSleep = true;
